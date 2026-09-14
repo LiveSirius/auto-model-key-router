@@ -65,3 +65,7 @@ Changelog = "https://github.com/Sparrived/auto-model-key-router/blob/master/CHAN
 where = ["."]
 include = ["auto_model_key_router*"]
 exclude = [".release-smoke*", ".venv*", "venv*", "build*", "dist*"]
+
+# WebUI 是预构建的静态资产（无构建步骤、零额外依赖），随 wheel 一起发布。
+[tool.setuptools.package-data]
+auto_model_key_router = ["webui/*", "webui/pages/*"]
