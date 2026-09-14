@@ -18,6 +18,7 @@ from .event_bus import EventBus
 from .key_pool import KeyPool
 from .management_api import register_management_api
 from .metrics import MetricsStore
+from .ops_api import register_ops_api
 from .proxy_handler import handle_proxy_request
 from .proxy_support import (
     _authorization_mode,
@@ -125,6 +126,7 @@ def create_app(
     app.state._metrics_broadcast_task: asyncio.Task | None = None
 
     register_management_api(app, _reload_config_if_changed)
+    register_ops_api(app, _reload_config_if_changed)
     app.state.webui_mounted = register_webui(app, enabled=app.state.webui_enabled)
 
     @app.head("/", include_in_schema=False)
