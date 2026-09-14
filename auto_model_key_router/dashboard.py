@@ -44,6 +44,7 @@ from .config_editor import (
     set_listen_interactively,
     set_local_api_key_interactively,
     set_timeouts_interactively,
+    set_webui_interactively,
 )
 from .formatting import abbreviate_number, compact_url, short_text
 from . import __version__
@@ -112,6 +113,7 @@ SETTINGS_OPTIONS = [
     ("4", "超时配置"),
     ("5", "配置迁移"),
     ("6", "版本更新"),
+    ("7", "WebUI"),
     ("0", "返回"),
 ]
 
@@ -349,6 +351,11 @@ def manage_cli_settings_interactively(
                 return result
             if isinstance(result, VersionCheckResult):
                 latest_result = result
+            continue
+        if choice == "7":
+            result = run_submodule(lambda: set_webui_interactively(config_path))
+            if result is not None:
+                show_result_page("WebUI", result)
 
 
 def manage_one_click_config_interactively(config_path: Path) -> None:

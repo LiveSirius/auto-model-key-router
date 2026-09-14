@@ -1701,6 +1701,36 @@ def set_local_api_key_interactively(path: Path) -> Any:
     return ResultPage(content, copy_text=local_api_key, copy_label="复制本地鉴权 key")
 
 
+def set_webui_interactively(path: Path) -> Any:
+    """开关随包发布的 WebUI。
+
+    WebUI 资产随 wheel 安装，这里只切换 webui_enabled。挂载发生在服务启动时，
+    因此变更需要重启服务才会真正释放/占用 /ui。
+    """
+    data = load_config_data(path)
+    old_config = RouterConfig.from_dict(data)
+    current = bool(data.get("webui_enabled", False))
+    if not confirm_choice(
+        f"WebUI 当前{'已启用' if current else '已关闭'}，是否{'关闭' if current else '启用'}？",
+        default=not current,
+    ):
+        return section_panel("[yellow]配置未变化。[/yellow]", "WebUI", "yellow")
+    operations.update_settings(data, webui_enabled=not current)
+    new_config = commit_config_data(path, data, old_config).new_config
+    enabled = new_config.webui_enabled
+    content = Group(
+        section_panel(
+            f"已{'启用' if enabled else '关闭'} WebUI。\n\n"
+            f"访问地址: [bold]http://{new_config.host}:{new_config.port}/ui/[/bold]\n"
+            "资产随软件包一起安装，无需额外安装步骤。",
+            "WebUI",
+            "green",
+        ),
+        restart_service_after_config_change(path, old_config, new_config),
+    )
+    return content
+
+
 def set_timeouts_interactively(path: Path) -> Any:
     data = load_config_data(path)
     old_config = RouterConfig.from_dict(data)
