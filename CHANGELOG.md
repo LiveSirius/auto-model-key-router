@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- 可选启用的内置 WebUI：资产随软件包一起发布（无构建步骤、无额外依赖），通过配置字段 `webui_enabled` 或 `--webui` / `--no-webui` 启用，也可在 TUI「CLI 设置 → WebUI」中切换；启用后访问 `http://<host>:<port>/ui/`。未启用或资产缺失时 `/ui` 返回 `404`，不影响其他接口。
+- 运维 API（均需本地鉴权）：`GET /api/logs`（读取日志尾部）、`GET /api/tool` 与 `POST /api/tool/webui`（版本检查与 WebUI 开关）、`POST /api/service/{action}`（服务启停与自启注册）、`GET /api/integrations`、`POST /api/integrations/{agent}` 与 `POST /api/integrations/{agent}/rollback`（Claude Code / Codex / Pi Agent 接管与回退）。`/health` 新增 `webui_available`、`webui_enabled`、`webui_mounted`、`webui_path` 四个字段。
+- WebUI 是预构建的静态资产（原生 ES 模块 + 手写 Material Design 样式），随 wheel 通过 `package-data` 发布，运行时不需要 Node.js。
+
 ## [4.0.2] - 2026-09-05
 
 ### Added

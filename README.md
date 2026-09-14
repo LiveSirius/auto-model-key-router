@@ -62,6 +62,20 @@ pipx install "auto-model-key-router[visitor]"
 uv tool install "auto-model-key-router[visitor]"
 ```
 
+### 可选 WebUI
+
+AMKR 自带一套可选的浏览器管理界面。**资产随软件包一起安装，没有单独的安装步骤，也没有额外依赖**，只由开关决定是否启用：
+
+```bash
+# 启动服务时启用（同时写入配置）
+amkr --config router-config.json --webui
+
+# 关闭
+amkr --config router-config.json --no-webui
+```
+
+也可以不写配置文件，直接在 TUI 的「CLI 设置 → WebUI」里切换。启用后访问 `http://127.0.0.1:8000/ui/`（端口以实际配置为准）。管理接口照常要求本地鉴权 Key；`/ui/` 的挂载在服务启动时完成，通过接口改动开关需要重启服务才会生效。
+
 ## 快速开始
 
 ### 1. 启动 Terminal UI
@@ -144,6 +158,10 @@ auto-model-key-router --config router-config.json --get-key
 # 查看配置摘要、日志与统计
 auto-model-key-router --config router-config.json --show-config
 auto-model-key-router --config router-config.json --show-logs 50
+
+# 启用 / 关闭内置 WebUI（访问 http://127.0.0.1:8000/ui/）
+auto-model-key-router --config router-config.json --webui
+auto-model-key-router --config router-config.json --no-webui
 
 # 管理 unified-model
 auto-model-key-router --config router-config.json --show-unified-model

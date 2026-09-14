@@ -72,6 +72,14 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `GET` | `/api/probes/{probe_id}` | 仅本地 | 查询探测进度和结果 |
 | `POST` | `/api/probes/{probe_id}/cancel` | 仅本地 | 取消探测 |
 | `POST` | `/api/config/export`、`/api/config/import` | 仅本地 | 导出或导入可迁移配置 |
+| `GET` | `/ui/` | 无 | 内置 WebUI（需 `webui_enabled`，未启用或资产缺失时返回 `404`） |
+| `GET` | `/api/logs` | 仅本地 | 读取日志文件尾部（默认最后 64 KiB） |
+| `GET` | `/api/tool` | 仅本地 | 查询版本、可用更新与 WebUI 状态 |
+| `POST` | `/api/tool/webui` | 仅本地 | 启用或关闭 WebUI（写入配置，需重启服务生效） |
+| `POST` | `/api/service/{action}` | 仅本地 | 执行服务的启动/停止/重启/注册/注销 |
+| `GET` | `/api/integrations` | 仅本地 | 查询 Claude Code / Codex / Pi Agent 的集成状态 |
+| `POST` | `/api/integrations/{agent}` | 仅本地 | 以 `unified-model` 或 `native` 模式接管该 Agent 配置 |
+| `POST` | `/api/integrations/{agent}/rollback` | 仅本地 | 回退该 Agent 到备份配置 |
 
 ## 代理接口通用参数
 
@@ -746,3 +754,131 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 ```
 
 Anthropic Messages 错误可能使用 Anthropic 风格的 `type` 和 `error` 对象。
+## 内置 WebUI 与运维 API
+
+AMKR 自带一套可选的 WebUI，用于在浏览器中完成与 TUI 等价的日常管理。**资产随软件包一起安装，没有单独的安装步骤，也没有额外依赖**；是否启用只由配置字段 `webui_enabled`（或启动参数 `--webui` / `--no-webui`）决定。
+
+### 启用方式
+
+```bash
+# 启动时临时启用（同时写入配置文件）
+amkr --config router-config.json --webui
+# 显式关闭
+amkr --config router-config.json --no-webui
+```
+
+也可以在 TUI 的「CLI 设置 → WebUI」中切换，或调用 `POST /api/tool/webui`。
+
+启用后访问：
+
+```
+http://127.0.0.1:8000/ui/
+```
+
+> WebUI 的挂载发生在服务进程启动时。通过 `POST /api/tool/webui` 修改开关会立即写入配置并让服务热重载配置，但 `/ui` 的挂载状态**要重启服务才会改变**。因此 `/health` 与 `/api/tool` 同时给出两个字段：`webui_enabled`（配置意图）与 `webui_mounted`（本进程实际状态）。
+
+### 鉴权
+
+`/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
+
+### `GET /api/logs`
+
+读取日志文件尾部，用于 WebUI 的日志面板。
+
+| 参数 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `tail` | 整数 | 否 | 读取的字节数，默认 65536（64 KiB），上限 1048576 |
+
+响应：
+
+```json
+{
+  "text": "最后若干行日志……",
+  "truncated": true,
+  "path": "C:/Users/me/AppData/Local/.../server.log",
+  "error": null
+}
+```
+
+日志文件不存在或不可读时返回 `200`，`text` 为空、`error` 为具体原因，便于前端区分「没有日志」与「读取失败」。
+
+### `GET /api/tool`
+
+汇总 CLI 的版本检查与 WebUI 状态，等价于 WebUI 的「设置 → 版本」卡片。
+
+```json
+{
+  "version": "4.0.2",
+  "latest_version": "4.0.2",
+  "update_available": false,
+  "release_url": null,
+  "source": "pypi",
+  "error": null,
+  "webui_available": true,
+  "webui_enabled": true,
+  "webui_mounted": true,
+  "webui_path": "/ui"
+}
+```
+
+版本检查使用短超时并复用 CLI 的实现；网络失败不会让接口报错，而是把原因放进 `error`。
+
+### `POST /api/tool/webui`
+
+```json
+{"enabled": true}
+```
+
+写入 `webui_enabled` 并热重载配置，响应为更新后的 WebUI 状态（字段同 `GET /api/tool` 的 `webui_*` 部分）。
+
+### `POST /api/service/{action}`
+
+在本机执行服务生命周期动作，响应体包含人类可读的执行输出：
+
+```json
+{"action": "restart_amkr", "text": "……命令输出……"}
+```
+
+可用动作：
+
+| 动作 | 说明 |
+| --- | --- |
+| `start_amkr` / `stop_amkr` / `restart_amkr` / `status_amkr` | 后台服务控制 |
+| `install_user_amkr` / `uninstall_amkr` | 当前用户登录自启 |
+| `install_system_amkr` / `uninstall_system_amkr` | 系统级服务（需要管理员授权） |
+| `start_system_amkr` / `stop_system_amkr` / `restart_system_amkr` | 系统级服务控制 |
+
+未知动作返回 `422`。
+
+### `GET /api/integrations`
+
+查询三个受支持客户端的接管状态。每一项都是独立的，**单个 Agent 读取失败只会让该项带 `error`，不影响其他两项**：
+
+```json
+{
+  "integrations": [
+    {
+      "agent": "claude-code",
+      "display_name": "Claude Code",
+      "target_path": "C:/Users/me/.claude/settings.json",
+      "target_exists": true,
+      "backup_available": false,
+      "current_is_applied": true,
+      "mode": "unified-model",
+      "error": null
+    }
+  ]
+}
+```
+
+### `POST /api/integrations/{agent}`
+
+```json
+{"mode": "unified-model"}
+```
+
+`agent` 取 `claude-code`、`codex`、`pi-agent`；`mode` 取 `unified-model` 或 `native`（Pi Agent 固定使用 `unified-model`）。写入前会先备份原配置，未启用本地鉴权时返回 `409`。
+
+### `POST /api/integrations/{agent}/rollback`
+
+从备份恢复该 Agent 的原配置；没有备份时返回 `409`。
