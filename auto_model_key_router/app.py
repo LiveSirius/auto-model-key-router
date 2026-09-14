@@ -28,6 +28,7 @@ from .runtime import (
     RuntimeResources,
 )
 from .visitor import visitor_feature_available
+from .webui import register_webui, webui_status
 from .websocket_proxy import register_websocket_proxy
 
 
@@ -43,7 +44,12 @@ def _new_http_client(timeout: float) -> httpx.AsyncClient:
     )
 
 
-def create_app(config: RouterConfig, config_path: str | Path | None = None) -> FastAPI:
+def create_app(
+    config: RouterConfig,
+    config_path: str | Path | None = None,
+    *,
+    webui: bool | None = None,
+) -> FastAPI:
     @asynccontextmanager
     async def lifespan(lifespan_app: FastAPI) -> AsyncIterator[None]:
         lifespan_app.state._metrics_broadcast_task = asyncio.create_task(
@@ -63,6 +69,8 @@ def create_app(config: RouterConfig, config_path: str | Path | None = None) -> F
             await lifespan_app.state.runtime_manager.close()
 
     app = FastAPI(title="Auto Model Key Router", version=__version__, lifespan=lifespan)
+    # webui=None 表示跟随配置文件；True/False 是 CLI 的显式覆盖。
+    app.state.webui_enabled = config.webui_enabled if webui is None else webui
     app.state.config_path = (
         str(Path(config_path).resolve()) if config_path is not None else ""
     )
@@ -117,6 +125,7 @@ def create_app(config: RouterConfig, config_path: str | Path | None = None) -> F
     app.state._metrics_broadcast_task: asyncio.Task | None = None
 
     register_management_api(app, _reload_config_if_changed)
+    app.state.webui_mounted = register_webui(app, enabled=app.state.webui_enabled)
 
     @app.head("/", include_in_schema=False)
     async def root_probe() -> Response:
@@ -146,6 +155,7 @@ def create_app(config: RouterConfig, config_path: str | Path | None = None) -> F
                 "visitor_key_count": visitor_key_count if visitor_installed else 0,
                 "unified_model": runtime.key_pool.unified_route,
                 "native_endpoint_states": runtime.key_pool.endpoint_capability_states(),
+                **webui_status(app),
             }
         finally:
             await lease.release()

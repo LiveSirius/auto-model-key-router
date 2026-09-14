@@ -196,6 +196,7 @@ def empty_config_dict() -> dict[str, Any]:
         "metrics_db_path": default_metrics_db_path(),
         "log_file_path": default_log_file_path(),
         "local_api_key": generate_local_api_key(),
+        "webui_enabled": False,
         "providers": {},
         "models": {},
     }
@@ -720,6 +721,7 @@ class RouterConfig:
     providers: tuple[ProviderConfig, ...] = ()
     upstream_routes: dict[str, dict[str, str]] = field(default_factory=dict)
     unified_model: UnifiedModelConfig | None = None
+    webui_enabled: bool = False
     reasoning_effort_by_model: dict[str, str] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -938,6 +940,7 @@ class RouterConfig:
             providers=tuple(providers),
             upstream_routes=upstream_routes,
             unified_model=unified_model,
+            webui_enabled=bool(raw.get("webui_enabled", False)),
         )
         config.validate()
         return config

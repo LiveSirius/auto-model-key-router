@@ -7,6 +7,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import DEFAULT_CONFIG_PATH, UNIFIED_MODEL_ID, RouterConfig
+from .config_service import ConfigService
 from .dashboard import render_config, run_terminal_ui
 from .logs_tui import render_logs
 from .service import background_status_panel, manage_system_service, service_status_panel, start_service_background, start_service_foreground, stop_background_service
@@ -51,6 +52,19 @@ def main() -> None:
     parser.add_argument("--check-update", action="store_true", help="通过 PyPI/GitHub 检查最新版本")
     parser.add_argument("--update", action="store_true", help="通过 PyPI/GitHub 手动更新到最新版本")
     parser.add_argument("--serve", action="store_true", help="跳过 Terminal UI，后台启动服务")
+    parser.add_argument(
+        "--webui",
+        dest="webui",
+        action="store_true",
+        default=None,
+        help="启用随包发布的 WebUI（写入 webui_enabled，重启服务后生效）",
+    )
+    parser.add_argument(
+        "--no-webui",
+        dest="webui",
+        action="store_false",
+        help="关闭 WebUI（写入 webui_enabled，重启服务后生效）",
+    )
     parser.add_argument("--serve-foreground", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--restart-service-after-update", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--stop", action="store_true", help="停止后台服务")
@@ -68,6 +82,12 @@ def main() -> None:
     config_path = Path(args.config)
 
     try:
+        # WebUI 开关是持久化设置：三个启动路径（前台/后台/系统服务）都读同一份
+        # 配置，写成配置项才能保证 --webui 对后台启动也生效。
+        if args.webui is not None:
+            ConfigService(config_path).update(
+                lambda data: data.update(webui_enabled=args.webui)
+            )
         interactive_tui = not any(
             (
                 args.show_config,
