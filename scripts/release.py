@@ -20,6 +20,27 @@ from rich.table import Table
 from rich.text import Text
 
 
+def make_output_utf8_safe() -> None:
+    """放开发布脚本输出流的编码错误处理。
+
+    中文 Windows 控制台默认 GBK，Rich 打印 ✓ / ℹ / ⚠ 时会抛
+    UnicodeEncodeError 并中断发布（改完版本号之后、提交之前）。
+    这里只放开错误处理，不强制改写编码：UTF-8 终端不受影响，
+    GBK 终端退化成 "?" 而不是崩溃。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is None:
+            continue  # pytest 等替换流没有 reconfigure
+        try:
+            reconfigure(errors="replace")
+        except (OSError, ValueError):
+            pass
+
+
+make_output_utf8_safe()
+
+
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = ROOT / "pyproject.toml"
 CHANGELOG_PATH = ROOT / "CHANGELOG.md"

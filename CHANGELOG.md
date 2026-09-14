@@ -8,6 +8,10 @@
 - 运维 API（均需本地鉴权）：`GET /api/logs`（读取日志尾部）、`GET /api/tool` 与 `POST /api/tool/webui`（版本检查与 WebUI 开关）、`POST /api/service/{action}`（服务启停与自启注册）、`GET /api/integrations`、`POST /api/integrations/{agent}` 与 `POST /api/integrations/{agent}/rollback`（Claude Code / Codex / Pi Agent 接管与回退）。`/health` 新增 `webui_available`、`webui_enabled`、`webui_mounted`、`webui_path` 四个字段。
 - WebUI 是预构建的静态资产（原生 ES 模块 + 手写 Material Design 样式），随 wheel 通过 `package-data` 发布，运行时不需要 Node.js。
 
+### Fixed
+
+- 修复发布脚本在中文 Windows 控制台（GBK）下中断：Rich 打印 `✓` / `ℹ` / `⚠` 会抛 `UnicodeEncodeError`，而此时版本号已写入、提交与标签尚未创建，会留下「已改版本但未发布」的半成品状态。现放开发布脚本输出流的编码错误处理（仅 `errors="replace"`，不改变终端实际编码）。
+
 ## [4.0.2] - 2026-09-05
 
 ### Added

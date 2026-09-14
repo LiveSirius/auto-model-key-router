@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 from pathlib import Path
+
+import pytest
 
 
 def load_release_script():
@@ -65,6 +68,29 @@ def test_run_command_prints_captured_stderr(capsys) -> None:
     captured = capsys.readouterr()
     assert result.returncode == 0
     assert "release error" in captured.err
+
+
+def _gbk_stream() -> tuple[io.TextIOWrapper, io.BytesIO]:
+    buffer = io.BytesIO()
+    return io.TextIOWrapper(buffer, encoding="gbk", errors="strict"), buffer
+
+
+def test_make_output_utf8_safe_stops_gbk_console_from_crashing(monkeypatch) -> None:
+    """回归：中文 Windows 控制台是 GBK，Rich 打印 ✓/ℹ/⚠ 会抛 UnicodeEncodeError，
+    使发布在改完版本号之后、提交之前中断。"""
+    stdout, stdout_buffer = _gbk_stream()
+    stderr, _ = _gbk_stream()
+    monkeypatch.setattr(sys, "stdout", stdout)
+    monkeypatch.setattr(sys, "stderr", stderr)
+
+    with pytest.raises(UnicodeEncodeError):
+        stdout.write("✓")
+
+    release_script.make_output_utf8_safe()
+    stdout.write("✓")
+    stdout.flush()
+
+    assert stdout_buffer.getvalue().decode("gbk") == "?"
 
 
 def test_render_updated_changelog_moves_unreleased_body() -> None:
