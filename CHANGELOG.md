@@ -11,6 +11,7 @@
 ### Fixed
 
 - 修复发布脚本在中文 Windows 控制台（GBK）下中断：Rich 打印 `✓` / `ℹ` / `⚠` 会抛 `UnicodeEncodeError`，而此时版本号已写入、提交与标签尚未创建，会留下「已改版本但未发布」的半成品状态。现放开发布脚本输出流的编码错误处理（仅 `errors="replace"`，不改变终端实际编码）。
+- 修复 Agent 配置写入（Claude Code / Codex / Pi Agent）在 Windows 上偶发 `PermissionError: [WinError 5]` 失败：`os.replace` 可能被杀软扫描或未释放的句柄短暂拒绝，现与配置写入一致地做小退避重试。
 
 ## [4.0.2] - 2026-09-05
 

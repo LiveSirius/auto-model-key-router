@@ -13,7 +13,12 @@ from typing import Any
 
 import tomlkit
 
-from .config import UNIFIED_MODEL_ID, RouterConfig, default_cache_dir
+from .config import (
+    UNIFIED_MODEL_ID,
+    RouterConfig,
+    _replace_with_retry,
+    default_cache_dir,
+)
 
 
 CLAUDE_CODE = "claude-code"
@@ -512,7 +517,8 @@ def _write_atomic(path: Path, content: bytes) -> None:
         temporary.write_bytes(content)
         if os.name != "nt":
             temporary.chmod(0o600)
-        temporary.replace(path)
+        # 与 config.py 一致：Windows 上 os.replace 偶发被杀软扫描/未释放句柄拒绝。
+        _replace_with_retry(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
 

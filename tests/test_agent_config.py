@@ -22,6 +22,30 @@ from auto_model_key_router.agent_config import (
 from auto_model_key_router.config import UNIFIED_MODEL_ID, RouterConfig
 
 
+def test_write_atomic_retries_transient_windows_oserror(tmp_path: Path, monkeypatch) -> None:
+    """回归：Windows 上 os.replace 偶发被杀软扫描/未释放句柄拒绝，
+    发布流程跑 pytest 时随机失败。写入应重试而不是直接抛 OSError。"""
+    from auto_model_key_router import agent_config, config as config_module
+
+    target = tmp_path / "config.toml"
+    attempts: list[int] = []
+    real_replace = Path.replace
+
+    def flaky_replace(self: Path, destination: Path) -> Path:
+        attempts.append(1)
+        if len(attempts) < 3:
+            raise PermissionError(5, "拒绝访问。")
+        return real_replace(self, destination)
+
+    monkeypatch.setattr(Path, "replace", flaky_replace)
+    monkeypatch.setattr(config_module.time, "sleep", lambda _seconds: None)
+
+    agent_config._write_atomic(target, b"hello")
+
+    assert len(attempts) == 3
+    assert target.read_bytes() == b"hello"
+
+
 def make_config(
     *,
     host: str = "127.0.0.1",
