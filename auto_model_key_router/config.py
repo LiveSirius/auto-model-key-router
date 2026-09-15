@@ -618,6 +618,9 @@ class ModelConfig:
     routing_mode: str = "round_robin"
     reasoning_effort: str | None = None
     native_first: bool = True
+    # 可直接调用但不出现在 /v1/models 的名字。见 RouterConfig.hidden_model_names()：
+    # 除这里手写的名字外，targets 的 upstream_model 也会自动获得同样待遇。
+    hidden_aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -869,13 +872,18 @@ class RouterConfig:
                     )
             keys = tuple(model_keys)
             aliases = tuple(str(alias) for alias in model.get("aliases", []) if str(alias))
+            hidden_aliases = tuple(
+                str(alias).strip()
+                for alias in model.get("hidden_aliases", [])
+                if str(alias).strip()
+            )
             routing_mode = str(model.get("routing_mode") or default_routing_mode)
             reasoning_effort = str(model.get("reasoning_effort") or "").strip() or None
             if reasoning_effort in {"default", "downstream"}:
                 reasoning_effort = None
             native_first = bool(model.get("native_first", True))
             model_id = str(model.get("id") or raw_model_id)
-            models.append(ModelConfig(id=model_id, keys=keys, aliases=aliases, routing_mode=routing_mode, reasoning_effort=reasoning_effort, native_first=native_first))
+            models.append(ModelConfig(id=model_id, keys=keys, aliases=aliases, routing_mode=routing_mode, reasoning_effort=reasoning_effort, native_first=native_first, hidden_aliases=hidden_aliases))
 
         unified_model = None
         raw_unified_model = raw.get("unified_model")
@@ -981,6 +989,23 @@ class RouterConfig:
                 if not key.base_url.startswith(("http://", "https://")):
                     raise ValueError(f"模型 {model.id} 的 base_url {key.base_url} 必须以 http:// 或 https:// 开头")
 
+        # 手写隐藏别名的冲突检查。自动推导的上游名允许重复（两个模型指向同一上游名时
+        # 按 models 顺序取第一个），这里只管用户显式声明的那些。
+        claimed_hidden: dict[str, str] = {}
+        for model in self.models:
+            for name in model.hidden_aliases:
+                if not name:
+                    raise ValueError(f"模型 {model.id} 存在空隐藏别名")
+                if name == UNIFIED_MODEL_ID:
+                    raise ValueError(f"隐藏别名不能使用保留名称: {UNIFIED_MODEL_ID}")
+                owner = model_ids_by_name.get(name)
+                if owner is not None and owner != model.id:
+                    raise ValueError(f"模型名称重复: {name}")
+                previous = claimed_hidden.get(name)
+                if previous is not None and previous != model.id:
+                    raise ValueError(f"模型名称重复: {name}")
+                claimed_hidden[name] = model.id
+
         for base_url, routes in self.upstream_routes.items():
             if not base_url.startswith(("http://", "https://")):
                 raise ValueError(
@@ -1014,6 +1039,22 @@ class RouterConfig:
             if model_name == model.id or model_name in model.aliases:
                 return model.id
         return None
+
+    def hidden_model_names(self) -> dict[str, str]:
+        """可直接调用、但不出现在 /v1/models 中的名字 -> 本地模型 ID。
+
+        手写 ``hidden_aliases`` 加上从每个 target 的 ``upstream_model`` 自动推导的名字
+        （上游叫法不变即可直接调用，无需重复维护）。同名的真实 ID/别名优先。
+        """
+        result: dict[str, str] = {}
+        for model in self.models:
+            names = list(model.hidden_aliases)
+            names.extend(
+                key.upstream_model for key in model.keys if key.upstream_model
+            )
+            for name in names:
+                result.setdefault(name, model.id)
+        return result
 
     def native_first_for_model(self, model_id: str) -> bool:
         for model in self.models:

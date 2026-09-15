@@ -58,6 +58,83 @@ def make_multi_key_pool(tmp_path: Path) -> KeyPool:
     )
 
 
+def test_hidden_names_resolve_without_being_listed(tmp_path: Path) -> None:
+    """上游模型名和手写隐藏别名可解析，但不进入 /v1/models 候选列表。"""
+    pool = KeyPool(
+        RouterConfig(
+            host="127.0.0.1",
+            port=8000,
+            request_timeout=10,
+            max_retries=1,
+            key_failure_threshold=5,
+            key_cooldown_seconds=10,
+            endpoint_capabilities_path=str(tmp_path / "endpoint-capabilities.json"),
+            metrics_db_path=str(tmp_path / "metrics.sqlite3"),
+            log_file_path=str(tmp_path / "server.log"),
+            local_api_key="local-key",
+            models=(
+                ModelConfig(
+                    id="model-a",
+                    aliases=("alias-a",),
+                    hidden_aliases=("manual-hidden",),
+                    keys=(
+                        KeyConfig(
+                            "key-a",
+                            "sk-a",
+                            "https://example.test",
+                            upstream_model="vendor-name",
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert pool.public_model_ids == ["alias-a", "model-a"]
+    assert pool.available_model_ids() == ["alias-a", "model-a"]
+    assert pool.hidden_model_ids == ["manual-hidden", "vendor-name"]
+    for name in ("model-a", "alias-a", "manual-hidden", "vendor-name"):
+        assert pool.resolve_model_id(name) == "model-a"
+
+
+def test_visible_name_wins_over_colliding_hidden_name(tmp_path: Path) -> None:
+    pool = KeyPool(
+        RouterConfig(
+            host="127.0.0.1",
+            port=8000,
+            request_timeout=10,
+            max_retries=1,
+            key_failure_threshold=5,
+            key_cooldown_seconds=10,
+            endpoint_capabilities_path=str(tmp_path / "endpoint-capabilities.json"),
+            metrics_db_path=str(tmp_path / "metrics.sqlite3"),
+            log_file_path=str(tmp_path / "server.log"),
+            local_api_key="local-key",
+            models=(
+                ModelConfig(
+                    id="model-a",
+                    keys=(KeyConfig("key-a", "sk-a", "https://a.test"),),
+                ),
+                # model-b 的上游名恰好是 model-a 的公开别名，别名优先。
+                ModelConfig(
+                    id="model-b",
+                    keys=(
+                        KeyConfig(
+                            "key-b",
+                            "sk-b",
+                            "https://b.test",
+                            upstream_model="model-a",
+                        ),
+                    ),
+                ),
+            ),
+        )
+    )
+
+    assert pool.resolve_model_id("model-a") == "model-a"
+    assert pool.public_model_ids == ["model-a", "model-b"]
+
+
 def test_round_robin_sticks_same_affinity_to_selected_key(tmp_path: Path) -> None:
     pool = make_multi_key_pool(tmp_path)
 

@@ -226,6 +226,99 @@ def test_provider_target_uses_upstream_model_in_request_body(tmp_path: Path) -> 
     assert attribution == ("vendor", None, "vendor-model")
 
 
+def test_hidden_names_are_callable_but_absent_from_models_list(
+    tmp_path: Path,
+) -> None:
+    """上游模型名与手写隐藏别名都能直接调用，但不出现在 /v1/models 和 /health。"""
+    config = RouterConfig.from_dict(
+        {
+            "config_version": 4,
+            "local_api_key": "local-key",
+            "providers": {
+                "vendor": {
+                    "base_url": "https://upstream.test",
+                    "keys": {"main": {"api_key": "sk-main"}},
+                }
+            },
+            "models": {
+                "deepseek-flash": {
+                    "aliases": ["ds-flash"],
+                    # 别处叫 deepseek-v4.1-flash，这里不用手工登记：target 的上游名
+                    # 自动获得隐藏别名待遇。
+                    "targets": [
+                        {
+                            "provider": "vendor",
+                            "key": "main",
+                            "upstream_model": "deepseek-v4.1-flash",
+                        }
+                    ],
+                },
+                "manual-model": {
+                    "hidden_aliases": ["manual-hidden"],
+                    "targets": [
+                        {
+                            "provider": "vendor",
+                            "key": "main",
+                            "upstream_model": "manual-upstream",
+                        }
+                    ],
+                },
+            },
+            "metrics_db_path": str(tmp_path / "metrics.sqlite3"),
+            "endpoint_capabilities_path": str(tmp_path / "endpoint-capabilities.json"),
+            "log_file_path": str(tmp_path / "server.log"),
+        }
+    )
+    app = create_app(config)
+    upstream_models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        upstream_models.append(json.loads(request.content.decode("utf-8"))["model"])
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def requests(client: httpx.AsyncClient):
+        listed = await client.get(
+            "/v1/models", headers={"Authorization": "Bearer local-key"}
+        )
+        health = await client.get(
+            "/health", headers={"Authorization": "Bearer local-key"}
+        )
+        calls = [
+            await client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": name, "messages": []},
+            )
+            for name in (
+                "deepseek-v4.1-flash",
+                "manual-hidden",
+                "manual-upstream",
+            )
+        ]
+        return listed, health, calls
+
+    listed, health, calls = run_client(app, requests)
+
+    assert all(response.status_code == 200 for response in calls)
+    # 请求方写上游叫法，转发时仍用上游名。
+    assert upstream_models == [
+        "deepseek-v4.1-flash",
+        "manual-upstream",
+        "manual-upstream",
+    ]
+    listed_ids = {model["id"] for model in listed.json()["data"]}
+    assert listed_ids == {"deepseek-flash", "ds-flash", "manual-model"}
+    assert health.json()["models"] == [
+        "deepseek-flash",
+        "ds-flash",
+        "manual-model",
+    ]
+
+
 def test_models_are_filtered_for_visitor_and_unified_model_is_rejected(
     tmp_path: Path, visitor_feature
 ) -> None:

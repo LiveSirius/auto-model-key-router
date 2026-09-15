@@ -41,6 +41,13 @@ class KeyPool:
             for model in config.models
             for name in (model.id, *model.aliases)
         }
+        # 隐藏名字：可直接调用，但不列进 /v1/models 和 /health。真实 ID/别名优先。
+        hidden_names = config.hidden_model_names()
+        self._hidden_names = {
+            name for name in hidden_names if name not in self._aliases
+        }
+        for name, model_id in hidden_names.items():
+            self._aliases.setdefault(name, model_id)
         self._visitor_routes = {
             f"{VISITOR_MODEL_PREFIX}{model_id}": model_id
             for model_id in self._keys
@@ -69,8 +76,13 @@ class KeyPool:
         return sorted(self._keys)
 
     @property
+    def hidden_model_ids(self) -> list[str]:
+        """可直接调用但不在 /v1/models 中列出的名字。"""
+        return sorted(self._hidden_names)
+
+    @property
     def public_model_ids(self) -> list[str]:
-        return sorted(self._aliases)
+        return sorted(set(self._aliases) - self._hidden_names)
 
     def available_model_ids(self, *, visitor_only: bool = False) -> list[str]:
         if visitor_only:
@@ -82,7 +94,7 @@ class KeyPool:
         result = sorted(
             name
             for name, model_id in self._aliases.items()
-            if self.keys_for_model(model_id)
+            if name not in self._hidden_names and self.keys_for_model(model_id)
         )
         if self._unified_default is not None:
             result.append(UNIFIED_MODEL_ID)
