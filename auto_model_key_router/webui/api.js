@@ -84,6 +84,14 @@ export const api = {
   metrics: (hours = 1) => request(`/metrics?hours=${hours}`),
   series: (hours = 1, bucketSeconds = 60) =>
     request(`/metrics/series?hours=${hours}&bucket_seconds=${bucketSeconds}`),
+  // 逐条请求明细：/metrics/requests 的 hours 上限是 720，limit 上限是 200。
+  requests: ({ hours = 1, limit = 50, ...filters } = {}) => {
+    const params = new URLSearchParams({ hours: String(hours), limit: String(limit) });
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== null && value !== undefined && value !== "") params.set(key, String(value));
+    }
+    return request(`/metrics/requests?${params}`);
+  },
   logs: () => request("/api/logs"),
 
   tool: () => request("/api/tool"),
