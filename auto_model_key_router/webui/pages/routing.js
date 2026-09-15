@@ -38,7 +38,9 @@ async function load() {
 
 // 候选目标：探测到该模型的 Key，且尚未绑定。
 function candidates(route) {
-  const existing = new Set((route.targets || []).map((target) => `${target.provider}|\${target.key}`));
+  // 注意别写成 \${target.key}：转义掉的插值会变成字面量 "${target.key}"，
+  // 于是所有已绑定的 Key 都被当成未绑定，候选列表里出现重复项。
+  const existing = new Set((route.targets || []).map((target) => `${target.provider}|${target.key}`));
   const list = [];
   for (const provider of state.providers) {
     for (const key of provider.keys || []) {
