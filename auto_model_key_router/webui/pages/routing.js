@@ -53,6 +53,7 @@ function candidates(route) {
 
 function routeEditor(route) {
   const aliasInput = input({ value: (route.aliases || []).join(", "), placeholder: "逗号分隔，留空表示无别名" });
+  const hiddenInput = input({ value: (route.hidden_aliases || []).join(", "), placeholder: "可调用但不列出，逗号分隔" });
   const modeSelect = select(MODES, { value: route.routing_mode || "" });
   const errorHost = h("div");
   const targets = [...(route.targets || [])];
@@ -88,8 +89,10 @@ function routeEditor(route) {
   return h("div.stack", {},
     h("div.form-grid", {},
       h("label.field", h("span", "编辑别名"), aliasInput),
+      h("label.field", h("span", "编辑隐藏别名"), hiddenInput),
       h("label.field", h("span", "编辑模式"), modeSelect),
     ),
+    h("p.muted", "隐藏别名可以直接调用，但不会出现在 /v1/models 里；各目标 Key 的上游模型名也会自动获得同样待遇。"),
     h("div", {}, h("h4", "绑定目标 Key"), h("p.muted", `仅显示探测到模型 ${route.id} 的 Key。`), candidateHost),
     listHost,
     errorHost,
@@ -101,7 +104,8 @@ function routeEditor(route) {
           draw();
           try {
             const aliases = aliasInput.value.split(",").map((item) => item.trim()).filter(Boolean);
-            await api.updateRoute(state.revision, route.id, targets, aliases, modeSelect.value || null);
+            const hiddenAliases = hiddenInput.value.split(",").map((item) => item.trim()).filter(Boolean);
+            await api.updateRoute(state.revision, route.id, targets, aliases, hiddenAliases, modeSelect.value || null);
             await load();
             state.editing = null;
             toast("路由已保存。");
@@ -188,6 +192,7 @@ function draw() {
       ),
       h("div.stack.tight", {},
         h("div", {}, h("span.muted", "别名："), (route.aliases || []).length ? h("span.mono", route.aliases.join(", ")) : "无别名"),
+        h("div", {}, h("span.muted", "隐藏别名："), (route.hidden_aliases || []).length ? h("span.mono", route.hidden_aliases.join(", ")) : "无隐藏别名"),
         h("div", {}, h("span.muted", "路由目标（按顺序）：")),
         (route.targets || []).length
           ? h("ul", { "aria-label": `${route.id} 的路由目标`, style: { margin: "0", paddingLeft: "20px" } },

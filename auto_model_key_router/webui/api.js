@@ -156,15 +156,15 @@ export const api = {
     request(`/api/probes/${encodeURIComponent(probeId)}/cancel`, { method: "POST" }),
 
   routes: () => request("/api/routes"),
-  createRoute: (revision, id, targets, aliases, routingMode) =>
+  createRoute: (revision, id, targets, aliases, hiddenAliases, routingMode) =>
     request("/api/routes", {
       method: "POST",
-      body: { config_revision: revision, id, targets, aliases, routing_mode: routingMode },
+      body: { config_revision: revision, id, targets, aliases, hidden_aliases: hiddenAliases, routing_mode: routingMode },
     }),
-  updateRoute: (revision, routeId, targets, aliases, routingMode) =>
+  updateRoute: (revision, routeId, targets, aliases, hiddenAliases, routingMode) =>
     request(`/api/routes/${encodeURIComponent(routeId)}`, {
       method: "PUT",
-      body: { config_revision: revision, targets, aliases, routing_mode: routingMode },
+      body: { config_revision: revision, targets, aliases, hidden_aliases: hiddenAliases, routing_mode: routingMode },
     }),
   deleteRoute: (revision, routeId) =>
     request(`/api/routes/${encodeURIComponent(routeId)}`, {
