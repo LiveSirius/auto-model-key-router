@@ -1,20 +1,29 @@
-// 共享 UI 组件：对话框、提示条、Toast、状态徽标、数据表。
+// 共享 UI 组件：卡片、KPI 瓦片、数据表、分段控件、对话框、提示条。
 // 全部为无状态工厂函数，调用方负责重新渲染。
 
-import { h, mount } from "./dom.js";
+import { h, mount, formatRelative, formatCount } from "./dom.js";
+import { icon } from "./icons.js";
+import { sparkline } from "./charts.js";
 
 let toastHost = null;
 
 export function installToastHost(root) {
   toastHost = h("div.toast-host", { role: "status", "aria-live": "polite" });
   root.append(toastHost);
+  return toastHost;
 }
 
 export function toast(message, tone = "info") {
   if (!toastHost) return;
-  const node = h("div.toast", tone === "error" ? { style: { background: "#b00020" } } : null, message);
+  const node = h("div.toast", { class: `tone-${tone}` },
+    icon(tone === "error" ? "alert" : tone === "good" ? "check" : "info", { size: 16 }),
+    h("span", message),
+  );
   toastHost.append(node);
-  setTimeout(() => node.remove(), 3200);
+  setTimeout(() => {
+    node.classList.add("is-leaving");
+    setTimeout(() => node.remove(), 220);
+  }, 3600);
 }
 
 // —— 模态对话框 ——
@@ -32,7 +41,9 @@ export function dialog({ title, body, actions = [], onClose, closeOnBackdrop = t
   const panel = h(
     "div.dialog",
     { role: "dialog", "aria-modal": "true", "aria-label": typeof title === "string" ? title : "对话框" },
-    h("h3", title),
+    h("div.dialog-head", {}, h("h3", title), buttonNode("", {
+      variant: "text", small: true, "aria-label": "关闭", onClick: close,
+    }, icon("close", { size: 16 }))),
     h("div.dialog-body", body),
     actions.length ? h("div.dialog-actions", actions.map((action) => button(action))) : null,
   );
@@ -48,10 +59,10 @@ export function dialog({ title, body, actions = [], onClose, closeOnBackdrop = t
 }
 
 function button(spec) {
-  return h(
-    `button.btn.${spec.variant || "text"}${spec.small ? ".small" : ""}`,
-    { type: "button", disabled: spec.disabled, onClick: spec.onClick },
+  return buttonNode(
     spec.label,
+    { variant: spec.variant || "text", small: spec.small, disabled: spec.disabled, onClick: spec.onClick },
+    spec.icon ? icon(spec.icon, { size: 16 }) : null,
   );
 }
 
@@ -74,11 +85,15 @@ export function confirmDialog({ title = "请确认", message, confirmLabel = "�
 // —— 基础块 ——
 export function notice(text, tone = "info") {
   if (!text) return null;
-  return h(`div.notice.${tone}`, { role: tone === "error" ? "alert" : "status" }, text);
+  const glyph = tone === "error" ? "alert" : tone === "warn" ? "alert" : tone === "good" ? "check" : "info";
+  return h(`div.notice.tone-${tone}`, { role: tone === "error" ? "alert" : "status" },
+    icon(glyph, { size: 18 }),
+    h("div.notice-text", text),
+  );
 }
 
 export function badge(text, tone = "muted", extra) {
-  return h(`span.badge.${tone}`, extra, text);
+  return h(`span.badge.tone-${tone}`, extra, text);
 }
 
 export function card(...children) {
@@ -89,12 +104,56 @@ export function cardHead(title, ...rest) {
   return h("div.card-head", h("h3", title), ...rest);
 }
 
-export function stat(label, value, hint) {
-  return h("div.card.stat", h("div.label", label), h("div.value", value), hint ? h("div.hint", hint) : null);
+// KPI 瓦片：值 + 单位 + 线索 +（可选）迷你趋势与环比。
+// 强调"读数"而不是"卡片"，因此不自带海拔，由父级 grid 统一对齐。
+//
+// trendPolarity 决定环比颜色的含义，必须由调用方明确指定：
+//   "inverse"（默认）—— 涨 = 红。适用于耗时、错误率这类"越低越好"的指标。
+//   "neutral"        —— 涨跌都用中性灰。适用于吞吐量这类"高低都正常"的指标，
+//                       给它们上红色会把正常波动误报成故障。
+//   "direct"         —— 涨 = 绿。适用于成功率、缓存命中率这类"越高越好"的指标。
+export function stat(label, value, hint, options = {}) {
+  const { unit, tone, points, metricId, bucketSeconds, trendChange, iconName, trendPolarity = "inverse" } = options;
+  const direction = trendChange === null || trendChange === undefined ? null
+    : trendChange > 0.001 ? "up" : trendChange < -0.001 ? "down" : "flat";
+  const trendTone = direction === null ? null
+    : direction === "flat" || trendPolarity === "neutral" ? "flat"
+      : trendPolarity === "direct"
+        ? (direction === "up" ? "down" : "up")   // 复用 tone-down（绿）表示"变好"
+        : (direction === "up" ? "up" : "down");
+  return h("div.stat", {},
+    h("div.stat-head", {},
+      iconName ? icon(iconName, { size: 15, class: "stat-icon" }) : null,
+      h("span.stat-label", label),
+      direction
+        ? h(`span.stat-trend.tone-${trendTone}`, {},
+            icon(direction === "down" ? "arrowDown" : direction === "up" ? "arrowUp" : "activity", { size: 12 }),
+            `${Math.abs(Math.round((trendChange || 0) * 100))}%`)
+        : null,
+    ),
+    h("div.stat-value", { class: tone ? `tone-${tone}` : null },
+      h("span", value),
+      unit ? h("small", unit) : null,
+    ),
+    hint ? h("div.stat-hint", hint) : null,
+    points && points.length
+      ? h("div.stat-spark", {}, sparkline({ points, metricId, bucketSeconds, tone: tone || "primary" }))
+      : null,
+  );
 }
 
-export function empty(text) {
-  return h("div.empty", text);
+// KPI 网格：自适应列宽，窄屏自动单列。
+export function statGrid(...tiles) {
+  return h("div.stat-grid", {}, tiles.flat().filter(Boolean));
+}
+
+export function empty(text, options = {}) {
+  return h("div.empty", {},
+    options.icon ? icon(options.icon, { size: 28, class: "empty-icon" }) : null,
+    h("p", text),
+    options.hint ? h("p.empty-hint", options.hint) : null,
+    options.action || null,
+  );
 }
 
 export function field(label, control) {
@@ -109,30 +168,72 @@ export function select(options, props = {}) {
   const node = h("select.select", props);
   for (const option of options) {
     const spec = typeof option === "string" ? { value: option, label: option } : option;
-    node.append(h("option", { value: spec.value, selected: String(props.value ?? "") === String(spec.value), disabled: spec.disabled }, spec.label));
+    node.append(h("option", {
+      value: spec.value,
+      selected: String(props.value ?? "") === String(spec.value),
+      disabled: spec.disabled,
+    }, spec.label));
   }
   return node;
 }
 
-export function buttonNode(label, props = {}) {
-  const { variant = "", small = false, ...rest } = props;
-  return h(`button.btn.${variant}${small ? ".small" : ""}`, { type: "button", ...rest }, label);
+export function buttonNode(label, props = {}, ...children) {
+  const { variant = "", small = false, iconName, ...rest } = props;
+  const classes = ["btn", variant, small ? "small" : ""].filter(Boolean).join(".");
+  return h(`button.${classes}`, { type: "button", ...rest },
+    iconName ? icon(iconName, { size: small ? 14 : 16 }) : null,
+    ...children,
+    label || null,
+  );
 }
 
 export function toggle(label, pressed, onClick, props = {}) {
   return h("button.toggle", { type: "button", "aria-pressed": String(!!pressed), onClick, ...props }, label);
 }
 
-export function table(columns, rows, emptyText) {
-  if (!rows.length) return empty(emptyText || "暂无数据。");
-  const head = h("tr", columns.map((column) => h(`th${column.numeric ? ".num" : ""}`, column.label)));
+// 分段控件（Material segmented button）：用于时间范围/指标切换。
+export function segmented(items, activeId, onSelect, props = {}) {
+  return h("div.segmented", { role: "group", ...props },
+    items.map((item) => h("button.segment", {
+      type: "button",
+      "aria-pressed": String(item.id === activeId),
+      title: item.title || null,
+      onClick: () => onSelect(item.id),
+    }, item.label)));
+}
+
+// —— 数据表 ——
+// columns: { label, render(row), numeric, width, sortValue(row), sortable, align }
+// options: { sort: { key, direction }, onSort(key), caption, dense }
+export function table(columns, rows, emptyText, options = {}) {
+  if (!rows.length) return empty(emptyText || "暂无数据。", { icon: "logs" });
+  const sort = options.sort;
+  const head = h("tr", {}, columns.map((column) => {
+    const active = sort && sort.key === column.key;
+    const sortable = options.onSort && column.sortValue;
+    const th = h(`th${column.numeric ? ".num" : ""}${active ? ".is-sorted" : ""}`, {
+      style: column.width ? { width: column.width } : null,
+      "aria-sort": active ? (sort.direction === "asc" ? "ascending" : "descending") : null,
+    }, sortable
+      ? h("button.th-sort", {
+          type: "button",
+          onClick: () => options.onSort(column.key),
+        }, column.label, icon(active && sort.direction === "asc" ? "arrowUp" : "arrowDown", { size: 12 }))
+      : column.label);
+    return th;
+  }));
   const body = rows.map((row) =>
-    h("tr", columns.map((column) => {
+    h("tr", {}, columns.map((column) => {
       const value = column.render(row);
       return h(`td${column.numeric ? ".num" : ""}`, value === null || value === undefined ? "-" : value);
     })),
   );
-  return h("table.table", h("thead", head), h("tbody", body));
+  const node = h("table.table", { class: options.dense ? "is-dense" : null },
+    options.caption ? h("caption", options.caption) : null,
+    h("thead", head),
+    h("tbody", body),
+  );
+  return options.scroll === false ? node : h("div.table-scroll", {}, node);
 }
 
 export function kv(pairs) {
@@ -144,19 +245,60 @@ export function kv(pairs) {
   return list;
 }
 
+// —— 骨架屏 ——
+// 结构形状贴近真实内容（读数块 + 图区 + 行），比转圈更能说明"将要出现什么"。
+export function skeleton(kind = "chart", rows = 5) {
+  if (kind === "stats") {
+    return h("div.stat-grid", {}, Array.from({ length: 4 }, () =>
+      h("div.stat.is-loading", {},
+        h("div.skel.skel-sm"), h("div.skel.skel-lg"), h("div.skel.skel-sm"))));
+  }
+  if (kind === "table") {
+    return h("div.table-scroll", {}, h("div.skeleton-table", {},
+      Array.from({ length: rows }, (_, index) =>
+        h("div.skel-row", { class: index === 0 ? "is-head" : null },
+          h("div.skel.skel-sm"), h("div.skel.skel-sm"), h("div.skel.skel-sm"), h("div.skel.skel-md")))));
+  }
+  return h("div.skeleton-chart", {}, h("div.skel.skel-chart"));
+}
+
 export function loading(text = "正在读取…") {
   return h("div.inline", h("span.spinner"), h("span.muted", text));
 }
 
-export function progressBar(percent) {
+// 内容区：统一"页头 + 栅格"骨架，页面只填内容。
+export function pageHead(title, subtitle, ...actions) {
+  return h("div.page-head", {},
+    h("div.page-title", {}, h("h1", title), subtitle ? h("p.sub", subtitle) : null),
+    h("div.page-actions", {}, actions.filter(Boolean)),
+  );
+}
+
+export function section(title, subtitle, ...children) {
+  return h("section.section", {},
+    title ? h("div.section-head", {}, h("h2", title), subtitle ? h("p.muted", subtitle) : null) : null,
+    ...children,
+  );
+}
+
+export function progressBar(percent, tone = "primary") {
   const value = Math.max(0, Math.min(100, percent ?? 0));
-  return h(
-    "div",
-    { style: { height: "4px", background: "#e0e0e0", borderRadius: "2px", overflow: "hidden" } },
-    h("div", { style: { width: value + "%", height: "100%", background: "var(--md-primary)", transition: "width 250ms cubic-bezier(0.4,0,0.2,1)" } }),
+  return h("div.progress", { role: "progressbar", "aria-valuenow": Math.round(value), "aria-valuemin": "0", "aria-valuemax": "100" },
+    h("div.progress-fill", { class: `tone-${tone}`, style: { width: `${value}%` } }),
+  );
+}
+
+// 有时间戳的"最后更新"提示：轮询界面必须让用户知道数据有多新。
+export function freshness(at, { prefix = "更新于" } = {}) {
+  if (!at) return null;
+  return h("span.freshness", { title: new Date(at).toLocaleString("zh-CN") },
+    icon("clock", { size: 13 }),
+    `${prefix} ${formatRelative(at)}`,
   );
 }
 
 export function render(target, ...children) {
   mount(target, ...children);
 }
+
+export { formatCount };
