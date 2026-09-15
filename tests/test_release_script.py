@@ -214,3 +214,106 @@ def test_run_command_gives_up_after_transient_retries(monkeypatch) -> None:
         release_script.run_command(["pip", "install", "-e", "."], capture=True, transient_retries=3)
 
     assert len(attempts) == 4
+
+
+# —— 流式命令（capture=False）的瞬时占用重试 ——
+# 上面三个测试都传了 capture=True，而真正会撞上 WinError 5 的两个调用点用的是默认的
+# capture=False。那条路径走 subprocess.run 时 stdout/stderr 都是 None，标记检测永远
+# 匹配不到，于是 python -m build 一步失败一次就直接放弃 —— 重试写了却从未生效。
+# 现在 capture=False 且有重试次数时改走 _run_with_tee，下面用 Popen 替身锁住它。
+
+
+class _FakePipe:
+    def __init__(self, text: str) -> None:
+        self._lines = text.splitlines(keepends=True)
+
+    def __iter__(self):
+        return iter(self._lines)
+
+
+class _FakeProcess:
+    def __init__(self, returncode: int, output: str) -> None:
+        self.stdout = _FakePipe(output)
+        self._returncode = returncode
+
+    def wait(self) -> int:
+        return self._returncode
+
+
+class _FakePopen:
+    """按预设序列逐次返回 (返回码, 输出)，并记录被调用的命令行。"""
+
+    def __init__(self, script: list[tuple[int, str]]) -> None:
+        self._script = script
+        self.commands: list[list[str]] = []
+
+    def __call__(self, args, **_kwargs):
+        index = min(len(self.commands), len(self._script) - 1)
+        self.commands.append(list(args))
+        return _FakeProcess(*self._script[index])
+
+    @property
+    def attempts(self) -> int:
+        return len(self.commands)
+
+
+def test_run_command_retries_transient_lock_without_capture(monkeypatch) -> None:
+    """回归：python -m build 用 capture=False 调用，也必须能重试瞬时文件占用。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    fake = _FakePopen([(1, "error: [WinError 5] 拒绝访问。: 'tmppbk1qbm' -> 'PKG-INFO'")])
+    monkeypatch.setattr(release_script.subprocess, "Popen", fake)
+
+    result = release_script.run_command(
+        [sys.executable, "-m", "build"], check=False, transient_retries=3
+    )
+
+    assert result.returncode == 1
+    assert fake.attempts == 4, "瞬时占用必须在 capture=False 时也重试到上限"
+    # 输出要留存下来供标记检测，否则判定依据又丢了。
+    assert "[WinError 5]" in result.stdout
+
+
+def test_run_command_recovers_when_transient_lock_clears(monkeypatch) -> None:
+    """占用是瞬时的：第 3 次成功就应当收工，而不是继续重试。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    fake = _FakePopen([
+        (1, "error: [WinError 5] 拒绝访问。"),
+        (1, "error: [WinError 5] 拒绝访问。"),
+        (0, "Successfully built"),
+    ])
+    monkeypatch.setattr(release_script.subprocess, "Popen", fake)
+
+    result = release_script.run_command(
+        [sys.executable, "-m", "build"], check=False, transient_retries=3
+    )
+
+    assert result.returncode == 0
+    assert fake.attempts == 3
+
+
+def test_run_command_does_not_retry_real_failures_without_capture(monkeypatch) -> None:
+    """capture=False 时同样不能把真实错误当文件占用来重试。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    fake = _FakePopen([(1, "error: no matching distribution found")])
+    monkeypatch.setattr(release_script.subprocess, "Popen", fake)
+
+    result = release_script.run_command(
+        [sys.executable, "-m", "build"], check=False, transient_retries=3
+    )
+
+    assert result.returncode == 1
+    assert fake.attempts == 1
+
+
+def test_remove_stale_egg_info_deletes_build_artifacts(tmp_path, monkeypatch) -> None:
+    """构建前清掉 egg-info：目标不存在时 os.replace 就不会撞锁。"""
+    stale = tmp_path / "auto_model_key_router.egg-info"
+    stale.mkdir()
+    (stale / "PKG-INFO").write_text("old", encoding="utf-8")
+    (tmp_path / "unrelated").mkdir()
+
+    monkeypatch.setattr(release_script, "ROOT", tmp_path)
+    release_script.remove_stale_egg_info()
+
+    assert not stale.exists()
+    assert (tmp_path / "unrelated").exists(), "只清 egg-info，不能误删其它目录"

@@ -5,6 +5,7 @@ import fnmatch
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
@@ -164,16 +165,68 @@ def format_command(args: Sequence[str]) -> str:
     return shlex.join(args)
 
 
+def remove_stale_egg_info() -> None:
+    """构建或可编辑安装前清掉旧的 egg-info。
+
+    setuptools 写 PKG-INFO 用 NamedTemporaryFile + os.replace，目标文件已存在且被杀软
+    或索引器扫到时会抛 WinError 5。目标不存在时 os.replace 只做创建，基本撞不上锁 ——
+    与其失败后重试，不如先让这个竞态不具备发生的条件。egg-info 是构建产物，随时会重建。
+    """
+    for path in sorted(ROOT.glob("*.egg-info")):
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _run_with_tee(args: Sequence[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
+    """执行命令，并把输出同时实时回显与留存。
+
+    subprocess.run 只能二选一：capture=True 拿得到输出却没有实时进度，capture=False
+    反之。而"命令是否被 Windows 文件占用拒绝"必须在输出里找 [WinError 5]，于是流式
+    执行的命令永远判定不出该重试 —— `python -m build` 就是这样一步步失败却从不重试的。
+    这里把 stderr 并入 stdout 逐行读取（只读一个管道，避免两个管道互相阻塞），
+    兼顾进度可见与输出可查。子进程是 Python（pip / build），设置 PYTHONUNBUFFERED
+    让它的 stdout 逐行落盘 —— 否则 pip 的 stdout 是块缓冲、stderr 是无缓冲，
+    错误会跑到逻辑上在它之前的那几行前面，读起来像错位。
+    """
+    process = subprocess.Popen(
+        args,
+        cwd=cwd,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        bufsize=1,
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    chunks: list[str] = []
+    stream = process.stdout
+    if stream is not None:
+        for line in stream:
+            chunks.append(line)
+            # markup=False：构建输出里会出现 "[WinError 5]" 这类方括号文本，
+            # 交给 Rich 当标记解析会抛 MarkupError，而这正是我们要检测的内容。
+            console.print(line, end="", markup=False)
+    return subprocess.CompletedProcess(args, process.wait(), "".join(chunks), "")
+
+
 def run_command(args: Sequence[str], *, capture: bool = False, check: bool = True, cwd: Path = ROOT, transient_retries: int = 0) -> subprocess.CompletedProcess[str]:
     console.print(Text(f"$ {format_command(args)}", style="bold blue"))
     delay = 0.5
     for attempt in range(transient_retries + 1):
-        result = subprocess.run(args, cwd=cwd, text=True, capture_output=capture, encoding="utf-8", errors="replace")
         if capture:
+            result = subprocess.run(args, cwd=cwd, text=True, capture_output=True, encoding="utf-8", errors="replace")
+            # 输出是子进程的任意文本，不能让 Rich 当标记解析。
             if result.stdout:
-                console.print(result.stdout, end="")
+                console.print(result.stdout, end="", markup=False)
             if result.stderr:
-                error_console.print(result.stderr, end="", style="red")
+                error_console.print(result.stderr, end="", style="red", markup=False)
+        elif transient_retries:
+            # 既要实时进度又要能在输出里找错误码：走 tee。
+            # 直接用 subprocess.run 的话 stdout/stderr 都是 None，下面的标记检测
+            # 永远匹配不到，重试次数形同虚设。
+            result = _run_with_tee(args, cwd=cwd)
+        else:
+            result = subprocess.run(args, cwd=cwd, text=True, encoding="utf-8", errors="replace")
         if result.returncode == 0 or attempt == transient_retries:
             break
         if not any(marker in f"{result.stdout or ''}\n{result.stderr or ''}" for marker in TRANSIENT_FILE_LOCK_MARKERS):
@@ -489,6 +542,7 @@ def verify_dist(version: str) -> None:
 
 def install_dev_environment() -> None:
     pip_args = [sys.executable, "-m", "pip", "install", "--upgrade", "-e", ".[dev]"]
+    remove_stale_egg_info()
     result = run_command(pip_args, capture=True, check=False, transient_retries=3)
     if result.returncode == 0:
         return
@@ -585,6 +639,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     success("已更新 pyproject.toml 和 CHANGELOG.md")
     if not args.skip_build:
         step(STEP_TITLES["build"])
+        remove_stale_egg_info()
         run_command([sys.executable, "-m", "build"], transient_retries=3)
     if not args.skip_twine:
         step(STEP_TITLES["twine"])

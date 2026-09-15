@@ -14,6 +14,8 @@
 
 ### Fixed
 
+- 修复发布脚本针对 Windows 文件占用的重试从未生效：`run_command` 靠 `result.stdout/stderr` 里的 `[WinError 5]` 判断是否该重试，但只有 `capture=True` 时这两项才有值，而真正会撞上该错误的两步（`pip install -e .`、`python -m build`）用的都是默认的 `capture=False` —— 于是 stdout 恒为 `None`，标记永远匹配不到，首次失败就直接放弃，`transient_retries=3` 形同虚设，发布卡在「构建分发产物」并留下「版本号已改、但未构建未提交未打标签」的半成品状态（4.0.3 记录的那次修复因此实际从未生效）。现 `capture=False` 且有重试次数时改走 teed 执行：把 stderr 并入 stdout 逐行读取，一边实时回显一边留存输出，标记检测与重试判定都能正常工作；并设置 `PYTHONUNBUFFERED=1` 保持输出顺序（否则 pip 的 stdout 块缓冲、stderr 无缓冲，错误会跑到逻辑上在它之前的那几行前面）。三个既有重试测试全都传了 `capture=True`，恰好只覆盖了唯一能工作的配置，故补上 `capture=False` 路径的回归测试。
+- 修复发布脚本构建/可编辑安装前不清理旧 `*.egg-info`：setuptools 用 `NamedTemporaryFile` + `os.replace` 写 `PKG-INFO`，**目标文件已存在**且被杀软或索引器扫到时会抛 `WinError 5`。现在构建前先删掉 `*.egg-info`（构建产物，随时重建），目标不存在时 `os.replace` 只做创建，从源头消除该竞态，而不是仅依赖失败后重试。
 - 修复 WebUI 图表的 X 轴时间标签全部渲染为 `-`：`timeTicks()` 只读取原始数据点的 `started_at`，而 `lineChart` 传入的是 `series()` 的产物（时间字段名为 `at`），导致整条时间轴丢失。
 - 修复 WebUI 整页白屏：`svg()` 为 SVG 元素赋值 `className` 会抛 `TypeError`（`SVGElement.className` 是只读的 `SVGAnimatedString`，ES 模块处于严格模式），异常在渲染首屏时中断，页面只剩空壳。现 SVG 一律走 `setAttribute`。
 - 修复 SVG 轴标签字体未生效：`font-family="var(--font)"` 作为 SVG 表现属性不会解析 CSS 变量，会被当成字面字族名而静默失效；改为由 CSS 统一设置。
