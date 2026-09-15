@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- 修复 uv tool 安装方式的自动更新永远失败：`uv tool install "auto-model-key-router==<版本>"` 会把版本锁写进 `uv-receipt.toml`，此后 `uv tool upgrade` 认为当前环境已满足该锁，只更新依赖、不动本体，并**以退出码 0 报「Nothing to upgrade」**。更新器因此把命令误判为成功，却在版本校验中发现仍是旧版本，重试 6 次后报「更新命令在 6 次尝试后仍失败」。现更新前读取 `uv-receipt.toml`：带版本锁时改用 `uv tool install --force`（保留 `[visitor]` 等 extras）重装以清掉锁，未锁版本时仍走 `uv tool upgrade`。
+
 ## [4.0.3] - 2026-09-15
 
 ### Added

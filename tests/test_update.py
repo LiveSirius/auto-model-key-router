@@ -162,6 +162,45 @@ def test_manual_update_command_uses_uv_tool_upgrade(monkeypatch) -> None:
     assert command == ["uv", "tool", "upgrade", "auto-model-key-router"]
 
 
+def test_manual_update_command_clears_uv_tool_version_pin(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("auto_model_key_router.update.detected_installation_method", lambda: "uv-tool")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    (tmp_path / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "auto-model-key-router", specifier = "==4.0.2" }]\n',
+        encoding="utf-8",
+    )
+
+    command = manual_update_command(VersionCheckResult(current_version="4.0.2", latest_version="4.0.3", source="PyPI"))
+
+    assert command == ["uv", "tool", "install", "--force", "auto-model-key-router"]
+
+
+def test_manual_update_command_clears_uv_tool_version_pin_and_keeps_extras(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("auto_model_key_router.update.detected_installation_method", lambda: "uv-tool")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    (tmp_path / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "auto-model-key-router", extras = ["visitor"], specifier = "==4.0.2" }]\n',
+        encoding="utf-8",
+    )
+
+    command = manual_update_command(VersionCheckResult(current_version="4.0.2", latest_version="4.0.3", source="PyPI"))
+
+    assert command == ["uv", "tool", "install", "--force", "auto-model-key-router[visitor]"]
+
+
+def test_manual_update_command_ignores_uv_tool_receipt_without_version_pin(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("auto_model_key_router.update.detected_installation_method", lambda: "uv-tool")
+    monkeypatch.setattr(sys, "prefix", str(tmp_path))
+    (tmp_path / "uv-receipt.toml").write_text(
+        '[tool]\nrequirements = [{ name = "auto-model-key-router" }]\n',
+        encoding="utf-8",
+    )
+
+    command = manual_update_command(VersionCheckResult(current_version="4.0.2", latest_version="4.0.3", source="PyPI"))
+
+    assert command == ["uv", "tool", "upgrade", "auto-model-key-router"]
+
+
 def test_manual_update_command_uses_uv_tool_install_for_uvx(monkeypatch) -> None:
     monkeypatch.setattr("auto_model_key_router.update.detected_installation_method", lambda: "uvx")
 

@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import time
+import tomllib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -224,6 +225,31 @@ def manual_update_target(result: VersionCheckResult) -> str:
     return PACKAGE_NAME
 
 
+def uv_tool_installed_requirement() -> str | None:
+    """读取 uv tool 环境的 receipt，返回「去掉版本锁」的安装目标（保留 extras），没有锁版本时返回 None。
+
+    `uv tool install <spec>` 会把完整 spec（含 `==4.0.2` 这类锁）记进 receipt，之后
+    `uv tool upgrade` 认为当前已满足该锁：只更新依赖、不动本体，并**以退出码 0 报「Nothing to upgrade」**，
+    于是更新器误判成功又校验不过版本，重试到耗尽。带锁时改用 `install --force` 重装以清掉锁。
+    """
+    if detected_installation_method() != "uv-tool":
+        return None
+    try:
+        receipt = tomllib.loads((Path(sys.prefix) / "uv-receipt.toml").read_text(encoding="utf-8"))
+        requirements = receipt["tool"]["requirements"]
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return None
+    for requirement in requirements if isinstance(requirements, list) else []:
+        if not isinstance(requirement, dict) or requirement.get("name") != PACKAGE_NAME:
+            continue
+        if not requirement.get("specifier"):
+            return None
+        extras = requirement.get("extras") or []
+        suffix = f"[{','.join(extras)}]" if extras else ""
+        return f"{PACKAGE_NAME}{suffix}"
+    return None
+
+
 def manual_update_command(result: VersionCheckResult) -> list[str]:
     target = manual_update_target(result)
     method = detected_installation_method()
@@ -233,7 +259,10 @@ def manual_update_command(result: VersionCheckResult) -> list[str]:
         return ["pipx", "install", "--force", target]
     if method in {"uv-tool", "uvx"}:
         if target == PACKAGE_NAME and method == "uv-tool":
-            return ["uv", "tool", "upgrade", PACKAGE_NAME]
+            unpinned = uv_tool_installed_requirement()
+            if unpinned is None:
+                return ["uv", "tool", "upgrade", PACKAGE_NAME]
+            return ["uv", "tool", "install", "--force", unpinned]
         return ["uv", "tool", "install", "--force", target]
     return [sys.executable, "-m", "pip", "install", "--upgrade", target]
 
