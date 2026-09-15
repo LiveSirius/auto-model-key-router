@@ -11,6 +11,7 @@
 
 ### Fixed
 
+- 修复发布脚本在「准备发布环境」一步偶发失败：`pip install -e .` / `python -m build` 走到 setuptools 写 `egg-info/PKG-INFO` 时，`NamedTemporaryFile` + `os.replace` 可能被 Windows 上短暂占用的句柄或杀软扫描拒绝，抛 `PermissionError: [WinError 5]` 并以 `subprocess-exited-with-error` 中止发布（与 Agent 配置写入那条同属 Windows 文件占用噪声，区别是这次发生在 pip / build 子进程内部，脚本自身无法重试那次 `os.replace`）。现由发布脚本检测该错误码后小退避重试整条命令（`[WinError 5]` / `[WinError 32]`，用带方括号的 ASCII 片段匹配以适配本地化错误正文，并避免误命中 `WinError 50` 等其它码）。
 - 修复发布脚本在中文 Windows 控制台（GBK）下中断：Rich 打印 `✓` / `ℹ` / `⚠` 会抛 `UnicodeEncodeError`，而此时版本号已写入、提交与标签尚未创建，会留下「已改版本但未发布」的半成品状态。现放开发布脚本输出流的编码错误处理（仅 `errors="replace"`，不改变终端实际编码）。
 - 修复 Agent 配置写入（Claude Code / Codex / Pi Agent）在 Windows 上偶发 `PermissionError: [WinError 5]` 失败：`os.replace` 可能被杀软扫描或未释放的句柄短暂拒绝，现与配置写入一致地做小退避重试。
 - 修复源码树内运行时报出「假版本号」：`__version__` 原先优先读取 `parents[1]/pyproject.toml`，会把发布中断遗留的「已改版本但未发布」状态当成真实版本（并在升级检查中误判为已是最新）。现在已安装的包一律以安装元数据为准，仅未安装（直接从源码运行）时才回退读取 `pyproject.toml`。

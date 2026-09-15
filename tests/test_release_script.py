@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import io
+import subprocess
 import sys
 from pathlib import Path
 
@@ -155,3 +156,61 @@ def test_classify_commits_skips_empty_groups() -> None:
 
 def test_classify_commits_empty_input() -> None:
     assert release_script.classify_commits([]) == {}
+
+
+def test_run_command_retries_transient_windows_file_locks(monkeypatch) -> None:
+    """回归：setuptools 用 NamedTemporaryFile + os.replace 写 egg-info/PKG-INFO，
+    Windows 上目标文件被短暂占用会抛 WinError 5，使发布卡在准备发布环境一步。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    attempts: list[int] = []
+    failures = 2
+
+    def fake_run(args, **kwargs):
+        attempts.append(1)
+        if len(attempts) <= failures:
+            # 错误正文是本地化的，只有 [WinError 5] 这段 ASCII 稳定出现。
+            return subprocess.CompletedProcess(args, 1, "", "PermissionError: [WinError 5] 拒绝访问。: 'tmp8k2' -> 'PKG-INFO'")
+        return subprocess.CompletedProcess(args, 0, "ok", "")
+
+    monkeypatch.setattr(release_script.subprocess, "run", fake_run)
+
+    result = release_script.run_command(["pip", "install", "-e", "."], capture=True, transient_retries=3)
+
+    assert result.returncode == 0
+    assert len(attempts) == failures + 1
+
+
+def test_run_command_does_not_retry_real_failures(monkeypatch) -> None:
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    # WinError 50 之类的其它错误码不应被当作文件占用而重试。
+    messages = ["error: no matching distribution found", "OSError: [WinError 50] 不支持该请求"]
+
+    for message in messages:
+        attempts: list[int] = []
+
+        def fake_run(args, _message=message, **kwargs):
+            attempts.append(1)
+            return subprocess.CompletedProcess(args, 1, "", _message)
+
+        monkeypatch.setattr(release_script.subprocess, "run", fake_run)
+
+        result = release_script.run_command(["pip", "install", "-e", "."], capture=True, check=False, transient_retries=3)
+
+        assert result.returncode == 1
+        assert len(attempts) == 1, message
+
+
+def test_run_command_gives_up_after_transient_retries(monkeypatch) -> None:
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    attempts: list[int] = []
+
+    def fake_run(args, **kwargs):
+        attempts.append(1)
+        return subprocess.CompletedProcess(args, 1, "", "PermissionError: [WinError 5] 拒绝访问。")
+
+    monkeypatch.setattr(release_script.subprocess, "run", fake_run)
+
+    with pytest.raises(SystemExit):
+        release_script.run_command(["pip", "install", "-e", "."], capture=True, transient_retries=3)
+
+    assert len(attempts) == 4

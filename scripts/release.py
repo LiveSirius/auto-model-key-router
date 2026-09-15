@@ -7,6 +7,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass
 from datetime import date
@@ -79,6 +80,15 @@ SENSITIVE_PATTERNS = (
     "*.sqlite3-wal",
     "*.sqlite3-shm",
     "*.log",
+)
+# setuptools 写 PKG-INFO 用 NamedTemporaryFile + os.replace（_core_metadata.py），
+# Windows 上目标文件被杀软扫描或未释放句柄短暂占用时会抛 WinError 5；pip 装可编辑
+# 包（`pip install -e`）与 `python -m build` 都会走到这里，属平台噪声而非真实错误。
+# 用带方括号的写法匹配：错误正文是本地化的（中文 Windows 下没有 "Access is denied"），
+# 只有 "[WinError 5]" 这段 ASCII 稳定出现，且不会误命中 "[WinError 50]"。
+TRANSIENT_FILE_LOCK_MARKERS = (
+    "[WinError 5]",
+    "[WinError 32]",
 )
 
 
@@ -154,14 +164,23 @@ def format_command(args: Sequence[str]) -> str:
     return shlex.join(args)
 
 
-def run_command(args: Sequence[str], *, capture: bool = False, check: bool = True, cwd: Path = ROOT) -> subprocess.CompletedProcess[str]:
+def run_command(args: Sequence[str], *, capture: bool = False, check: bool = True, cwd: Path = ROOT, transient_retries: int = 0) -> subprocess.CompletedProcess[str]:
     console.print(Text(f"$ {format_command(args)}", style="bold blue"))
-    result = subprocess.run(args, cwd=cwd, text=True, capture_output=capture, encoding="utf-8", errors="replace")
-    if capture:
-        if result.stdout:
-            console.print(result.stdout, end="")
-        if result.stderr:
-            error_console.print(result.stderr, end="", style="red")
+    delay = 0.5
+    for attempt in range(transient_retries + 1):
+        result = subprocess.run(args, cwd=cwd, text=True, capture_output=capture, encoding="utf-8", errors="replace")
+        if capture:
+            if result.stdout:
+                console.print(result.stdout, end="")
+            if result.stderr:
+                error_console.print(result.stderr, end="", style="red")
+        if result.returncode == 0 or attempt == transient_retries:
+            break
+        if not any(marker in f"{result.stdout or ''}\n{result.stderr or ''}" for marker in TRANSIENT_FILE_LOCK_MARKERS):
+            break
+        warning(f"命令被 Windows 文件占用拒绝，{delay:.1f}s 后重试（{attempt + 1}/{transient_retries}）。")
+        time.sleep(delay)
+        delay *= 2
     if check and result.returncode != 0:
         raise SystemExit(result.returncode)
     return result
@@ -470,14 +489,14 @@ def verify_dist(version: str) -> None:
 
 def install_dev_environment() -> None:
     pip_args = [sys.executable, "-m", "pip", "install", "--upgrade", "-e", ".[dev]"]
-    result = run_command(pip_args, capture=True, check=False)
+    result = run_command(pip_args, capture=True, check=False, transient_retries=3)
     if result.returncode == 0:
         return
     if "No module named pip" not in result.stderr:
         raise SystemExit(result.returncode)
     warning("当前解释器缺少 pip，正在通过 ensurepip 初始化。")
     run_command([sys.executable, "-m", "ensurepip", "--upgrade"])
-    run_command(pip_args)
+    run_command(pip_args, transient_retries=3)
 
 
 def preview_plan(current_version: str, next_version: str, tag: str, args: argparse.Namespace) -> None:
@@ -566,7 +585,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     success("已更新 pyproject.toml 和 CHANGELOG.md")
     if not args.skip_build:
         step(STEP_TITLES["build"])
-        run_command([sys.executable, "-m", "build"])
+        run_command([sys.executable, "-m", "build"], transient_retries=3)
     if not args.skip_twine:
         step(STEP_TITLES["twine"])
         verify_dist(next_version)
