@@ -1,191 +1,467 @@
-// 概览：统一模型卡片、用量总览、趋势图。
+// 概览：监控看板的首页。
+//
+// 数据来源分两类，必须说清楚，否则读数会被误读：
+//   1. /metrics（小时=1）—— 窗口汇总与实时速率，KPI 用这里；
+//   2. /metrics/series —— 时间序列，趋势图用这里。桶宽由 chart-math 选最小的
+//      可行值（后端上限 500 点），所以 1 小时窗口是 15 秒一个桶。
+// 两张图各自标注自己的时间窗与桶宽，避免"图上是 15 秒桶、数字是 1 小时窗口"混淆。
 
-import { h, formatCount, formatCompact, formatPercent, formatRate, formatDuration, errorText, copyText } from "../dom.js";
+import {
+  h, errorText, copyText, formatCount, formatCompact, formatDuration,
+  formatPercent, formatRate,
+} from "../dom.js";
 import { api } from "../api.js";
-import { card, cardHead, stat, notice, badge, empty, loading, render, buttonNode, toast } from "../ui.js";
+import {
+  card, cardHead, stat, statGrid, notice, badge, empty, skeleton, render,
+  buttonNode, segmented, freshness, progressBar, toast,
+} from "../ui.js";
+import { icon } from "../icons.js";
+import { lineChart, stackedBars, donut, barList, legend, chartSummary } from "../charts.js";
+import {
+  TIME_RANGES, pickBucketSeconds, bucketLabel, METRIC_MAP,
+  rank, statusGroups, formatPercentValue, formatCompactNumber, formatNumber,
+  trend as computeTrend,
+} from "../chart-math.js";
 
-const METRICS = [
-  { id: "rpm", label: "RPM", unit: "次/分", value: (p) => p.current_rpm, pick: (p) => p.requests, format: (v) => formatCount(v) },
-  { id: "tpm", label: "TPM", unit: "Token/分", value: (p) => p.current_tpm, pick: (p) => p.total_tokens, format: (v) => formatCompact(v) },
-  { id: "cache", label: "缓存率", unit: "", value: (p) => (p.cached_token_rate ?? 0) * 100, pick: (p) => (p.cached_token_rate ?? 0) * 100, format: (v) => `${v.toFixed(1)}%` },
-];
+// 页面级状态：时间范围与主图指标是用户选择，需在轮询重绘间保持。
+const state = {
+  hours: 1,
+  metric: "rpm",
+  series: null,
+  seriesHours: null,
+  seriesBucket: null,
+  seriesError: null,
+  // 本页自己按所选窗口取快照，而不是复用全局的 1 小时快照：
+  // 否则把窗口切到 7 天时，折线是 7 天、排行与状态分布却仍是 1 小时，
+  // 同一屏出现两个口径的"总量"。
+  snapshot: null,
+  snapshotHours: null,
+  snapshotError: null,
+  snapshotAt: null,
+  loading: true,
+  trendMode: "line",
+};
 
-// 每分钟一个桶时，桶内请求数就是 RPM；Token 数就是 TPM。
-function pointValue(point, metric) {
-  if (metric.pick) return metric.pick(point);
-  return metric.value(point);
+let host = null;
+let xtxRef = null;
+let windowToken = 0;
+
+function rangeLabel() {
+  return TIME_RANGES.find((range) => range.hours === state.hours)?.label || `${state.hours} 小时`;
 }
 
-function niceMaximum(values) {
-  const max = Math.max(...values, 1);
-  const magnitude = 10 ** Math.floor(Math.log10(max));
-  const normalized = max / magnitude;
-  const interval = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
-  return interval * magnitude;
+// 快照与序列必须同一个窗口、同一次请求周期内取，保证同屏数字自洽。
+async function loadWindow(force = false) {
+  if (!force && state.series && state.seriesHours === state.hours) return;
+  const bucket = pickBucketSeconds(state.hours);
+  const token = ++windowToken;
+  const hours = state.hours;
+  const [snapshot, series] = await Promise.all([
+    api.metrics(hours).catch((error) => ({ __error: errorText(error) })),
+    api.series(hours, bucket).catch((error) => ({ __error: errorText(error) })),
+  ]);
+  if (token !== windowToken) return; // 期间用户又换了范围，丢弃过期响应
+  state.snapshotError = snapshot.__error || null;
+  state.snapshot = snapshot.__error ? null : snapshot;
+  state.seriesError = series.__error || null;
+  state.series = series.__error ? null : (series.points || []);
+  state.seriesHours = hours;
+  state.snapshotHours = hours;
+  state.seriesBucket = series.bucket_seconds || bucket;
+  state.snapshotAt = new Date().toISOString();
+  state.loading = false;
+  draw();
 }
 
-function chart(points, metric) {
-  const width = 640;
-  const height = 160;
-  const pad = 16;
-  const values = points.map((point) => pointValue(point, metric));
-  const max = metric.id === "cache" ? 100 : niceMaximum(values);
-  const step = points.length > 1 ? (width - pad * 2) / (points.length - 1) : 0;
-  const x = (index) => (points.length === 1 ? width / 2 : pad + index * step);
-  const y = (value) => height - pad - (Math.max(0, Math.min(value, max)) / max) * (height - pad * 2);
+// —— KPI 区 ——
+// 实时速率（当前 RPM/TPM）来自 /metrics 的 60 秒滚动窗口，与所选统计窗口无关；
+// 其余累计量都取自同一份窗口快照，保证同屏数字出自同一口径。
+function kpiTiles(metrics, points, bucketSeconds) {
+  const total = metrics.total || {};
+  const successRatio = total.requests ? total.successes / total.requests : null;
+  const cacheRatio = total.prompt_tokens ? total.cached_tokens / total.prompt_tokens : null;
+  const currentRpm = metrics.current_rpm ?? 0;
+  const currentTpm = metrics.current_tpm ?? 0;
+  // 环比只看"已完结"的桶，否则末尾残桶会把结论拖偏。
+  const rpmTrend = computeTrend((points || []).map((point) => ({
+    value: point.complete === false ? null : (point.requests || 0) * (60 / (bucketSeconds || 60)),
+  })));
 
-  const segments = [];
-  let current = [];
-  points.forEach((point, index) => {
-    const value = values[index];
-    if (value === null || value === undefined) {
-      if (current.length) segments.push(current);
-      current = [];
-      return;
-    }
-    current.push(`${x(index).toFixed(1)},${y(value).toFixed(1)}`);
-  });
-  if (current.length) segments.push(current);
+  const statusTone = metrics.router_status === "red" ? "bad"
+    : metrics.router_status === "yellow" ? "warn" : null;
 
-  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-  svg.setAttribute("class", "chart");
-  svg.setAttribute("role", "img");
-  svg.setAttribute("aria-label", `${metric.label} 趋势`);
-
-  const ns = (tag, attrs) => {
-    const node = document.createElementNS("http://www.w3.org/2000/svg", tag);
-    for (const [key, value] of Object.entries(attrs)) node.setAttribute(key, value);
-    return node;
-  };
-  for (const ratio of [0, 0.5, 1]) {
-    svg.append(ns("line", { class: "axis", x1: pad, x2: width - pad, y1: y(max * ratio), y2: y(max * ratio) }));
-    const text = ns("text", { class: "scale-label", x: pad, y: y(max * ratio) - 4 });
-    text.textContent = metric.id === "cache" ? `${Math.round(max * ratio)}%` : formatCompact(Math.round(max * ratio));
-    svg.append(text);
-  }
-  for (const segment of segments) {
-    if (segment.length === 1) {
-      const [cx, cy] = segment[0].split(",");
-      svg.append(ns("circle", { class: "dot", cx, cy, r: 2.5 }));
-    } else {
-      svg.append(ns("polyline", { class: "line", points: segment.join(" ") }));
-    }
-  }
-  return svg;
+  return statGrid(
+    stat("当前 RPM", formatCount(currentRpm), `近 ${metrics.rate_window_seconds || 60} 秒窗口`, {
+      unit: "次/分", iconName: "bolt", tone: statusTone,
+    }),
+    stat("当前 TPM", formatCompact(currentTpm), "近 60 秒 Token 速率", {
+      unit: "Token/分", iconName: "activity",
+    }),
+    stat("窗口请求", formatCount(total.requests), `最近 ${rangeLabel()}`, {
+      iconName: "layers", points: points || [], metricId: "rpm", bucketSeconds,
+      // 流量涨跌本身不分好坏，用中性色；否则一次正常高峰会被标成红色告警。
+      trendChange: rpmTrend?.change ?? null, trendPolarity: "neutral",
+    }),
+    stat("成功率", successRatio === null ? "-" : formatPercentValue(successRatio, 1),
+      `${formatCount(total.successes)} 成功 · ${formatCount(total.failures)} 失败`, {
+        iconName: "check",
+        tone: successRatio !== null && successRatio < 0.95 ? "bad" : null,
+      }),
+    stat("Token 用量", formatCompact(total.total_tokens),
+      `输入 ${formatCompact(total.prompt_tokens)} · 输出 ${formatCompact(total.completion_tokens)}`, {
+        iconName: "layers", points: points || [], metricId: "tpm", bucketSeconds,
+      }),
+    stat("缓存命中率", cacheRatio === null ? "-" : formatPercentValue(cacheRatio, 1),
+      `缓存 ${formatCompact(total.cached_tokens)} Token`, {
+        iconName: "filter",
+        tone: cacheRatio !== null && cacheRatio > 0.3 ? "good" : null,
+      }),
+    stat("平均耗时", total.requests ? formatDuration(total.avg_duration_ms) : "-",
+      total.requests ? `最快 ${formatDuration(total.min_duration_ms)} · 最慢 ${formatDuration(total.max_duration_ms)}` : "窗口内无请求", {
+        iconName: "clock",
+      }),
+    stat("平均首字", total.requests && total.avg_first_token_ms ? formatDuration(total.avg_first_token_ms) : "-",
+      `${formatCount(metrics.active_requests ?? 0)} 个请求进行中`, {
+        iconName: "activity",
+      }),
+  );
 }
 
-function unifiedCard(xtx) {
-  const { store, navigate } = xtx;
-  const unified = store.health?.unified_model;
-  const models = store.health?.models || [];
-  const target = unified?.default?.primary;
-  const body = unified
-    ? h("div.stack.tight", {},
-        h("div.inline", {},
-          badge("已启用", "good"),
-          h("span.muted", target
-            ? `${target.key ? `固定 Key · ${target.key}` : "自动路由"} · ${1 + (unified.default?.fallback ? 1 : 0)} 个目标`
-            : "尚未配置统一路由"),
+// —— 主趋势图 ——
+function trendCard() {
+  const points = state.series || [];
+  const bucketSeconds = state.seriesBucket || pickBucketSeconds(state.hours);
+  const metric = METRIC_MAP[state.metric] || METRIC_MAP.rpm;
+  const { total, latest } = chartSummary({ points, metricId: state.metric, bucketSeconds, windowHours: state.hours });
+
+  const body = state.seriesError
+    ? notice(`趋势数据读取失败: ${state.seriesError}`, "error")
+    : state.loading && !points.length
+      ? skeleton("chart")
+      : h("div.stack", {},
+          h("div.chart-readout", {},
+            h("span.readout-main", {},
+              state.metric === "tokens" ? formatCompactNumber(total ?? 0) : formatNumber(total ?? 0, 1),
+              h("small", state.metric === "tokens" ? "Token" : metric.unit),
+            ),
+            h("span.readout-note", {},
+              state.metric === "tokens"
+                ? `最近 ${rangeLabel()}合计`
+                : `最近 ${rangeLabel()}平均 · 最新 ${metric.format(latest ?? 0)}`),
+            h("span.spacer"),
+            h("span.readout-note", {}, `${bucketLabel(bucketSeconds)}/点 · 共 ${points.length} 点`),
+          ),
+          lineChart({
+            points, metricId: state.metric, bucketSeconds, height: 280,
+            ariaLabel: `${metric.label}趋势，最近 ${rangeLabel()}`,
+          }),
+        );
+
+  return card(
+    cardHead("流量趋势",
+      badge(`${rangeLabel()}窗口`, "muted"),
+      h("div.head-tools", {},
+        segmented(
+          [{ id: "rpm", label: "请求速率" }, { id: "tpm", label: "Token 速率" },
+           { id: "tokens", label: "Token 用量" }, { id: "latency", label: "耗时" },
+           { id: "success", label: "成功率" }],
+          state.metric,
+          (id) => { state.metric = id; draw(); },
+          { "aria-label": "选择趋势指标" },
         ),
-        h("div.mono", target?.model || "-"),
-      )
-    : h("div.stack.tight", {}, badge("未启用", "muted"), h("span.muted", "请求统一入口时按下方模型路由分发。"));
-  return h("div.card.is-lift", { role: "link", tabindex: "0", onClick: () => navigate("unified") },
-    cardHead("统一模型", h("span.badge.muted", "统一入口")),
+      ),
+    ),
+    h("p.muted", { style: { marginBottom: "12px" } }, metric.hint),
     body,
   );
 }
 
-function metricsCard(xtx) {
-  const { store, navigate } = xtx;
-  const total = store.metrics?.total;
-  const rows = total
-    ? [
-        ["请求", formatCount(total.requests)],
-        ["Token", formatCompact(total.total_tokens)],
-        ["缓存命中", formatRate(total.cached_token_rate)],
-        ["RPM / TPM", `${formatCount(store.metrics.current_rpm)} / ${formatCompact(store.metrics.current_tpm)}`],
-        ["平均延迟", formatDuration(total.avg_duration_ms)],
-        ["成功率", formatPercent(total.successes, total.requests)],
-      ]
-    : null;
-  return h("div.card.is-lift", { role: "link", tabindex: "0", onClick: () => navigate("activity") },
-    cardHead("数据总览",
-      store.metricsError && total ? badge("上次成功数据", "warn") : badge("最近 60 分钟", "muted"),
+// —— 构成与分布 ——
+// 用窗口快照而不是序列求和：这两个数字会和 KPI 瓦片并排出现，
+// 不同来源的小数位差异会让人怀疑数据不准。
+function compositionCard(metrics) {
+  const total = metrics.total || {};
+  const prompt = total.prompt_tokens || 0;
+  const completion = total.completion_tokens || 0;
+  const grandTotal = prompt + completion;
+  return card(
+    cardHead("Token 构成", badge(rangeLabel(), "muted")),
+    h("div.stack", {},
+      donut({
+        ratio: grandTotal ? completion / grandTotal : null,
+        label: "输出占比",
+        tone: "secondary",
+        size: 152,
+        caption: `合计 ${formatCompact(grandTotal)} Token`,
+      }),
+      legend([
+        { label: "输入", value: formatCompact(prompt), tone: "primary" },
+        { label: "输出", value: formatCompact(completion), tone: "secondary" },
+        { label: "缓存读", value: formatCompact(total.cached_tokens || 0), tone: "neutral" },
+      ]),
     ),
-    rows
-      ? h("div.grid", rows.map(([label, value]) => stat(label, value)))
-      : h("div", store.metricsError ? notice(`指标暂不可用: ${store.metricsError}`, "warn") : loading("正在读取指标…")),
   );
 }
 
-// 同步返回卡片节点、异步填充内容：h() 只接受节点，不能返回 Promise。
-function trendCard(xtx) {
-  const host = h("div.card", {}, cardHead("近一小时用量", badge("每分钟采样", "muted")),
-    h("div", loading("正在读取趋势…")));
-  let metricId = "rpm";
-  const load = async () => {
-    try {
-      const data = await api.series(1, 60);
-      const points = data.points || [];
-      if (!points.length) { render(host, cardHead("近一小时用量"), empty("暂无趋势数据。")); return; }
-      const metric = METRICS.find((item) => item.id === metricId);
-      const values = points.map((point) => pointValue(point, metric));
-      const latest = [...values].reverse().find((value) => value !== null && value !== undefined);
-      render(host,
-        cardHead("近一小时用量",
-          h("div.inline", {}, METRICS.map((item) => buttonNode(item.label, {
-            small: true,
-            variant: item.id === metricId ? "" : "text",
-            "aria-pressed": String(item.id === metricId),
-            onClick: () => { metricId = item.id; load(); },
-          }))),
-        ),
-        h("div.chart-wrap", {},
-          h("div.row-between", {},
-            h("span.muted", "最新"),
-            h("strong", latest === undefined ? "-" : `${metric.format(latest)}${metric.unit ? ` ${metric.unit}` : ""}`),
+function statusCard(metrics) {
+  const groups = statusGroups(metrics.total?.status_codes || {});
+  const total = groups.ok + groups.client + groups.server + groups.other;
+  const rows = [
+    { label: "2xx 成功", value: groups.ok, tone: "good" },
+    { label: "4xx 客户端错误", value: groups.client, tone: "warn" },
+    { label: "5xx 服务端错误", value: groups.server, tone: "bad" },
+    { label: "其它状态", value: groups.other, tone: "neutral" },
+  ].filter((row) => row.value > 0);
+
+  return card(
+    cardHead("响应状态分布", badge(`最近 ${rangeLabel()}`, "muted")),
+    total
+      ? h("div.stack", {},
+          h("div.status-bar", { role: "img", "aria-label": "响应状态占比" },
+            rows.map((row) => h("span", {
+              class: `status-seg tone-${row.tone}`,
+              style: { flex: String(row.value) },
+              title: `${row.label} ${formatCount(row.value)}`,
+            }))),
+          h("div.stack.tight", {}, rows.map((row) =>
+            h("div.row-between", {},
+              h("span.inline", {},
+                h("i", { class: `swatch tone-${row.tone === "good" ? "secondary" : row.tone === "neutral" ? "neutral" : row.tone}` }),
+                row.label,
+              ),
+              h("span.inline", {},
+                h("strong", formatCount(row.value)),
+                h("span.muted", ` · ${formatPercent(row.value, total)}`),
+              ),
+            ))),
+        )
+      : empty("窗口内没有带状态码的请求。", { icon: "activity" }),
+  );
+}
+
+// 请求流转：本次窗口内的"尝试"如何收敛成成功。
+// 刻意不用箭头列：那会让人误读成顺序漏斗（请求→重试→失败→成功），
+// 而成功率/重试率/失败率是同一批请求的三个侧面，用横向占比条最诚实。
+function waterfallCard(metrics) {
+  const total = metrics.total || {};
+  const requests = total.requests || 0;
+  const retries = total.retries || 0;
+  const failures = total.failures || 0;
+  const successes = total.successes || 0;
+
+  const rows = [
+    { label: "成功", value: successes, tone: "secondary", hint: "上游返回 2xx" },
+    { label: "重试", value: retries, tone: "warn", hint: "同一次调用换了 Key/上游再试" },
+    { label: "失败", value: failures, tone: "bad", hint: "所有尝试均未成功" },
+  ];
+
+  return card(
+    cardHead("请求结果", badge("按上游尝试计数", "muted"), badge(`最近 ${rangeLabel()}`, "muted")),
+    h("div.flow-total", {},
+      h("span.flow-total-value", formatCount(requests)),
+      h("span.flow-total-label", "次上游尝试"),
+    ),
+    h("div.flow-rows", {}, rows.map((row) => {
+      const ratio = requests ? row.value / requests : 0;
+      return h("div.flow-row", {},
+        h("div.flow-row-head", {},
+          h("span.inline", {}, h("i", { class: `swatch tone-${row.tone === "secondary" ? "secondary" : row.tone}` }), row.label),
+          h("span.inline", {},
+            h("strong", formatCount(row.value)),
+            h("span.muted", ` · ${formatPercent(row.value, requests)}`),
           ),
-          chart(points, metric),
         ),
-        h("p.muted", "按分钟聚合的最近一小时用量；缓存率为每分钟的缓存命中占比。"),
+        progressBar(ratio * 100, row.tone === "secondary" ? "good" : row.tone),
+        h("span.flow-row-hint", row.hint),
       );
-    } catch (error) {
-      render(host, cardHead("近一小时用量"), notice(`趋势读取失败: ${errorText(error)}`, "error"));
-    }
-  };
-  load();
+    })),
+    h("div.card-foot", {},
+      `平均耗时 ${formatDuration(total.avg_duration_ms)} · 缓存率 ${formatRate(total.cached_token_rate)}`),
+  );
+}
+
+function rankingCard(title, entries, keyLabel, options = {}) {
+  const rows = rank(entries, { limit: options.limit || 6, value: options.value });
+  return card(
+    cardHead(title, badge(`${Object.keys(entries || {}).length} 项`, "muted")),
+    barList(rows, {
+      tone: options.tone || "primary",
+      emptyText: `窗口内没有${keyLabel}数据。`,
+      format: options.format || ((row) => `${formatCount(row.value)} 次`),
+    }),
+  );
+}
+
+// —— 统一模型入口卡 ——
+function unifiedCard() {
+  const { store, navigate } = xtxRef;
+  const unified = store.health?.unified_model;
+  const target = unified?.default?.primary;
+  const description = unified
+    ? (target?.key ? `固定 Key · ${target.key}` : "自动路由（按 Key 池顺序）")
+    : "未启用";
+  return h("div.card.is-lift", {
+    role: "link", tabindex: "0", "aria-label": "查看统一模型配置",
+    onClick: () => navigate("unified"),
+    onKeydown: (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); navigate("unified"); } },
+  },
+    cardHead("统一模型入口",
+      unified ? badge("已启用", "good") : badge("未启用", "muted"),
+      h("div.head-tools", {}, icon("chevron", { size: 18, class: "muted" })),
+    ),
+    h("div.stack.tight", {},
+      h("div.unified-target", {},
+        h("span.muted", "主模型"),
+        h("strong", target?.model || "—"),
+      ),
+      h("div", {}, h("span.muted", "路由方式："), description),
+      unified?.default?.fallback?.model
+        ? h("div", {}, h("span.muted", "回退模型："), h("span.mono", unified.default.fallback.model))
+        : h("div.muted", "未配置回退模型"),
+      unified?.image?.primary?.model
+        ? h("div", {}, h("span.muted", "图像模型："), h("span.mono", unified.image.primary.model))
+        : null,
+    ),
+    h("div.card-foot", {},
+      h("span", `可用模型 ${(store.health?.models || []).length} 个`),
+    ),
+  );
+}
+
+function runtimeCard() {
+  const { store, refreshHealth } = xtxRef;
+  const health = store.health || {};
+  const native = Object.values(health.native_endpoint_states || {});
+  const ok = native.filter((state) => state?.supported).length;
+  const rows = [
+    ["监听地址", health.base_url || "—"],
+    ["版本", health.version ? `v${health.version}` : "—"],
+    ["配置路径", health.config_path || "—"],
+    ["本地鉴权", health.local_auth_enabled ? "已启用" : "未启用"],
+    ["访客访问", health.visitor_access_enabled ? `已启用 · ${health.visitor_key_count} 个 Key` : "未启用"],
+  ];
+  return card(
+    cardHead("运行状态",
+      health.local_auth_enabled ? badge("鉴权已启用", "good") : badge("鉴权未启用", "warn"),
+      h("div.head-tools", {},
+        buttonNode("刷新", { variant: "text", small: true, iconName: "refresh", onClick: () => refreshHealth() }),
+      ),
+    ),
+    h("dl.kv", {}, rows.flatMap(([key, value]) => [h("dt", key), h("dd", {}, value)])),
+    native.length
+      ? h("div.card-foot", {},
+          h("div.row-between", {},
+            h("span", `原生端点可用 ${ok} / ${native.length}`),
+            h("span", { class: "muted" }, "响应/Anthropic 原生转发能力"),
+          ),
+          h("div", { style: { marginTop: "8px" } }, progressBar(native.length ? (ok / native.length) * 100 : 0, ok === native.length ? "good" : "primary")),
+        )
+      : null,
+  );
+}
+
+// —— 页面组装 ——
+export function renderOverview(context) {
+  xtxRef = context;
+  host = h("div.stack");
+  if (context.store.health?.local_auth_enabled && !context.store.authorized) {
+    return h("div.stack", {}, notice("需要本地鉴权 Key 才能读取用量。", "warn"));
+  }
+  if (!state.snapshot && !state.loading) state.loading = true;
+  if (state.seriesHours !== state.hours) loadWindow();
+  // 指标轮询时刷新本页窗口数据（快照 + 序列一起，保持同屏口径一致）。
+  context.onTick?.(() => { loadWindow(true); });
+  draw();
   return host;
 }
 
-export function renderOverview(xtx) {
-  const { store, askLogin } = xtx;
-  if (store.connectionError) {
-    return h("div.stack", {},
-      h("div.page-head", h("div", {}, h("h1", "概览"), h("p.sub", "本机 AMKR 服务状态与实时用量。"))),
-      notice(`无法连接 AMKR 服务: ${store.connectionError}`, "error"),
-      buttonNode("重新连接", { onClick: () => xtx.refreshHealth() }),
-    );
-  }
-  if (store.health?.local_auth_enabled && !store.authorized) {
-    return h("div.stack", {}, h("div.page-head", h("h1", "概览")), notice("需要本地鉴权 Key 才能读取用量。", "warn"));
-  }
-  return h("div.stack", {},
-    h("div.page-head", {},
-      h("div", {}, h("h1", "概览"), h("p.sub", "本机 AMKR 服务的统一入口、用量与最近趋势。")),
-      h("div.spacer"),
+function draw() {
+  if (!host || !host.isConnected) return;
+  const { store } = xtxRef;
+  const metrics = state.snapshot;
+  const points = state.series || [];
+  const bucketSeconds = state.seriesBucket || pickBucketSeconds(state.hours);
+
+  const head = h("div.page-head", {},
+    h("div.page-title", {},
+      h("h1", "概览"),
+      h("p.sub", "本机 AMKR 的统一入口、实时速率与用量趋势。"),
+    ),
+    h("div.page-actions", {},
+      state.snapshotAt ? freshness(state.snapshotAt) : null,
       store.health?.base_url
-        ? buttonNode(`复制地址 ${store.health.base_url}`, {
-            variant: "secondary", small: true,
-            onClick: () => copyText(store.health.base_url).then(() => toast("地址已复制")),
+        ? buttonNode("复制入口地址", {
+            variant: "secondary", small: true, iconName: "copy",
+            onClick: () => copyText(store.health.base_url).then(() => toast("入口地址已复制")),
           })
         : null,
+      segmented(TIME_RANGES.map((range) => ({ id: range.hours, label: range.short, title: range.label })),
+        state.hours,
+        (id) => { state.hours = Number(id); state.loading = true; draw(); loadWindow(true); },
+        { "aria-label": "选择统计窗口" }),
     ),
-    store.health && !store.health.local_auth_enabled
-      ? notice("本地鉴权未启用：管理接口对本机开放。建议在设置中启用。", "warn")
-      : null,
-    h("div.grid.wide", {}, unifiedCard(xtx), metricsCard(xtx)),
-    trendCard(xtx),
+  );
+
+  const children = [head];
+
+  if (store.connectionError) {
+    children.push(notice(`无法连接 AMKR 服务：${store.connectionError}`, "error"));
+  } else if (state.snapshotError && !metrics) {
+    children.push(notice(`指标读取失败：${state.snapshotError}`, "error"));
+  }
+  if (store.health?.local_auth_enabled === false) {
+    children.push(notice("本地鉴权未启用：管理接口对本机开放，建议在设置中启用。", "warn"));
+  }
+
+  if (!metrics) {
+    children.push(skeleton("stats"));
+    children.push(card(cardHead("流量趋势"), skeleton("chart")));
+    render(host, children);
+    return;
+  }
+
+  children.push(kpiTiles(metrics, points, bucketSeconds));
+  children.push(h("div.grid-12", {},
+    h("div.col-8", {}, trendCard()),
+    h("div.col-4", {}, unifiedCard()),
+  ));
+  children.push(h("div.grid-12", {},
+    h("div.col-4", {}, compositionCard(metrics)),
+    h("div.col-4", {}, statusCard(metrics)),
+    h("div.col-4", {}, waterfallCard(metrics)),
+  ));
+  children.push(h("div.grid-12", {},
+    h("div.col-4", {}, rankingCard("模型调用排行", metrics.models, "模型")),
+    h("div.col-4", {}, rankingCard("调用方排行", metrics.caller_types, "调用方")),
+    h("div.col-4", {}, rankingCard("上游 Token 排行", metrics.upstream_models, "上游模型的 Token", {
+      value: (stats) => stats.total_tokens,
+      tone: "secondary",
+      format: (row) => `${formatCompact(row.value)} Token`,
+    })),
+  ));
+  children.push(h("div.grid-12", {},
+    h("div.col-8", {}, tokenBreakdownCard(points, bucketSeconds)),
+    h("div.col-4", {}, runtimeCard()),
+  ));
+
+  render(host, children);
+}
+
+// Token 构成随时间：堆叠柱，和折线看"总量趋势"互补，看"输入/输出结构变化"。
+// 图例只作颜色索引、不带数字：窗口总量已经在 KPI 与 Token 构成卡上给过，
+// 这里再算一遍（按图内桶求和）只会多出一个对不上的数字。
+function tokenBreakdownCard(points, bucketSeconds) {
+  return card(
+    cardHead("Token 构成随时间",
+      badge(rangeLabel(), "muted"),
+      badge(`${bucketLabel(bucketSeconds)}/柱`, "muted"),
+    ),
+    legend([
+      { label: "输入", tone: "primary" },
+      { label: "输出", tone: "secondary" },
+    ]),
+    h("div", { style: { marginTop: "12px" } },
+      stackedBars({ points, height: 220, bucketSeconds }),
+    ),
   );
 }
