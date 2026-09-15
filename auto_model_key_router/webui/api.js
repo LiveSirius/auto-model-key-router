@@ -27,6 +27,14 @@ export class ApiError extends Error {
   }
 }
 
+// Key 在会话中途失效（如在设置里重置了本地鉴权 Key）时，任何接口都会 401。
+// 这里统一上报，由 app.js 回到登录卡，避免各页面把 401 当成业务错误缓存下来。
+let unauthorizedHandler = null;
+
+export function onUnauthorized(handler) {
+  unauthorizedHandler = handler;
+}
+
 function detailText(payload, status) {
   if (payload && typeof payload === "object") {
     const d = payload.detail;
@@ -65,6 +73,7 @@ async function request(path, { method = "GET", body, auth = true } = {}) {
   }
   if (!response.ok) {
     const detail = detailText(payload, response.status);
+    if (response.status === 401 && auth && unauthorizedHandler) unauthorizedHandler();
     throw new ApiError(`AMKR 请求失败（HTTP ${response.status}）: ${detail}`, response.status, detail);
   }
   return payload;

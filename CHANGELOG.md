@@ -5,6 +5,7 @@
 ### Fixed
 
 - 修复 uv tool 安装方式的自动更新永远失败：`uv tool install "auto-model-key-router==<版本>"` 会把版本锁写进 `uv-receipt.toml`，此后 `uv tool upgrade` 认为当前环境已满足该锁，只更新依赖、不动本体，并**以退出码 0 报「Nothing to upgrade」**。更新器因此把命令误判为成功，却在版本校验中发现仍是旧版本，重试 6 次后报「更新命令在 6 次尝试后仍失败」。现更新前读取 `uv-receipt.toml`：带版本锁时改用 `uv tool install --force`（保留 `[visitor]` 等 extras）重装以清掉锁，未锁版本时仍走 `uv tool upgrade`。
+- 修复 WebUI 输入本地鉴权 Key 后仍停在「读取设置失败: AMKR 请求失败（HTTP 401）: 本地 API key 验证失败」：进入页面时只检查 localStorage 里「有没有 Key」就当作已授权，Key 失效（被重置或来自旧版本）时各页面仍带着错误 Key 加载，并把 401 当作业务错误缓存进模块级 `state`，此后每次重绘都重复显示同一条旧报错，且没有任何回到登录卡的入口。现在进入页面会先用一次真实请求校验 Key（只把 401 视为 Key 无效并清除，网络不通则保留 Key 并提示服务未运行），未授权时整壳只渲染登录卡、页面模块不再加载；提交的 Key 会先校验成功才保存并整页重载，校验失败会就地提示且不写入 localStorage；会话中途 Key 失效（如重置本地鉴权 Key）时会回到登录卡并说明原因。健康轮询不再重建登录卡节点，避免清空已粘贴一半的 Key。
 
 ## [4.0.3] - 2026-09-15
 

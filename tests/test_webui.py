@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import TypeVar
 
 import anyio
 import httpx
+import pytest
 from fastapi import FastAPI
 
 from auto_model_key_router.app import create_app
@@ -119,3 +122,48 @@ def test_webui_status_separates_intent_from_mount_state(tmp_path: Path) -> None:
     assert running["webui_enabled"] is True
     assert running["webui_mounted"] is True
     assert running["webui_path"] == "/ui"
+
+
+# —— 前端鉴权流程回归 ——
+# 曾经的问题：localStorage 里存着失效 Key 时，app.js 只判断"有没有 Key"就认为已授权，
+# 各页面于是带着 401 加载并把报错缓存进模块级 state，界面永远停在
+# "读取设置失败: AMKR 请求失败（HTTP 401）"，且没有任何回到登录卡的路径。
+# 这些行为只在浏览器里体现，所以用 node 直接驱动真实的 webui 模块来锁住。
+
+PROBE = Path(__file__).with_name("webui_auth_probe.mjs")
+
+PROBE_SCENARIOS = [
+    "stale_key_prompts_login",
+    "no_key_prompts_login",
+    "valid_key_renders_page",
+    "wrong_key_submit_shows_error",
+    "correct_key_submit_reloads",
+    "mid_session_401_returns_to_login",
+    "login_input_survives_health_poll",
+    "auth_disabled_no_login",
+]
+
+
+def _node_executable() -> str | None:
+    return shutil.which("node")
+
+
+@pytest.mark.parametrize("scenario", PROBE_SCENARIOS)
+def test_webui_auth_flow(scenario: str) -> None:
+    node = _node_executable()
+    if node is None:
+        pytest.skip("未安装 node，跳过 WebUI 前端鉴权流程校验")
+
+    result = subprocess.run(
+        [node, str(PROBE), scenario],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        cwd=str(PROBE.parent),
+    )
+    assert result.returncode == 0, (
+        f"{scenario} 失败：\nstdout: {result.stdout}\nstderr: {result.stderr}"
+    )
+    payload = json.loads(result.stdout.strip().splitlines()[-1])
+    assert payload["failed"] == [], f"{scenario} 未通过的断言: {payload['failed']}"
+

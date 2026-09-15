@@ -2,8 +2,8 @@
 // 轮询节奏对齐 Keyloom：健康 5s、指标 15s（活动页 2s）。
 
 import { h, mount, errorText } from "./dom.js";
-import { api, getKey, setKey, ApiError } from "./api.js";
-import { installToastHost, notice, buttonNode, input, field, empty } from "./ui.js";
+import { api, setKey, ApiError, onUnauthorized } from "./api.js";
+import { installToastHost, notice, buttonNode, input, field, empty, render } from "./ui.js";
 
 import { renderOverview } from "./pages/overview.js";
 import { renderActivity } from "./pages/activity.js";
@@ -70,7 +70,7 @@ export function ctx() {
   };
 }
 
-async function loadHealth() {
+async function fetchHealth() {
   try {
     store.health = await api.health();
     store.connectionError = null;
@@ -78,7 +78,28 @@ async function loadHealth() {
     store.health = null;
     store.connectionError = errorText(error);
   }
+}
+
+async function loadHealth() {
+  await fetchHealth();
   renderShell();
+}
+
+// localStorage 里有 Key 不代表 Key 可用（可能已被重置或来自旧版本），必须实际请求一次。
+// 返回值区分"未授权"与"连不上"，前者才清掉本地 Key，避免网络抖动误删有效 Key。
+async function verifyAccess() {
+  if (!store.health?.local_auth_enabled) return "ok";
+  try {
+    await api.settings();
+    return "ok";
+  } catch (error) {
+    return error instanceof ApiError && error.isUnauthorized ? "unauthorized" : "unreachable";
+  }
+}
+
+// 未授权时整壳只渲染登录卡，页面模块不会带着错误 Key 加载并缓存 401，授权后自然是干净状态。
+function requiresKey() {
+  return Boolean(store.health?.local_auth_enabled) && !store.authorized;
 }
 
 async function loadMetrics(force = false) {
@@ -169,6 +190,10 @@ export function requiresCompatible(page, children) {
 
 function renderContent() {
   if (!contentHost) return;
+  if (requiresKey()) {
+    mount(contentHost, loginCard());
+    return;
+  }
   const page = currentPage();
   try {
     const node = page.render(ctx());
@@ -178,42 +203,83 @@ function renderContent() {
   }
 }
 
-function askLogin(message) {
+// 复用同一个节点：健康轮询会整壳重绘，新建节点会让用户已粘贴一半的 Key 消失。
+let loginNode = null;
+let loginError = null;
+
+function loginCard() {
+  if (loginNode) return loginNode;
   const keyInput = input({ type: "password", placeholder: "粘贴本地鉴权 Key", autocomplete: "off" });
-  const node = h("div.stack", {},
-    notice(message || "管理接口需要本地鉴权 Key。可在终端执行 amkr --show-api-key 获取。", "info"),
-    field("本地鉴权 Key", keyInput),
-  );
+  const errorHost = h("div");
   const submit = async () => {
-    setKey(keyInput.value.trim());
+    const value = keyInput.value.trim();
+    if (!value) {
+      render(errorHost, notice("请先填写本地鉴权 Key。", "warn"));
+      return;
+    }
+    setKey(value);
+    const status = await verifyAccess();
+    if (status !== "ok") {
+      setKey("");
+      store.authorized = false;
+      render(errorHost, notice(
+        status === "unauthorized"
+          ? "本地鉴权 Key 无效，请重新核对后重试。可在终端执行 amkr --show-api-key 获取。"
+          : "无法连接 AMKR 服务，请确认服务正在运行。",
+        "error",
+      ));
+      return;
+    }
     store.authorized = true;
     store.connectionError = null;
-    await loadHealth();
-    await loadMetrics(true);
-    renderShell();
+    loginNode = null;
+    // ponytail: 各页面模块的 state 是模块级缓存，重新鉴权后可能残留旧数据与旧
+    // config_revision（保存会 409）。整页重载是最省事且确定干净的收尾。
+    location.reload();
   };
   keyInput.addEventListener("keydown", (event) => { if (event.key === "Enter") submit(); });
-  mount(contentHost, h("div.card", {}, h("div.card-head", h("h3", "连接到 AMKR")), node,
+  loginNode = h("div.card", {}, h("div.card-head", h("h3", "连接到 AMKR")),
+    h("div.stack", {},
+      notice(loginError || "管理接口需要本地鉴权 Key。可在终端执行 amkr --show-api-key 获取。", "info"),
+      field("本地鉴权 Key", keyInput),
+      errorHost,
+    ),
     h("div.btn-row", { style: { marginTop: "16px" } },
       buttonNode("连接", { onClick: submit }),
-    )));
+    ));
+  return loginNode;
 }
 
+function askLogin(message) {
+  loginError = message || null;
+  if (loginNode) loginNode = null;
+  store.authorized = false;
+  renderShell();
+}
 async function boot() {
   root = document.getElementById("root");
   installToastHost(root);
   store.page = currentPage().id;
 
-  await loadHealth();
-  if (store.health?.local_auth_enabled && !getKey()) {
-    store.authorized = false;
-    renderShell();
-    askLogin();
-  } else {
-    store.authorized = true;
-    await loadMetrics(true);
-    renderShell();
+  // 已在登录卡上时 401 由 submit 自己处理错误提示，这里只管会话中途失效的情况。
+  onUnauthorized(() => { if (store.authorized) askLogin("本地鉴权 Key 已失效，请重新输入。"); });
+
+  await fetchHealth();
+  if (store.health?.local_auth_enabled) {
+    // 有 Key 也要先验证：失效的 Key 会让每个页面都缓存 401 报错，而不是回到登录卡。
+    const status = await verifyAccess();
+    if (status !== "ok") {
+      if (status === "unauthorized") setKey("");
+      store.authorized = false;
+      loginError = status === "unreachable" ? "无法连接 AMKR 服务，请确认服务正在运行。" : null;
+      renderShell();
+      scheduleTimers();
+      return;
+    }
   }
+  store.authorized = true;
+  renderShell();
+  await loadMetrics(true);
   scheduleTimers();
 
   window.addEventListener("hashchange", () => {
