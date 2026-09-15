@@ -46,6 +46,7 @@ make_output_utf8_safe()
 ROOT = Path(__file__).resolve().parents[1]
 PYPROJECT_PATH = ROOT / "pyproject.toml"
 CHANGELOG_PATH = ROOT / "CHANGELOG.md"
+UV_LOCK_PATH = ROOT / "uv.lock"
 console = Console()
 error_console = Console(stderr=True)
 VERSION_PATTERN = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)(?:(?P<pre>a|b|rc)(?P<pre_num>\d+))?(?:\.post(?P<post>\d+))?(?:\.dev(?P<dev>\d+))?$")
@@ -91,6 +92,32 @@ TRANSIENT_FILE_LOCK_MARKERS = (
     "[WinError 5]",
     "[WinError 32]",
 )
+# 推送/拉取远端时的连接类失败。代理异常与网络抖动都落在这里：前者先绕过代理，
+# 后者靠退避重试。注意 schannel 的握手失败报文里既没有 "proxy" 也没有 "127.0.0.1"，
+# 只按代理关键字判断会漏掉它 —— 这正是发布卡在最后一步的原因。
+CONNECTIVITY_FAILURE_MARKERS = (
+    "proxy",
+    "127.0.0.1",
+    "schannel",
+    "ssl",
+    "tls",
+    "handshake",
+    "unable to access",
+    "failed to connect",
+    "connection refused",
+    "connection reset",
+    "connection timed out",
+    "could not resolve host",
+    "operation timed out",
+)
+# 推送的整体尝试次数（每次都可能再补一次"绕过代理"）。
+PUSH_ATTEMPTS = 3
+
+
+def _git_failure_text(result: subprocess.CompletedProcess[str] | None) -> str:
+    if result is None:
+        return ""
+    return f"{result.stdout or ''}\n{result.stderr or ''}".lower()
 
 
 def info(message: str) -> None:
@@ -265,6 +292,31 @@ def write_project_version(version: str, path: Path = PYPROJECT_PATH) -> None:
     if count != 1:
         raise RuntimeError("无法更新 pyproject.toml 中的 version 字段。")
     path.write_text(updated, encoding="utf-8")
+
+
+def write_locked_version(version: str, path: Path = UV_LOCK_PATH) -> None:
+    """同步 uv.lock 里本项目自己的版本号。
+
+    uv 把根项目也当作一个 package 写进 uv.lock。发布只改 pyproject 时，lock 里的版本
+    会停在旧值：tag 上的 pyproject 是 4.1.0、uv.lock 却写着 4.0.3，而且之后任何
+    `uv run` 都会把它改回来，于是工作区永远脏一块。
+
+    这里直接改那一行，而不是跑 `uv lock`：只有根项目版本变了，依赖解析结果不变，
+    跑 uv lock 反而要联网、可能因索引不可达而失败。找不到条目就静默跳过（不是 uv
+    项目，或 lock 格式变了）—— 不猜、不误改依赖的版本号。
+    """
+    if not path.exists():
+        return
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    for index, line in enumerate(lines):
+        if line.strip() != 'name = "auto-model-key-router"':
+            continue
+        for offset in range(1, 4):  # version 紧跟 name，留一点余量
+            target = index + offset
+            if target < len(lines) and lines[target].startswith("version = "):
+                lines[target] = f'version = "{version}"\n'
+                path.write_text("".join(lines), encoding="utf-8")
+                return
 
 
 def next_prerelease(current: ParsedVersion, phase: str) -> str:
@@ -522,15 +574,45 @@ def tag_exists(tag: str, remote: str, no_proxy: bool) -> bool:
 
 
 def push_with_proxy_fallback(args: Sequence[str], no_proxy: bool) -> None:
-    result = run_git(args, capture=True, check=False, no_proxy=no_proxy)
-    if result.returncode == 0:
-        return
-    output = f"{result.stdout}\n{result.stderr}"
-    if not no_proxy and ("127.0.0.1" in output or "proxy" in output.lower()):
-        warning("检测到 Git 代理连接异常，临时绕过代理重试。")
-        run_git(args, capture=True, no_proxy=True)
-        return
-    raise SystemExit(result.returncode)
+    """推送，并处理两类可自愈的失败。
+
+    1) 代理/经代理的 TLS 握手异常 → 临时绕过代理再试一次；
+    2) 纯网络抖动 → 退避后重试。
+
+    背景：原来只在错误文本里出现 "proxy" 或 "127.0.0.1" 时才绕过代理，而
+    `schannel: failed to receive handshake, SSL/TLS connection failed` 两者都不含，
+    于是既不绕代理、也不重试 —— 一次瞬时抖动就把整个发布卡在最后一步，而提交和
+    标签已经建好，留下「已提交已打标签、但没推上去」的半成品状态。
+    """
+    delay = 1.0
+    last: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(PUSH_ATTEMPTS):
+        result = run_git(args, capture=True, check=False, no_proxy=no_proxy)
+        if result.returncode == 0:
+            return
+        last = result
+        text = _git_failure_text(result)
+        if not any(marker in text for marker in CONNECTIVITY_FAILURE_MARKERS):
+            # 不是连接问题（例如鉴权被拒），重试和绕代理都没意义。
+            break
+        if not no_proxy:
+            warning("检测到 Git 代理/TLS 连接异常，临时绕过代理重试。")
+            direct = run_git(args, capture=True, check=False, no_proxy=True)
+            if direct.returncode == 0:
+                return
+            last = direct
+            no_proxy = True  # 直连也失败，后面就别再绕回代理了
+            if not any(marker in _git_failure_text(direct) for marker in CONNECTIVITY_FAILURE_MARKERS):
+                break
+        if attempt == PUSH_ATTEMPTS - 1:
+            break
+        warning(f"推送遇到瞬时网络错误，{delay:.0f}s 后重试（{attempt + 1}/{PUSH_ATTEMPTS}）。")
+        time.sleep(delay)
+        delay *= 2
+    raise SystemExit(
+        f"推送失败（已尝试 {PUSH_ATTEMPTS} 次，含代理与直连）。\n"
+        f"{(_git_failure_text(last) if last else '')}".strip()
+    )
 
 
 def verify_dist(version: str) -> None:
@@ -635,8 +717,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             if not args.yes:
                 notes = prompt_edit_notes(notes)
     write_project_version(next_version)
+    write_locked_version(next_version)
     update_changelog(next_version, date.today().isoformat(), notes)
-    success("已更新 pyproject.toml 和 CHANGELOG.md")
+    success("已更新 pyproject.toml、uv.lock 和 CHANGELOG.md")
     if not args.skip_build:
         step(STEP_TITLES["build"])
         remove_stale_egg_info()

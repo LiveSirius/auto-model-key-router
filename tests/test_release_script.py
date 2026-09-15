@@ -317,3 +317,121 @@ def test_remove_stale_egg_info_deletes_build_artifacts(tmp_path, monkeypatch) ->
 
     assert not stale.exists()
     assert (tmp_path / "unrelated").exists(), "只清 egg-info，不能误删其它目录"
+
+
+# —— uv.lock 里的根项目版本 ——
+# uv 把根项目也写进 uv.lock，而发布原先只改 pyproject。结果 tag 上 pyproject 是 4.1.0、
+# uv.lock 还是 4.0.3，且之后任何 `uv run` 都会改回来，工作区永远脏一块。
+
+LOCK_SAMPLE = """\
+version = 1
+
+[[package]]
+name = "fastapi"
+version = "4.13.0"
+
+[[package]]
+name = "auto-model-key-router"
+version = "4.0.3"
+source = { editable = "." }
+
+[[package]]
+name = "httpx"
+version = "0.28.1"
+"""
+
+
+def test_write_locked_version_updates_root_project_only(tmp_path) -> None:
+    lock = tmp_path / "uv.lock"
+    lock.write_text(LOCK_SAMPLE, encoding="utf-8")
+
+    release_script.write_locked_version("4.1.0", path=lock)
+
+    text = lock.read_text(encoding="utf-8")
+    assert 'name = "auto-model-key-router"\nversion = "4.1.0"' in text
+    # 依赖的版本号不能被误改
+    assert 'name = "fastapi"\nversion = "4.13.0"' in text
+    assert 'name = "httpx"\nversion = "0.28.1"' in text
+    assert 'version = "4.0.3"' not in text
+
+
+def test_write_locked_version_without_lock_file_is_noop(tmp_path) -> None:
+    """不是 uv 项目（没有 uv.lock）时应静默跳过，而不是报错中断发布。"""
+    missing = tmp_path / "uv.lock"
+    release_script.write_locked_version("4.1.0", path=missing)
+    assert not missing.exists()
+
+
+# —— 推送失败的处理 ——
+# 线上故障：schannel 握手失败（报文里既没有 "proxy" 也没有 "127.0.0.1"），
+# 老逻辑既不绕过代理也不重试，直接在最后一步中止发布。
+
+
+def _fake_git(monkeypatch, script: list[tuple[int, str]]) -> list[tuple[list[str], bool]]:
+    """让 run_git 按预设序列返回结果，并记录每次调用的参数与 no_proxy 标志。
+
+    必须连 no_proxy 一起记：真实的 run_git 会在 no_proxy=True 时插入
+    `-c http.proxy=`，而这里替换掉了整个 run_git，只看 args 是看不出差别的。
+    """
+    calls: list[tuple[list[str], bool]] = []
+
+    def fake_run_git(args, *, no_proxy: bool = False, **_kwargs):
+        index = min(len(calls), len(script) - 1)
+        calls.append((list(args), no_proxy))
+        returncode, output = script[index]
+        return subprocess.CompletedProcess(list(args), returncode, output, "")
+
+    monkeypatch.setattr(release_script, "run_git", fake_run_git)
+    return calls
+
+
+SCHANNEL_ERROR = (
+    "fatal: unable to access 'https://github.com/x/y.git/': "
+    "schannel: failed to receive handshake, SSL/TLS connection failed"
+)
+
+
+def test_push_retries_transient_network_failure(monkeypatch) -> None:
+    """瞬时握手失败必须退避重试，而不是一次就放弃。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    calls = _fake_git(monkeypatch, [(1, SCHANNEL_ERROR), (1, SCHANNEL_ERROR), (0, "")])
+
+    release_script.push_with_proxy_fallback(["push", "origin", "master"], no_proxy=False)
+
+    assert len(calls) == 3
+
+
+def test_push_bypasses_proxy_on_tls_failure(monkeypatch) -> None:
+    """经代理握手失败 → 绕过代理重试一次；成功即收工。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    calls = _fake_git(monkeypatch, [(1, SCHANNEL_ERROR), (0, "")])
+
+    release_script.push_with_proxy_fallback(["push", "origin", "master"], no_proxy=False)
+
+    assert len(calls) == 2
+    assert calls[0][1] is False, "第一次应先走用户配置的代理"
+    assert calls[1][1] is True, "第二次必须绕过代理"
+
+
+def test_push_does_not_retry_non_connectivity_failure(monkeypatch) -> None:
+    """鉴权被拒之类的错误不该重试，也不该白试一次直连。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    calls = _fake_git(monkeypatch, [(1, "remote: Permission denied (403)")])
+
+    with pytest.raises(SystemExit):
+        release_script.push_with_proxy_fallback(["push", "origin", "master"], no_proxy=False)
+
+    assert len(calls) == 1
+
+
+def test_push_gives_up_after_attempts(monkeypatch) -> None:
+    """一直不通就如实报错退出，并把最后一次的错误正文带上。"""
+    monkeypatch.setattr(release_script.time, "sleep", lambda _seconds: None)
+    calls = _fake_git(monkeypatch, [(1, SCHANNEL_ERROR)])
+
+    with pytest.raises(SystemExit) as excinfo:
+        release_script.push_with_proxy_fallback(["push", "origin", "master"], no_proxy=False)
+
+    assert "schannel" in str(excinfo.value), "报错要保留原始正文，便于判断是网络还是鉴权"
+    assert len(calls) == release_script.PUSH_ATTEMPTS + 1, "重试 PUSH_ATTEMPTS 轮，首轮额外试一次直连"
+    assert calls[0][1] is False and calls[1][1] is True
