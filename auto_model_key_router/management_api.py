@@ -75,6 +75,7 @@ class ModelCreate(APIModel):
     config_revision: str | None = Field(default=None, min_length=1)
     id: str = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
+    hidden_aliases: list[str] = Field(default_factory=list)
     routing_mode: str = "round_robin"
     reasoning_effort: str | None = None
     keys: list[KeyCreate] = Field(default_factory=list)
@@ -83,6 +84,7 @@ class ModelCreate(APIModel):
 class ModelUpdate(APIModel):
     id: str | None = Field(default=None, min_length=1)
     aliases: list[str] | None = None
+    hidden_aliases: list[str] | None = None
     routing_mode: str | None = None
     reasoning_effort: str | None = None
 
@@ -148,6 +150,7 @@ class RouteCreate(RevisionPayload):
     id: str = Field(min_length=1)
     targets: list[dict[str, str]] = Field(min_length=1)
     aliases: list[str] = Field(default_factory=list)
+    hidden_aliases: list[str] = Field(default_factory=list)
     routing_mode: str | None = None
 
 
@@ -155,6 +158,7 @@ class RouteUpdate(RevisionPayload):
     id: str | None = Field(default=None, min_length=1)
     targets: list[dict[str, str]] | None = None
     aliases: list[str] | None = None
+    hidden_aliases: list[str] | None = None
     routing_mode: str | None = None
 
 
@@ -486,6 +490,7 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
                 data,
                 payload.id,
                 aliases=list(route.get("aliases") or []),
+                hidden_aliases=list(route.get("hidden_aliases") or []),
                 routing_mode=str(route.get("routing_mode") or "round_robin"),
                 targets=list(route["targets"]),
             )
@@ -505,6 +510,7 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
                 route_id,
                 new_id=updates.get("id"),
                 aliases=updates.get("aliases"),
+                hidden_aliases=updates.get("hidden_aliases"),
                 routing_mode=updates.get("routing_mode"),
                 targets=updates.get("targets"),
             )
@@ -753,6 +759,7 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
                 data,
                 str(model_data["id"]),
                 aliases=list(model_data.get("aliases") or []),
+                hidden_aliases=list(model_data.get("hidden_aliases") or []),
                 routing_mode=str(model_data.get("routing_mode") or "round_robin"),
                 reasoning_effort=model_data.get("reasoning_effort"),
                 keys=list(model_data.get("keys") or []),
@@ -796,6 +803,7 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
                 model_id,
                 new_id=updates.get("id"),
                 aliases=updates.get("aliases"),
+                hidden_aliases=updates.get("hidden_aliases"),
                 routing_mode=updates.get("routing_mode"),
                 reasoning_effort=updates.get("reasoning_effort"),
                 update_reasoning_effort="reasoning_effort" in updates,
@@ -1180,11 +1188,15 @@ def _key_create_data(payload: KeyCreate) -> dict[str, Any]:
 
 
 def _normalize_model_updates(data: dict[str, Any]) -> None:
-    _reject_null_fields(data, "id", "aliases", "routing_mode")
+    _reject_null_fields(data, "id", "aliases", "hidden_aliases", "routing_mode")
     if "id" in data and data["id"] is not None:
         data["id"] = str(data["id"]).strip()
     if "aliases" in data and data["aliases"] is not None:
         data["aliases"] = [str(alias).strip() for alias in data["aliases"]]
+    if "hidden_aliases" in data and data["hidden_aliases"] is not None:
+        data["hidden_aliases"] = [
+            str(alias).strip() for alias in data["hidden_aliases"]
+        ]
     if "routing_mode" in data and data["routing_mode"] is not None:
         data["routing_mode"] = str(data["routing_mode"]).strip()
     if "reasoning_effort" in data and data["reasoning_effort"] is not None:
@@ -1240,6 +1252,7 @@ def _management_editable_config_data(data: dict[str, Any]) -> dict[str, Any]:
         {
             "id": model.id,
             "aliases": list(model.aliases),
+            "hidden_aliases": list(model.hidden_aliases),
             "routing_mode": model.routing_mode,
             "reasoning_effort": model.reasoning_effort,
             "native_first": model.native_first,
@@ -1275,6 +1288,17 @@ def _model_response(model: ModelConfig) -> dict[str, Any]:
     return {
         "id": model.id,
         "aliases": list(model.aliases),
+        "hidden_aliases": list(model.hidden_aliases),
+        # 除手写隐藏别名外，targets 的上游名同样可直接调用但不列出，一并回显便于排查。
+        "auto_hidden_aliases": sorted(
+            {
+                key.upstream_model
+                for key in model.keys
+                if key.upstream_model
+                and key.upstream_model not in {model.id, *model.aliases}
+                and key.upstream_model not in model.hidden_aliases
+            }
+        ),
         "routing_mode": model.routing_mode,
         "reasoning_effort": model.reasoning_effort,
         "visitor_available": any(

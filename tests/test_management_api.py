@@ -998,6 +998,87 @@ def test_model_and_key_crud_persist_and_hot_reload_visitor_access(
     assert "sk-secret-b" not in updated_key.text
 
 
+def test_hidden_aliases_are_managed_and_reported(tmp_path: Path) -> None:
+    app, path = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient) -> list[httpx.Response]:
+        return [
+            await client.post(
+                "/api/models",
+                headers=AUTH_HEADERS,
+                json={
+                    "id": "model-b",
+                    "aliases": ["alias-b"],
+                    "hidden_aliases": ["deepseek-v4.1-flash"],
+                    "keys": [
+                        {
+                            "name": "main",
+                            "api_key": "sk-b",
+                            "base_url": "https://b.example.test",
+                        }
+                    ],
+                },
+            ),
+            await client.put(
+                "/api/models/model-a",
+                headers=AUTH_HEADERS,
+                json={"hidden_aliases": ["legacy-name"]},
+            ),
+            await client.get("/api/models/model-a", headers=AUTH_HEADERS),
+            # 撞名必须被拒。
+            await client.put(
+                "/api/models/model-a",
+                headers=AUTH_HEADERS,
+                json={"hidden_aliases": ["deepseek-v4.1-flash"]},
+            ),
+        ]
+
+    created, updated, read, conflict = run_client(app, requests)
+
+    assert created.status_code == 201
+    assert created.json()["hidden_aliases"] == ["deepseek-v4.1-flash"]
+    assert updated.status_code == 200
+    assert updated.json()["hidden_aliases"] == ["legacy-name"]
+    assert read.json()["hidden_aliases"] == ["legacy-name"]
+    assert conflict.status_code == 409
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["models"]["model-a"]["hidden_aliases"] == ["legacy-name"]
+    assert saved["models"]["model-b"]["hidden_aliases"] == ["deepseek-v4.1-flash"]
+
+
+def test_model_response_reports_upstream_names_as_auto_hidden_aliases(
+    tmp_path: Path,
+) -> None:
+    """各 target 的上游模型名自动成为隐藏别名，并在响应里回显。"""
+    app, _ = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient) -> httpx.Response:
+        current = await client.get("/api/models/model-a", headers=AUTH_HEADERS)
+        await client.put(
+            "/api/routes/model-a",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": current.json()["config_revision"],
+                "targets": [
+                    {
+                        "provider": "a.example.test",
+                        "key": "key-a",
+                        "upstream_model": "vendor-name",
+                    }
+                ],
+                "hidden_aliases": ["manual-name"],
+            },
+        )
+        return await client.get("/api/models/model-a", headers=AUTH_HEADERS)
+
+    read = run_client(app, requests)
+
+    assert read.status_code == 200
+    assert read.json()["hidden_aliases"] == ["manual-name"]
+    assert read.json()["auto_hidden_aliases"] == ["vendor-name"]
+
+
 def test_key_update_preserves_secret_and_last_key_deletion_cascades(
     tmp_path: Path,
 ) -> None:
