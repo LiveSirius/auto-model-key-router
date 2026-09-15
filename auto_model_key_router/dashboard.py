@@ -904,10 +904,22 @@ def config_renderables(config: RouterConfig, path: Path) -> tuple[Any, ...]:
     table = Table(show_lines=False, box=box.SIMPLE_HEAVY, expand=True)
     table.add_column("模型 ID", style="cyan", ratio=2)
     table.add_column("别名")
+    table.add_column("隐藏别名")
     table.add_column("路由模式")
     table.add_column("Keys", justify="right", style="green")
     for model in config.models:
         display_names = "\n".join(model.aliases) if model.aliases else "-"
+        # 自动推导的隐藏名即上游模型名，这里只报个数，避免面板暴露上游细节。
+        auto_hidden = {
+            key.upstream_model
+            for key in model.keys
+            if key.upstream_model
+            and key.upstream_model not in {model.id, *model.aliases}
+            and key.upstream_model not in model.hidden_aliases
+        }
+        hidden_text = ", ".join(model.hidden_aliases) if model.hidden_aliases else ""
+        if auto_hidden:
+            hidden_text = f"{hidden_text} +{len(auto_hidden)} 自动".strip()
         routing_mode = {
             "round_robin": "分流",
             "priority": "优先级",
@@ -916,11 +928,12 @@ def config_renderables(config: RouterConfig, path: Path) -> tuple[Any, ...]:
         table.add_row(
             short_text(model.id, 28),
             short_text(display_names, 24),
+            short_text(hidden_text or "-", 24),
             routing_mode,
             str(len(model.keys)),
         )
     if not config.models:
-        table.add_row("未配置", "-", "-", "0")
+        table.add_row("未配置", "-", "-", "-", "0")
     renderables = [section_panel(summary, "运行概览", "cyan")]
     if warning is not None:
         renderables.append(warning)

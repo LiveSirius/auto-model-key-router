@@ -285,6 +285,32 @@ def model_targets(model: dict[str, Any]) -> list[dict[str, Any]]:
     return operations.model_targets(model)
 
 
+def hidden_aliases_text(model_id: str, model: dict[str, Any]) -> str:
+    """隐藏别名单元格：手写的直接列名，自动推导的只报个数。
+
+    自动推导的名字就是各 target 的上游模型名，这里不展开，以免这些面板重新暴露
+    上游细节（见 test_v2_summary_model_section_focuses_on_mapping）。
+    """
+    visible = {str(model_id)}
+    visible.update(str(alias) for alias in model.get("aliases", []) if str(alias))
+    explicit = [
+        str(alias)
+        for alias in model.get("hidden_aliases", [])
+        if str(alias) and str(alias) not in visible
+    ]
+    auto = {
+        str(target.get("upstream_model"))
+        for target in model_targets(model)
+        if target.get("upstream_model")
+        and str(target.get("upstream_model")) not in visible
+        and str(target.get("upstream_model")) not in explicit
+    }
+    parts = [", ".join(explicit)] if explicit else []
+    if auto:
+        parts.append(f"+{len(auto)} 自动")
+    return " ".join(parts) or "-"
+
+
 def v2_summary_panel(data: dict[str, Any]) -> Any:
     providers = raw_providers(data)
     models = raw_v2_models(data)
@@ -320,18 +346,21 @@ def v2_summary_panel(data: dict[str, Any]) -> Any:
     model_table = Table(show_header=True, header_style="bold cyan", expand=True)
     model_table.add_column("本地模型", ratio=2)
     model_table.add_column("别名", ratio=2)
+    model_table.add_column("隐藏别名", ratio=2)
     model_table.add_column("路由模式", ratio=1)
     model_table.add_column("Keys", justify="right")
     for model_id, model in sorted(models.items()):
         aliases = ", ".join(str(alias) for alias in model.get("aliases", []) if str(alias))
+        hidden = hidden_aliases_text(model_id, model)
         model_table.add_row(
             short_text(str(model_id), 28),
             short_text(aliases or "-", 36),
+            short_text(hidden or "-", 36),
             str(model.get("routing_mode") or "round_robin"),
             str(len(model_targets(model))),
         )
     if not model_table.rows:
-        model_table.add_row("-", "-", "-", "0")
+        model_table.add_row("-", "-", "-", "-", "0")
     return Group(
         section_panel(provider_table, "供应商 Key", "cyan"),
         section_panel(model_table, "模型设置", "magenta"),
@@ -1038,10 +1067,11 @@ def manage_v2_model_settings_interactively(path: Path) -> None:
             f"模型设置 · {short_text(model_id, 28)}",
             [
                 ("1", "别名"),
-                ("2", "路由模式"),
-                ("3", "管理 Key"),
-                ("4", "绑定 Key"),
-                ("5", "删除模型"),
+                ("2", "隐藏别名"),
+                ("3", "路由模式"),
+                ("4", "管理 Key"),
+                ("5", "绑定 Key"),
+                ("6", "删除模型"),
                 ("0", "返回"),
             ],
             content=model_key_targets_panel(data, model_id),
@@ -1049,20 +1079,20 @@ def manage_v2_model_settings_interactively(path: Path) -> None:
         if choice == "0":
             continue
         clear_terminal_history()
-        if choice in {"1", "2"}:
+        if choice in {"1", "2", "3"}:
             result = update_v2_model_settings_interactively(path, model_id, choice)
-        elif choice == "3":
+        elif choice == "4":
             run_submodule(lambda: manage_model_routes_interactively(path, model_id))
             continue
-        elif choice == "4":
-            result = run_submodule(lambda: add_model_route_interactively(path, model_id))
         elif choice == "5":
+            result = run_submodule(lambda: add_model_route_interactively(path, model_id))
+        elif choice == "6":
             result = delete_v2_model_interactively(path, model_id)
         else:
             continue
         if result is not None:
             show_result_page("模型设置", result)
-        if choice == "5":
+        if choice == "6":
             return
 
 
@@ -1081,6 +1111,20 @@ def update_v2_model_settings_interactively(path: Path, model_id: str, choice: st
         )
         message = f"已更新 {model_id} 的别名。"
     elif choice == "2":
+        hidden_text = prompt_text(
+            "隐藏别名",
+            "可调用但不在 /v1/models 中列出，多个用逗号分隔",
+            default=", ".join(model.get("hidden_aliases") or []),
+        ).strip()
+        operations.update_model(
+            data,
+            model_id,
+            hidden_aliases=[
+                alias.strip() for alias in hidden_text.split(",") if alias.strip()
+            ],
+        )
+        message = f"已更新 {model_id} 的隐藏别名。"
+    elif choice == "3":
         current = str(model.get("routing_mode") or "round_robin")
         routing_mode = prompt_text(
             "路由模式",

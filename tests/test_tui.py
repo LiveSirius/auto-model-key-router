@@ -2134,6 +2134,92 @@ def test_delete_provider_clears_removed_unified_model_key(
     }
 
 
+def test_model_settings_hidden_alias_prompt_saves_and_clears(tmp_path, monkeypatch) -> None:
+    config_path = tmp_path / "router-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "config_version": 4,
+                "providers": {
+                    "vendor": {
+                        "base_url": "https://vendor.test",
+                        "keys": {"main": {"api_key": "sk-main"}},
+                    }
+                },
+                "models": {
+                    "local-model": {
+                        "aliases": [],
+                        "routing_mode": "round_robin",
+                        "targets": [
+                            {"provider": "vendor", "key": "main", "upstream_model": "upstream-model"}
+                        ],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    prompts: list[str] = []
+
+    def prompt(title, message, **kwargs):
+        prompts.append(title)
+        # 第一次写入隐藏别名，第二次清空。
+        return "deepseek-v4.1-flash, extra-name" if len(prompts) == 1 else ""
+
+    monkeypatch.setattr(config_editor, "prompt_text", prompt)
+    monkeypatch.setattr(
+        config_editor, "restart_service_after_config_change", lambda *args: Text("restart")
+    )
+
+    config_editor.update_v2_model_settings_interactively(config_path, "local-model", "2")
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert prompts == ["隐藏别名"]
+    assert saved["models"]["local-model"]["hidden_aliases"] == [
+        "deepseek-v4.1-flash",
+        "extra-name",
+    ]
+
+    config_editor.update_v2_model_settings_interactively(config_path, "local-model", "2")
+    saved = json.loads(config_path.read_text(encoding="utf-8"))
+    assert prompts == ["隐藏别名", "隐藏别名"]
+    assert "hidden_aliases" not in saved["models"]["local-model"]
+
+
+def test_model_settings_summary_counts_auto_hidden_names() -> None:
+    """自动推导的隐藏名只报个数，手写的才列名（面板不暴露上游细节）。"""
+    output = render_plain(
+        config_editor.v2_summary_panel(
+            {
+                "config_version": 4,
+                "providers": {
+                    "gateway": {
+                        "base_url": "https://gateway.example.test",
+                        "keys": {"main": {"api_key": "sk-main"}},
+                    }
+                },
+                "models": {
+                    "local-model": {
+                        "aliases": ["alias-model"],
+                        "hidden_aliases": ["manual-hidden"],
+                        "targets": [
+                            {
+                                "provider": "gateway",
+                                "key": "main",
+                                "upstream_model": "upstream-model",
+                            }
+                        ],
+                    }
+                },
+            }
+        )
+    )
+
+    assert "隐藏别名" in output
+    assert "manual-hidden" in output
+    assert "+1 自动" in output
+    assert "upstream-model" not in output
+
+
 def test_model_settings_menu_includes_key_binding_controls(tmp_path, monkeypatch) -> None:
     config_path = tmp_path / "router-config.json"
     config_path.write_text(
@@ -2173,10 +2259,11 @@ def test_model_settings_menu_includes_key_binding_controls(tmp_path, monkeypatch
 
     assert menus[0] == [
         ("1", "别名"),
-        ("2", "路由模式"),
-        ("3", "管理 Key"),
-        ("4", "绑定 Key"),
-        ("5", "删除模型"),
+        ("2", "隐藏别名"),
+        ("3", "路由模式"),
+        ("4", "管理 Key"),
+        ("5", "绑定 Key"),
+        ("6", "删除模型"),
         ("0", "返回"),
     ]
 
