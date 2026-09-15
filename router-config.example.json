@@ -54,13 +54,14 @@
   "models": {
     "gpt-4o-mini": {
       "aliases": ["gpt-4o-mini-display", "fast-mini"],
+      "hidden_aliases": ["mini-latest"],
       "routing_mode": "round_robin",
       "reasoning_effort": "medium",
       "targets": [
         {
           "provider": "openai",
           "key": "main",
-          "upstream_model": "gpt-4o-mini"
+          "upstream_model": "gpt-4o-mini-2024-07-18"
         }
       ]
     }

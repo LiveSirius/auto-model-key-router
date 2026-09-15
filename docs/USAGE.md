@@ -104,7 +104,7 @@ cp router-config.example.json router-config.json
 - `host` / `port`：本地监听地址和端口。
 - `local_api_key`：客户端访问本地代理时使用的鉴权 Key；留空表示不启用本地鉴权，不推荐暴露到非可信网络。
 - `providers`：供应商（含 `base_url`）及至少一个 `keys`（供应商级 API Key）。
-- `models`：真实模型列表；每个模型至少有一个 `targets[]`，通过 `{provider, key, upstream_model}` 绑定一个供应商 Key。
+- `models`：真实模型列表；每个模型至少有一个 `targets[]`，通过 `{provider, key, upstream_model}` 绑定一个供应商 Key。可选 `aliases`（会出现在 `/v1/models`）与 `hidden_aliases`（可调用但不列出，见 [3.x 同一个模型的多个名字](#同一个模型的多个名字隐藏别名)）。
 
 示例：
 
@@ -176,7 +176,7 @@ TUI 里最常用的入口：
 | --- | --- |
 | 一键配置 | 注册路由服务，或自动配置 Claude Code / Codex / Pi Agent 使用 AMKR |
 | 供应商 | 添加供应商与 Key、管理 Key、刷新能力探测（可按 Key 与端点范围）、设置 Base URL / 路由 |
-| 模型设置 | 管理模型别名、路由模式，把供应商 Key 绑定/解绑到模型、修改上游模型名 |
+| 模型设置 | 管理模型别名、隐藏别名、路由模式，把供应商 Key 绑定/解绑到模型、修改上游模型名 |
 | 统一模型 | 设置 `unified-model` 当前指向的真实模型，并选择自动路由或固定 Key |
 | CLI 设置 | 管理监听地址、端口、本地鉴权、请求超时、配置迁移、版本更新等 |
 
@@ -271,6 +271,40 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ```
 
 AMKR 会在转发给上游前把请求体里的模型名改写为真实模型 ID，并把 `Authorization` 替换成选中的上游 `api_key`。
+
+### 同一个模型的多个名字（隐藏别名）
+
+同一模型在不同地方经常叫不同名字（例如本地叫 `deepseek-flash`，别处叫 `deepseek-v4.1-flash`）。除了会出现在 `/v1/models` 里的 `aliases`，还有一类「隐藏别名」：**可以直接调用，但不会出现在 `/v1/models` 与 `/health` 中**。两种来源：
+
+1. **自动（通常不需要任何配置）**：每个 target 的 `upstream_model` 会自动成为隐藏别名。上面 `gpt-4o-mini` 的 target 上游名是 `gpt-4o-mini-2024-07-18`，于是客户端可以直接用这个名字调用，但 `/v1/models` 只列出 `gpt-4o-mini` 及其 `aliases`。绑定 Key 时填的上游模型名即是这个用途，不需要再手工登记一遍。
+2. **手动**：模型级 `hidden_aliases` 列表，用于上游名之外还想额外接受的叫法。
+
+```json
+{
+  "models": {
+    "gpt-4o-mini": {
+      "aliases": ["fast-mini"],
+      "hidden_aliases": ["mini-latest"],
+      "targets": [
+        {
+          "provider": "openai",
+          "key": "main",
+          "upstream_model": "gpt-4o-mini-2024-07-18"
+        }
+      ]
+    }
+  }
+}
+```
+
+上例中 `fast-mini`（别名）会出现在 `/v1/models`；`mini-latest`（手写隐藏别名）与 `gpt-4o-mini-2024-07-18`（上游名，自动获得隐藏别名待遇）都只可调用、不列出。
+
+规则：
+
+- 隐藏别名只在**本地调用**时生效。visitor 只能用 `amkr-{真实模型ID}`，看不到也用不了隐藏别名。
+- 名字冲突时真实模型 ID 与 `aliases` 优先；多个模型指向同一上游名时按 `models` 顺序取第一个匹配。
+- 手写的 `hidden_aliases` 参与重名校验：与任何模型 ID、`aliases` 或其他模型的手写隐藏别名冲突都会报错。
+- 在 TUI「模型设置 → 隐藏别名」或 WebUI 的模型路由页可以编辑手写隐藏别名；自动推导的部分无需维护（同步调整绑定 Key 时的上游模型名即可）。
 
 ---
 

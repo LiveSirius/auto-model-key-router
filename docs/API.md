@@ -87,7 +87,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `model` | string | 是 | 真实模型 ID、模型别名、`unified-model`、`模型[Key名称]` 或 visitor 公共模型 ID |
+| `model` | string | 是 | 真实模型 ID、模型别名、隐藏别名（如各 target 的 `upstream_model`）、`unified-model`、`模型[Key名称]` 或 visitor 公共模型 ID |
 | `stream` | boolean | 否 | 为 `true` 时使用流式响应，并自动向上游补充 `stream_options.include_usage=true` |
 | `stream_options` | object | 否 | 流式选项；服务会保留已有字段并强制加入 `include_usage=true` |
 | `reasoning_effort` | string | 否 | 推理强度；模型配置中的非空值优先级更高 |
@@ -226,7 +226,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | `status` | string | 当前为 `ok` |
-| `models` | array | 已配置的真实模型 ID 和别名 |
+| `models` | array | 已配置的真实模型 ID 和别名（不含隐藏别名） |
 | `config_path` | string | 当前配置文件绝对路径；嵌入式应用可能为空 |
 | `local_auth_enabled` | boolean | 是否设置本地鉴权 |
 | `local_api_key_fingerprint` | string | 本地 key 的 SHA-256 前 12 位 |
@@ -256,6 +256,8 @@ Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或�
 ```
 
 本地调用只返回当前有可用 Key 的真实模型、别名和已配置的 `unified-model`。visitor 只返回 `amkr-*` 公共模型 ID。
+
+隐藏别名（各 target 的 `upstream_model` 自动获得的叫法，以及模型 `hidden_aliases` 中手写的名字）可以直接调用，但不会出现在这里；见 [`docs/USAGE.md`](USAGE.md) 的「同一个模型的多个名字」。
 
 ## 调用统计
 
@@ -441,14 +443,15 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
 | 字段 | 类型 | 必填 | 默认值/约束 |
 | --- | --- | --- | --- |
 | `id` | string | 是 | 非空；不能与其他 ID 或别名重复 |
-| `aliases` | string[] | 否 | `[]`；所有模型名称必须全局唯一 |
+| `aliases` | string[] | 否 | `[]`；所有模型名称必须全局唯一；会出现在 `/v1/models` |
+| `hidden_aliases` | string[] | 否 | `[]`；可直接调用但不出现在 `/v1/models`；与任何模型 ID、`aliases` 或其他模型的手写隐藏别名重复时返回 `409` |
 | `routing_mode` | string | 否 | `round_robin`；可选 `round_robin`、`priority`、`only_first` |
 | `reasoning_effort` | string/null | 否 | 可选 `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max` |
 | `keys` | KeyCreate[] | 否 | `[]`；兼容写法：每个 Key 会在其 `base_url` 对应的供应商下创建（不存在则自动建供应商）并绑定为模型的 target。也可先创建无 Key 的模型，再通过模型 Key 接口或 `/api/routes` 补充绑定 |
 
 #### ModelUpdate
 
-字段与 ModelCreate 的模型字段相同，全部可省略，但请求中至少需要出现一个字段。`id`、`aliases`、`routing_mode` 不能为 `null`；`reasoning_effort: null` 用于清除模型级覆盖。不能通过该接口更新 `keys` 或 `targets`（使用模型 Key 接口或 `/api/routes`）。
+字段与 ModelCreate 的模型字段相同，全部可省略，但请求中至少需要出现一个字段。`id`、`aliases`、`hidden_aliases`、`routing_mode` 不能为 `null`；`reasoning_effort: null` 用于清除模型级覆盖，`hidden_aliases: []` 用于清空手写隐藏别名。不能通过该接口更新 `keys` 或 `targets`（使用模型 Key 接口或 `/api/routes`）。
 
 #### KeyCreate
 
@@ -475,6 +478,8 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
 {
   "id": "gpt-5.5",
   "aliases": ["gpt"],
+  "hidden_aliases": ["gpt-latest"],
+  "auto_hidden_aliases": ["gpt-5.5-2026-01-01"],
   "routing_mode": "round_robin",
   "reasoning_effort": "medium",
   "visitor_available": true,
@@ -514,7 +519,7 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
 | --- | --- | --- | --- |
 | `provider` | string | 是 | 供应商 ID，必须已存在 |
 | `key` | string | 是 | 该供应商下已声明的 Key 名称 |
-| `upstream_model` | string | 是 | 发送给上游的真实模型名（创建模型 Key 等交互流程默认填本地模型 ID） |
+| `upstream_model` | string | 是 | 发送给上游的真实模型名（创建模型 Key 等交互流程默认填本地模型 ID）。该名字同时会自动成为模型的隐藏别名：可直接调用，但不出现在 `/v1/models` |
 
 示例：
 
@@ -705,7 +710,7 @@ curl -X POST http://127.0.0.1:8000/api/providers/openai/keys/main/probe \
 
 ### 路由接口
 
-`/api/routes` 系列是模型路由（targets）的管理入口，与 `/api/models` 操作同一份模型数据：`POST /api/routes` 创建模型并写入 targets，`GET/PUT/DELETE /api/routes/{route_id}` 读取、整体替换或删除某模型的 targets。请求体中的 `targets` 为 RouteTarget 数组（`{provider, key, upstream_model}`），target 引用的供应商与 Key 必须已存在。v3 的 `pool` 引用已不存在于 target 中。
+`/api/routes` 系列是模型路由（targets）的管理入口，与 `/api/models` 操作同一份模型数据：`POST /api/routes` 创建模型并写入 targets，`GET/PUT/DELETE /api/routes/{route_id}` 读取、整体替换或删除某模型的 targets。请求体中的 `targets` 为 RouteTarget 数组（`{provider, key, upstream_model}`），target 引用的供应商与 Key 必须已存在。v3 的 `pool` 引用已不存在于 target 中。请求体同样支持 `aliases` 和 `hidden_aliases`（后者可直接调用但不出现在 `/v1/models`）。
 
 ```bash
 curl -X POST http://127.0.0.1:8000/api/routes \
@@ -714,6 +719,7 @@ curl -X POST http://127.0.0.1:8000/api/routes \
   -d '{
     "id": "gpt-5.5",
     "aliases": ["gpt"],
+    "hidden_aliases": ["gpt-latest"],
     "routing_mode": "round_robin",
     "targets": [
       {"provider": "openai", "key": "main", "upstream_model": "gpt-5.5"},

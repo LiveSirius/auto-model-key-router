@@ -4,6 +4,7 @@
 
 ### Added
 
+- 模型隐藏别名：同一个模型可以在多个名字下调用，但只有本地模型 ID 和 `aliases` 会出现在 `/v1/models` 与 `/health` 中。两种来源：① 自动——每个 target 的 `upstream_model`（上游叫法）自动成为可直接调用的名字，无需逐个登记；② 手动——模型可配置 `hidden_aliases` 列表。隐藏名与真实 ID/别名冲突时以真实名优先；手写的隐藏别名参与重名校验（与模型 ID、`aliases` 及其他模型的隐藏别名冲突都会报错）。管理 API（`/api/models`、`/api/routes`）新增 `hidden_aliases` 字段并在模型响应中额外返回 `auto_hidden_aliases`（自动推导的名字，便于排查）；TUI 模型设置新增「隐藏别名」菜单项，WebUI 模型路由页新增隐藏别名输入框。
 - 可选启用的内置 WebUI：资产随软件包一起发布（无构建步骤、无额外依赖），通过配置字段 `webui_enabled` 或 `--webui` / `--no-webui` 启用，也可在 TUI「CLI 设置 → WebUI」中切换；启用后访问 `http://<host>:<port>/ui/`。未启用或资产缺失时 `/ui` 返回 `404`，不影响其他接口。
 - 运维 API（均需本地鉴权）：`GET /api/logs`（读取日志尾部）、`GET /api/tool` 与 `POST /api/tool/webui`（版本检查与 WebUI 开关）、`POST /api/service/{action}`（服务启停与自启注册）、`GET /api/integrations`、`POST /api/integrations/{agent}` 与 `POST /api/integrations/{agent}/rollback`（Claude Code / Codex / Pi Agent 接管与回退）。`/health` 新增 `webui_available`、`webui_enabled`、`webui_mounted`、`webui_path` 四个字段。
 - WebUI 是预构建的静态资产（原生 ES 模块 + 手写 Material Design 样式），随 wheel 通过 `package-data` 发布，运行时不需要 Node.js。
