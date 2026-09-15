@@ -127,7 +127,7 @@ def test_webui_status_separates_intent_from_mount_state(tmp_path: Path) -> None:
 # —— 前端鉴权流程回归 ——
 # 曾经的问题：localStorage 里存着失效 Key 时，app.js 只判断"有没有 Key"就认为已授权，
 # 各页面于是带着 401 加载并把报错缓存进模块级 state，界面永远停在
-# "读取设置失败: AMKR 请求失败（HTTP 401）"，且没有任何回到登录卡的路径。
+# "读取设置失败: AMKR 请求失败（HTTP 401）"，且没有任何回到验证页的路径。
 # 这些行为只在浏览器里体现，所以用 node 直接驱动真实的 webui 模块来锁住。
 
 PROBE = Path(__file__).with_name("webui_auth_probe.mjs")
@@ -141,6 +141,8 @@ PROBE_SCENARIOS = [
     "mid_session_401_returns_to_login",
     "login_input_survives_health_poll",
     "auth_disabled_no_login",
+    "deeplink_without_key_stays_on_login",
+    "unreachable_service_stays_on_login",
 ]
 
 

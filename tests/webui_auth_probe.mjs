@@ -105,6 +105,7 @@ global.fetch = async (url, options = {}) => {
   const bearer = (headers.Authorization || "").replace(/^Bearer /, "");
   server.requests.push({ url, bearer });
 
+  if (server.offline) throw new TypeError("fetch failed");
   if (url === "/health") {
     return respond(200, {
       status: "ok",
@@ -138,6 +139,7 @@ function findAll(node, predicate, out = []) {
 const text = () => root.textContent;
 const inputs = () => findAll(root, (n) => n.tagName === "input");
 const buttons = () => findAll(root, (n) => n.tagName === "button");
+const byClass = (name) => findAll(root, (n) => String(n.className || "").split(/\s+/).includes(name));
 const clickButton = async (label) => {
   const target = buttons().find((b) => b.textContent.trim() === label);
   if (!target) throw new Error(`找不到按钮: ${label}`);
@@ -145,7 +147,7 @@ const clickButton = async (label) => {
 };
 const submitKey = async (value) => {
   const field = inputs()[0];
-  if (!field) throw new Error("登录卡没有 Key 输入框");
+  if (!field) throw new Error("验证页没有 Key 输入框");
   field.value = value;
   await clickButton("连接");
 };
@@ -163,6 +165,14 @@ const setup = {
     server.authEnabled = false;
     storage.set("amkr.apiKey", "anything");
   },
+  // 深链进入：地址栏直接指向某个内页，未鉴权时不能绕过验证页。
+  deeplink_without_key_stays_on_login: () => {
+    global.location.hash = "#/providers";
+  },
+  unreachable_service_stays_on_login: () => {
+    server.offline = true;
+    storage.set("amkr.apiKey", "good-key");
+  },
 };
 setup[scenario]?.();
 
@@ -178,11 +188,31 @@ if (scenario === "stale_key_prompts_login") {
 } else if (scenario === "no_key_prompts_login") {
   checks.loginCard = text().includes("连接到 AMKR");
   checks.unauthorized = store.authorized === false;
+  // 独立页：不能带应用栏与导航，未鉴权时无从"进入"主界面。
+  checks.noAppBar = byClass("app-bar").length === 0;
+  checks.noNav = byClass("nav").length === 0;
+  checks.noShell = byClass("shell").length === 0;
+  checks.noPages = !text().includes("模型路由") && !text().includes("统一模型");
+  checks.fullHeight = byClass("login-shell").length === 1;
+} else if (scenario === "deeplink_without_key_stays_on_login") {
+  // 地址栏直达内页也必须先过验证页。
+  checks.pageWasProviders = store.page === "providers";
+  checks.stillLogin = store.authorized === false && text().includes("连接到 AMKR");
+  checks.noProvidersPage = !text().includes("供应商");
+  checks.noNav = byClass("nav").length === 0;
+} else if (scenario === "unreachable_service_stays_on_login") {
+  // 连不上时无从判断是否需要鉴权：宁可停在验证页，也不拿没验证过的状态进主界面。
+  checks.stillLogin = store.authorized === false && text().includes("连接到 AMKR");
+  checks.reasonShown = text().includes("无法连接");
+  checks.keyKept = storage.get("amkr.apiKey") === "good-key";
+  checks.retryOffered = buttons().some((b) => b.textContent.includes("重试连接"));
 } else if (scenario === "valid_key_renders_page") {
   checks.noLoginCard = !text().includes("连接到 AMKR");
   checks.authorized = store.authorized === true;
   checks.pageRendered = text().includes("设置");
   checks.noAuthError = !text().includes("401");
+  checks.hasAppBar = byClass("app-bar").length === 1;
+  checks.hasNav = byClass("nav").length === 1;
 } else if (scenario === "wrong_key_submit_shows_error") {
   await submitKey("bad-key");
   checks.errorShown = text().includes("无效");
@@ -213,6 +243,8 @@ if (scenario === "stale_key_prompts_login") {
 } else if (scenario === "auth_disabled_no_login") {
   checks.noLoginCard = !text().includes("连接到 AMKR");
   checks.authorized = store.authorized === true;
+  checks.pageRendered = text().includes("设置");
+  checks.hasAppBar = byClass("app-bar").length === 1;
 }
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);

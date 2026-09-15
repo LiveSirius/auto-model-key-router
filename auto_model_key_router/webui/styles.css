@@ -375,6 +375,32 @@ a { color: var(--md-primary); }
 .inline { display: flex; align-items: center; gap: var(--sp-1); flex-wrap: wrap; }
 .divider { height: 1px; background: var(--md-outline); margin: var(--sp-2) 0; border: 0; }
 
+/* ══ 独立验证页 ══ */
+/* 未通过鉴权时整页只有它，所以自己撑满视口并居中；没有应用栏与导航。 */
+.login-shell {
+  display: grid; place-items: center;
+  min-height: 100vh;
+  padding: var(--sp-3);
+  background: var(--md-bg);
+}
+.login-card { width: min(460px, 100%); padding: var(--sp-4); box-shadow: var(--dp8); }
+.login-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.login-mark {
+  display: grid; place-items: center;
+  width: 52px; height: 52px; flex: none;
+  border-radius: var(--radius);
+  background: #ede7f6; color: var(--md-primary);
+  font-size: 13px; font-weight: 500; letter-spacing: 0.02em;
+}
+.login-head h2 { font-size: 20px; }
+.login-head .muted { font-size: 13px; margin-top: 2px; }
+.login-foot {
+  margin-top: var(--sp-3); padding-top: 12px;
+  border-top: 1px solid var(--md-outline);
+  font-size: 12px; color: var(--md-on-surface-variant);
+  overflow-wrap: anywhere;
+}
+
 @media (max-width: 860px) {
   .shell { flex-direction: column; }
   .nav { position: static; width: 100%; flex-direction: row; overflow-x: auto; padding: var(--sp-1); }
