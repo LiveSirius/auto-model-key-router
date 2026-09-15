@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [4.0.3] - 2026-09-15
+
 ### Added
 
 - 模型隐藏别名：同一个模型可以在多个名字下调用，但只有本地模型 ID 和 `aliases` 会出现在 `/v1/models` 与 `/health` 中。两种来源：① 自动——每个 target 的 `upstream_model`（上游叫法）自动成为可直接调用的名字，无需逐个登记；② 手动——模型可配置 `hidden_aliases` 列表。隐藏名与真实 ID/别名冲突时以真实名优先；手写的隐藏别名参与重名校验（与模型 ID、`aliases` 及其他模型的隐藏别名冲突都会报错）。管理 API（`/api/models`、`/api/routes`）新增 `hidden_aliases` 字段并在模型响应中额外返回 `auto_hidden_aliases`（自动推导的名字，便于排查）；TUI 模型设置新增「隐藏别名」菜单项，WebUI 模型路由页新增隐藏别名输入框。
