@@ -564,39 +564,57 @@ def _normalize_aliases(aliases: list[str]) -> list[str]:
     return result
 
 
-def _validate_model_names(data: dict[str, Any], model_id: str, aliases: list[str], *, exclude: str | None = None) -> None:
+def _normalize_hidden_aliases(aliases: list[str]) -> list[str]:
+    result = [str(alias).strip() for alias in aliases if str(alias).strip()]
+    if len(result) != len(set(result)):
+        raise ConfigOperationError("隐藏别名不能重复", status_code=422)
+    return result
+
+
+def _validate_model_names(data: dict[str, Any], model_id: str, aliases: list[str], *, exclude: str | None = None, hidden_aliases: list[str] | None = None) -> None:
     names: set[str] = set()
+    hidden_names: set[str] = set()
     for current_id, model in models(data).items():
         if str(current_id) == exclude or not isinstance(model, dict):
             continue
         names.add(str(current_id))
         names.update(str(alias) for alias in model.get("aliases", []) if str(alias))
+        hidden_names.update(
+            str(alias) for alias in model.get("hidden_aliases", []) if str(alias)
+        )
+    hidden_names -= names
     if model_id in names:
         raise ConfigOperationError(f"模型名称重复: {model_id}", status_code=409)
     for alias in aliases:
-        if alias == model_id or alias in names:
+        if alias == model_id or alias in names or alias in hidden_names:
+            raise ConfigOperationError(f"模型名称重复: {alias}", status_code=409)
+    for alias in hidden_aliases or []:
+        if alias == model_id or alias in aliases or alias in names or alias in hidden_names:
             raise ConfigOperationError(f"模型名称重复: {alias}", status_code=409)
 
 
-def create_model(data: dict[str, Any], model_id: str, *, aliases: list[str] | None = None, routing_mode: str = "round_robin", reasoning_effort: str | None = None, targets: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def create_model(data: dict[str, Any], model_id: str, *, aliases: list[str] | None = None, routing_mode: str = "round_robin", reasoning_effort: str | None = None, targets: list[dict[str, Any]] | None = None, hidden_aliases: list[str] | None = None) -> dict[str, Any]:
     model_id = _non_empty(model_id, "模型 ID")
     if model_id in models(data):
         raise ConfigOperationError(f"模型已存在: {model_id}", status_code=409)
     aliases = _normalize_aliases(list(aliases or []))
-    _validate_model_names(data, model_id, aliases)
+    hidden_aliases = _normalize_hidden_aliases(list(hidden_aliases or []))
+    _validate_model_names(data, model_id, aliases, hidden_aliases=hidden_aliases)
     routing_mode = str(routing_mode or "round_robin").strip()
     if routing_mode not in {"priority", "round_robin", "only_first"}:
         raise ConfigOperationError("routing_mode 无效", status_code=422)
     if targets is not None:
         validate_targets(data, targets)
     model: dict[str, Any] = {"aliases": aliases, "routing_mode": routing_mode, "targets": deepcopy(targets or [])}
+    if hidden_aliases:
+        model["hidden_aliases"] = hidden_aliases
     if reasoning_effort is not None and str(reasoning_effort).strip() not in {"", "default", "downstream"}:
         model["reasoning_effort"] = str(reasoning_effort).strip()
     models(data)[model_id] = model
     return model
 
 
-def update_model(data: dict[str, Any], model_id: str, *, new_id: str | None = None, aliases: list[str] | None = None, routing_mode: str | None = None, reasoning_effort: str | None = None, update_reasoning_effort: bool = False, targets: list[dict[str, Any]] | None = None) -> str:
+def update_model(data: dict[str, Any], model_id: str, *, new_id: str | None = None, aliases: list[str] | None = None, routing_mode: str | None = None, reasoning_effort: str | None = None, update_reasoning_effort: bool = False, targets: list[dict[str, Any]] | None = None, hidden_aliases: list[str] | None = None) -> str:
     all_models = models(data)
     model = require_model(data, model_id)
     target_id = _non_empty(new_id, "模型 ID") if new_id is not None else model_id
@@ -604,7 +622,9 @@ def update_model(data: dict[str, Any], model_id: str, *, new_id: str | None = No
         raise ConfigOperationError(f"模型已存在: {target_id}", status_code=409)
     if target_id != model_id:
         if target_id in {
-            str(alias) for alias in model.get("aliases", []) if str(alias)
+            str(alias)
+            for alias in (*model.get("aliases", []), *model.get("hidden_aliases", []))
+            if str(alias)
         }:
             raise ConfigOperationError(
                 f"模型名称重复: {target_id}", status_code=409
@@ -615,7 +635,24 @@ def update_model(data: dict[str, Any], model_id: str, *, new_id: str | None = No
     if aliases is not None:
         aliases = _normalize_aliases(list(aliases))
         _validate_model_names(data, target_id, aliases, exclude=model_id)
+        # 本模型已有的隐藏别名同样不能与新别名撞名（它们不在上面的全局扫描范围内）。
+        for alias in aliases:
+            if alias in model.get("hidden_aliases", []):
+                raise ConfigOperationError(f"模型名称重复: {alias}", status_code=409)
         model["aliases"] = aliases
+    if hidden_aliases is not None:
+        hidden_aliases = _normalize_hidden_aliases(list(hidden_aliases))
+        _validate_model_names(
+            data,
+            target_id,
+            list(model.get("aliases", [])),
+            exclude=model_id,
+            hidden_aliases=hidden_aliases,
+        )
+        if hidden_aliases:
+            model["hidden_aliases"] = hidden_aliases
+        else:
+            model.pop("hidden_aliases", None)
     if routing_mode is not None:
         routing_mode = str(routing_mode).strip()
         if routing_mode not in {"priority", "round_robin", "only_first"}:
@@ -710,8 +747,8 @@ def create_model_key(data: dict[str, Any], model_id: str, key_name: str, api_key
         set_upstream_routes_for_base_url(data, target_url, upstream_routes)
 
 
-def create_model_with_keys(data: dict[str, Any], model_id: str, *, aliases: list[str] | None = None, routing_mode: str = "round_robin", reasoning_effort: str | None = None, keys: list[dict[str, Any]] | None = None) -> None:
-    create_model(data, model_id, aliases=aliases, routing_mode=routing_mode, reasoning_effort=reasoning_effort)
+def create_model_with_keys(data: dict[str, Any], model_id: str, *, aliases: list[str] | None = None, routing_mode: str = "round_robin", reasoning_effort: str | None = None, keys: list[dict[str, Any]] | None = None, hidden_aliases: list[str] | None = None) -> None:
+    create_model(data, model_id, aliases=aliases, hidden_aliases=hidden_aliases, routing_mode=routing_mode, reasoning_effort=reasoning_effort)
     for key in keys or []:
         create_model_key(data, model_id, str(key.get("name") or ""), str(key.get("api_key") or ""), base_url=key.get("base_url"), enabled=bool(key.get("enabled", True)), allow_visitor=bool(key.get("allow_visitor", False)), upstream_model=str(key.get("upstream_model") or model_id), upstream_routes=key.get("upstream_routes"), update_upstream_routes="upstream_routes" in key)
 

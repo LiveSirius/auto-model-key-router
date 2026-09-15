@@ -274,6 +274,64 @@ def test_merge_transferable_config_renames_target_key_when_source_key_is_renamed
     RouterConfig.from_dict(merged)
 
 
+def test_hidden_aliases_round_trip_and_reject_collisions() -> None:
+    data = {
+        "config_version": 4,
+        "providers": {
+            "gateway": {
+                "base_url": "https://gateway.example.test",
+                "keys": {"main": {"api_key": "sk-main"}},
+            }
+        },
+        "models": {},
+    }
+    operations.create_model(
+        data,
+        "local",
+        aliases=["friendly"],
+        hidden_aliases=["deepseek-v4.1-flash"],
+        targets=[{"provider": "gateway", "key": "main", "upstream_model": "remote"}],
+    )
+    assert data["models"]["local"]["hidden_aliases"] == ["deepseek-v4.1-flash"]
+    config = RouterConfig.from_dict(data)
+    assert config.hidden_model_names() == {
+        "deepseek-v4.1-flash": "local",
+        "remote": "local",
+    }
+
+    # 隐藏别名与既有别名/模型 ID/其他模型的隐藏别名都不能撞名。
+    for bad in (["friendly"], ["local"], ["deepseek-v4.1-flash"]):
+        try:
+            operations.create_model(data, "another", hidden_aliases=bad)
+        except operations.ConfigOperationError:
+            continue
+        raise AssertionError(f"应当拒绝重复的隐藏别名: {bad}")
+
+    # 单改别名也不能撞上本模型已有的隐藏别名，反之亦然。
+    for kwargs in (
+        {"aliases": ["deepseek-v4.1-flash"]},
+        {"hidden_aliases": ["friendly"]},
+    ):
+        try:
+            operations.update_model(data, "local", **kwargs)
+        except operations.ConfigOperationError:
+            continue
+        raise AssertionError(f"应当拒绝自家名字撞名: {kwargs}")
+
+    # 改名同样不能撞上隐藏别名。
+    try:
+        operations.update_model(data, "local", new_id="deepseek-v4.1-flash")
+    except operations.ConfigOperationError:
+        pass
+    else:
+        raise AssertionError("应当拒绝把模型 ID 改成隐藏别名")
+
+    # 清空隐藏别名会连字段一起移除。
+    operations.update_model(data, "local", hidden_aliases=[])
+    assert "hidden_aliases" not in data["models"]["local"]
+    RouterConfig.from_dict(data)
+
+
 def test_updating_provider_key_api_key_drops_stale_capabilities() -> None:
     data = {
         "config_version": 4,
