@@ -117,15 +117,6 @@ class StreamLifecycle:
         await self.key_pool.release_key(self.model_id, self.key_name)
         await self.response.aclose()
 
-    def close_report(self) -> dict[str, Any]:
-        return {
-            "status_code": self.response.status_code,
-            "chunks": self.chunk_count,
-            "bytes": self.byte_count,
-            "first_token_ms": self.first_token_ms,
-            "usage": self.usage,
-        }
-
 
 def retry_after_seconds(response: httpx.Response) -> float | None:
     value = response.headers.get("retry-after")

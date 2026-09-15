@@ -33,7 +33,6 @@ from .protocol_compat import (
 from .proxy_support import (
     UNSUPPORTED_ENDPOINT_STATUS_CODES,
     _authorization_mode,
-    _debug_report,
     _is_stream_request,
     _is_tool_error,
     _join_url,
@@ -180,16 +179,6 @@ async def _prepare_proxy_request(
     payload = _json_body(body)
     is_stream = _is_stream_request(payload)
     requested_model_id = _resolve_model_id(path, payload)
-    _debug_report(
-        "proxy-entry",
-        {
-            "path": path,
-            "method": request.method,
-            "requested_model_id": requested_model_id,
-            "stream": is_stream,
-            "body_bytes": len(body),
-        },
-    )
     if requested_model_id is None:
         return JSONResponse(
             {"error": {"message": "请求体中缺少 model 字段"}}, status_code=400
@@ -453,18 +442,6 @@ async def _execute_attempt(
         if anthropic_beta:
             headers["anthropic-beta"] = anthropic_beta
 
-    _debug_report(
-        "upstream-attempt",
-        {
-            "upstream": upstream,
-            "model_id": context.model_id,
-            "upstream_model_id": upstream_model_id,
-            "requested_model_id": context.requested_model_id,
-            "key_name": key.name,
-            "stream": context.is_stream,
-            "native": use_native,
-        },
-    )
     started = perf_counter()
     first_byte_deadline = (
         asyncio.get_running_loop().time()
@@ -485,18 +462,6 @@ async def _execute_attempt(
         )
     except httpx.RequestError as exc:
         duration_ms = _elapsed_ms(started)
-        _debug_report(
-            "upstream-request-error",
-            {
-                "model_id": context.model_id,
-                "requested_model_id": context.requested_model_id,
-                "key_name": key.name,
-                "error_type": exc.__class__.__name__,
-                "error": str(exc),
-                "duration_ms": duration_ms,
-                "native": use_native,
-            },
-        )
         await runtime.metrics.record(
             context.model_id,
             key.name,
@@ -566,15 +531,6 @@ async def _execute_attempt(
             reasoning_model_id=context.model_id,
         )
         fallback_headers = _upstream_headers(context.request, key.api_key)
-        _debug_report(
-            "upstream-fallback",
-            {
-                "upstream": fallback_upstream,
-                "model_id": context.model_id,
-                "key_name": key.name,
-                "original_status": response.status_code,
-            },
-        )
         fallback_started = perf_counter()
         first_byte_deadline = (
             asyncio.get_running_loop().time()
@@ -629,10 +585,6 @@ async def _execute_attempt(
         and attempt + 1 < context.attempts
     ):
         content = await response.aread()
-        _debug_report(
-            "upstream-retryable-response",
-            _response_debug_payload(context, key, response, duration_ms, content),
-        )
         error = _json_error_response_from_content(response, content)
         await _record_upstream_response(
             runtime,
@@ -653,10 +605,6 @@ async def _execute_attempt(
 
     if context.is_stream and response.status_code >= 400:
         content = await response.aread()
-        _debug_report(
-            "upstream-stream-error-response",
-            _response_debug_payload(context, key, response, duration_ms, content),
-        )
         await response.aclose()
         await _record_upstream_response(
             runtime,
@@ -681,10 +629,6 @@ async def _execute_attempt(
     if response.status_code == 400:
         content = await response.aread()
         if _is_tool_error(content):
-            _debug_report(
-                "upstream-tool-error-retry",
-                _response_debug_payload(context, key, response, duration_ms, content),
-            )
             await _record_upstream_response(
                 runtime,
                 context.model_id,
@@ -730,15 +674,6 @@ async def _execute_attempt(
                 retry_duration_ms = _elapsed_ms(retry_started)
                 # 如果重试成功，使用重试的响应
                 if retry_response.status_code < 400:
-                    _debug_report(
-                        "upstream-tool-filter-success",
-                        {
-                            "model_id": context.model_id,
-                            "key_name": key.name,
-                            "original_status": 400,
-                            "retry_status": retry_response.status_code,
-                        },
-                    )
                     response = retry_response
                     duration_ms = retry_duration_ms
                     started = retry_started
@@ -782,15 +717,6 @@ async def _execute_attempt(
                 )
                 await runtime.key_pool.mark_failure(context.model_id, key.name)
                 await _broadcast_metrics(runtime)
-                _debug_report(
-                    "upstream-tool-filter-error",
-                    {
-                        "model_id": context.model_id,
-                        "key_name": key.name,
-                        "error_type": exc.__class__.__name__,
-                        "duration_ms": retry_duration_ms,
-                    },
-                )
                 return AttemptOutcome(
                     response=_json_error_response_from_content(
                         response, content, anthropic=context.path == "messages"
@@ -849,17 +775,6 @@ def _streaming_response(
     native_upstream: bool = False,
 ) -> StreamingResponse:
     runtime = context.runtime
-    _debug_report(
-        "upstream-stream-response",
-        {
-            "model_id": context.model_id,
-            "requested_model_id": context.requested_model_id,
-            "key_name": key.name,
-            "status_code": response.status_code,
-            "duration_ms": _elapsed_ms(started),
-            "content_type": response.headers.get("content-type"),
-        },
-    )
     stream = _stream_upstream(
         response,
         runtime.metrics,
@@ -935,10 +850,6 @@ async def _buffered_response(
     native_upstream: bool = False,
 ) -> Response:
     content = await response.aread()
-    _debug_report(
-        "upstream-buffered-response",
-        _response_debug_payload(context, key, response, duration_ms, content),
-    )
     await response.aclose()
     await _record_upstream_response(
         context.runtime,
@@ -1154,10 +1065,8 @@ async def _stream_upstream(
         LOGGER.warning(
             "upstream stream error %s", json.dumps(payload, ensure_ascii=False)
         )
-        _debug_report("upstream-stream-error", payload)
     finally:
         await lifecycle.finish(failed=failed)
-        _debug_report("upstream-stream-close", lifecycle.close_report())
 
 
 def _is_sse_media_type(media_type: str | None) -> bool:
@@ -1315,10 +1224,8 @@ async def _stream_anthropic_messages(
             "upstream anthropic stream error %s",
             json.dumps(payload, ensure_ascii=False),
         )
-        _debug_report("upstream-anthropic-stream-error", payload)
     finally:
         await lifecycle.finish(failed=failed)
-        _debug_report("upstream-anthropic-stream-close", lifecycle.close_report())
 
 
 async def _stream_responses(
@@ -1410,7 +1317,5 @@ async def _stream_responses(
             "upstream responses stream error %s",
             json.dumps(payload, ensure_ascii=False),
         )
-        _debug_report("upstream-responses-stream-error", payload)
     finally:
         await lifecycle.finish(failed=failed)
-        _debug_report("upstream-responses-stream-close", lifecycle.close_report())

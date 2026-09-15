@@ -4,9 +4,7 @@ import asyncio
 import json
 import logging
 import re
-from pathlib import Path
 from typing import Any
-from urllib.request import Request as UrlRequest, urlopen
 
 import httpx
 from fastapi import Request
@@ -321,29 +319,6 @@ async def _send_upstream(
         await response.aclose()
         raise
     return response
-
-
-def _debug_report(event: str, payload: dict[str, Any]) -> None:
-    env_path = Path.cwd() / ".dbg" / "upstream-request-failed.env"
-    try:
-        values = dict(
-            line.strip().split("=", 1)
-            for line in env_path.read_text(encoding="utf-8").splitlines()
-            if "=" in line
-        )
-        url = values.get("DEBUG_SERVER_URL")
-        if not url:
-            return
-        body = json.dumps(
-            {"event": event, "runId": "pre", "payload": payload}, ensure_ascii=False
-        ).encode("utf-8")
-        request = UrlRequest(
-            url, data=body, headers={"Content-Type": "application/json"}, method="POST"
-        )
-        with urlopen(request, timeout=0.2):
-            pass
-    except Exception:
-        return
 
 
 def _json_error_response_from_content(
