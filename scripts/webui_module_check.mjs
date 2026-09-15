@@ -1,0 +1,73 @@
+// 开发用：静态检查 webui 所有模块能否被解析并完成 import 图求值。
+// 用法：node scripts/webui_module_check.mjs
+// 说明：app.js / main.js 依赖浏览器全局（location/document），这里提供最小垫片后再导入。
+
+import { pathToFileURL } from "node:url";
+import { readdirSync, statSync } from "node:fs";
+import path from "node:path";
+
+const WEBUI = path.resolve(import.meta.dirname, "../auto_model_key_router/webui");
+
+const define = (name, value) =>
+  Object.defineProperty(global, name, { value, writable: true, configurable: true });
+
+// 最小浏览器垫片：只为让模块求值到"没有语法/导入错误"这一步。
+class FakeNode {
+  constructor(tag = "div") { this.tagName = tag; this.children = []; this.style = {}; this.attrs = {}; }
+  append(...nodes) { this.children.push(...nodes.flat()); }
+  appendChild(node) { this.children.push(node); return node; }
+  replaceChildren(...nodes) { this.children = nodes.flat(); }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return this.attrs[k]; }
+  addEventListener() {}
+  removeEventListener() {}
+  remove() {}
+  querySelector() { return null; }
+  prepend() {}
+  replaceWith() {}
+  focus() {}
+}
+define("location", { hash: "#/overview", reload() {} });
+define("window", { addEventListener() {}, isSecureContext: true, location: global.location });
+define("navigator", { clipboard: null });
+define("Node", FakeNode);
+define("document", {
+  createElement: (tag) => new FakeNode(tag),
+  createElementNS: (_ns, tag) => new FakeNode(tag),
+  createTextNode: (text) => ({ textContent: String(text), children: [] }),
+  getElementById: () => new FakeNode("div"),
+  body: new FakeNode("body"),
+  addEventListener() {}, removeEventListener() {},
+});
+define("setInterval", () => 0);
+define("clearInterval", () => {});
+define("setTimeout", () => 0);
+define("localStorage", { getItem: () => null, setItem() {}, removeItem() {} });
+define("fetch", async () => ({ ok: true, status: 200, async text() { return "{}"; } }));
+
+function walk(dir, out = []) {
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) walk(full, out);
+    else if (entry.endsWith(".js")) out.push(full);
+  }
+  return out;
+}
+
+const failures = [];
+for (const file of walk(WEBUI)) {
+  const rel = path.relative(WEBUI, file);
+  try {
+    await import(pathToFileURL(file).href);
+    console.log(`OK   ${rel}`);
+  } catch (error) {
+    failures.push(`${rel}: ${error.message}`);
+    console.log(`FAIL ${rel}: ${error.message}`);
+  }
+}
+
+if (failures.length) {
+  console.error(`\n${failures.length} 个模块加载失败`);
+  process.exit(1);
+}
+console.log(`\n全部 ${walk(WEBUI).length} 个模块加载正常`);
