@@ -449,17 +449,14 @@ function draw() {
   } else {
     children.push(kpiTiles(metrics, points, bucketSeconds));
     children.push(liveChartCard(points, bucketSeconds));
+    const flatKeys = flattenKeys(metrics.keys);
+    // 同一个栅格承载全部卡片，间隙统一为 gap；与概览页保持一致的排版规则。
     children.push(h("div.grid-12", {},
       h("div.col-7", {}, latencyChartCard(points, bucketSeconds)),
       h("div.col-5", {}, streamCard()),
-    ));
-    const flatKeys = flattenKeys(metrics.keys);
-    children.push(h("div.grid-12", {},
       h("div.col-6", {}, breakdownCard("模型用量", metrics.models, "模型", "窗口内没有模型调用。")),
       h("div.col-6", {}, breakdownCard("调用方用量", metrics.caller_types, "调用方", "窗口内没有调用方数据。")),
-    ));
-    children.push(breakdownCard("模型 / Key 用量", flatKeys, "条目", "窗口内没有 Key 调用数据。"));
-    children.push(h("div.grid-12", {},
+      h("div.col-12", {}, breakdownCard("模型 / Key 用量", flatKeys, "条目", "窗口内没有 Key 调用数据。")),
       h("div.col-4", {}, upstreamCard(metrics)),
       h("div.col-8", {}, logCard()),
     ));

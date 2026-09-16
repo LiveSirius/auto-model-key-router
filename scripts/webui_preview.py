@@ -210,29 +210,74 @@ def build_snapshot(hours: float = 1) -> dict:
             status={"200": agg["requests"] - agg["failures"], "429": agg["failures"] // 2, "500": agg["failures"] - agg["failures"] // 2},
         ),
         "caller_types": {
-            "local": stats(requests=int(agg["requests"] * 0.72), prompt=agg["prompt"] // 2, completion=agg["completion"] // 2, duration=agg["duration"] // 2),
-            "visitor": stats(requests=agg["requests"] - int(agg["requests"] * 0.72), failures=agg["failures"], prompt=agg["prompt"] // 3, completion=agg["completion"] // 3, duration=agg["duration"] // 3),
+            # 每个维度都要带上 duration / cached / first_token：漏掉就会让
+            # 分解表里的"平均耗时"算成 0ms，看起来像前端算错了。
+            "local": stats(
+                requests=int(agg["requests"] * 0.72),
+                prompt=agg["prompt"] // 2,
+                completion=agg["completion"] // 2,
+                cached=agg["cached"] // 2,
+                duration=agg["duration"] * 3 // 4,
+                first_token=agg["first_token"] * 3 // 4,
+            ),
+            "visitor": stats(
+                requests=agg["requests"] - int(agg["requests"] * 0.72),
+                failures=agg["failures"],
+                prompt=agg["prompt"] // 3,
+                completion=agg["completion"] // 3,
+                cached=agg["cached"] // 3,
+                duration=agg["duration"] // 4,
+                first_token=agg["first_token"] // 4,
+            ),
         },
         "models": {
-            model: stats(requests=max(1, agg["requests"] // len(MODELS)), prompt=agg["prompt"] // len(MODELS), completion=agg["completion"] // len(MODELS), cached=agg["cached"] // len(MODELS))
+            model: stats(
+                requests=max(1, agg["requests"] // len(MODELS)),
+                prompt=agg["prompt"] // len(MODELS),
+                completion=agg["completion"] // len(MODELS),
+                cached=agg["cached"] // len(MODELS),
+                duration=agg["duration"] // len(MODELS),
+                first_token=agg["first_token"] // len(MODELS),
+            )
             for model in MODELS
         },
         "requested_models": {},
         "model_requested_models": {},
         "keys": {
             model: {
-                key: stats(requests=max(1, agg["requests"] // (len(MODELS) * len(KEYS))), prompt=agg["prompt"] // (len(MODELS) * len(KEYS)), completion=agg["completion"] // (len(MODELS) * len(KEYS)))
+                key: stats(
+                    requests=max(1, agg["requests"] // (len(MODELS) * len(KEYS))),
+                    prompt=agg["prompt"] // (len(MODELS) * len(KEYS)),
+                    completion=agg["completion"] // (len(MODELS) * len(KEYS)),
+                    cached=agg["cached"] // (len(MODELS) * len(KEYS)),
+                    duration=agg["duration"] // (len(MODELS) * len(KEYS)),
+                    first_token=agg["first_token"] // (len(MODELS) * len(KEYS)),
+                )
                 for key in KEYS
             }
             for model in MODELS
         },
         "providers": {
-            provider: stats(requests=max(1, agg["requests"] // len(PROVIDERS)), prompt=agg["prompt"] // len(PROVIDERS), completion=agg["completion"] // len(PROVIDERS))
+            provider: stats(
+                requests=max(1, agg["requests"] // len(PROVIDERS)),
+                prompt=agg["prompt"] // len(PROVIDERS),
+                completion=agg["completion"] // len(PROVIDERS),
+                cached=agg["cached"] // len(PROVIDERS),
+                duration=agg["duration"] // len(PROVIDERS),
+                first_token=agg["first_token"] // len(PROVIDERS),
+            )
             for provider in PROVIDERS
         },
         "provider_pools": {},
         "upstream_models": {
-            upstream: stats(requests=max(1, agg["requests"] // len(UPSTREAMS)), prompt=agg["prompt"] // len(UPSTREAMS), completion=agg["completion"] // len(UPSTREAMS))
+            upstream: stats(
+                requests=max(1, agg["requests"] // len(UPSTREAMS)),
+                prompt=agg["prompt"] // len(UPSTREAMS),
+                completion=agg["completion"] // len(UPSTREAMS),
+                cached=agg["cached"] // len(UPSTREAMS),
+                duration=agg["duration"] // len(UPSTREAMS),
+                first_token=agg["first_token"] // len(UPSTREAMS),
+            )
             for upstream in UPSTREAMS
         },
         "unattributed": stats(),

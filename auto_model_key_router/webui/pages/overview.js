@@ -421,16 +421,16 @@ function draw() {
   }
 
   children.push(kpiTiles(metrics, points, bucketSeconds));
+  // 所有看板卡放进同一个栅格，而不是每排一个 .grid-12：
+  // 分开写时排内间距是 16px、排间却是 .content 的 24px，横向纵向对不上，
+  // 整体节奏显得松散。合成一个栅格后，所有间隙统一为 gap。
+  // 每排仍按最高卡等高（见 styles.css 的说明），因此排内底边平齐。
   children.push(h("div.grid-12", {},
     h("div.col-8", {}, trendCard()),
     h("div.col-4", {}, unifiedCard()),
-  ));
-  children.push(h("div.grid-12", {},
     h("div.col-4", {}, compositionCard(metrics)),
     h("div.col-4", {}, statusCard(metrics)),
     h("div.col-4", {}, waterfallCard(metrics)),
-  ));
-  children.push(h("div.grid-12", {},
     h("div.col-4", {}, rankingCard("模型调用排行", metrics.models, "模型")),
     h("div.col-4", {}, rankingCard("调用方排行", metrics.caller_types, "调用方")),
     h("div.col-4", {}, rankingCard("上游 Token 排行", metrics.upstream_models, "上游模型的 Token", {
@@ -438,8 +438,6 @@ function draw() {
       tone: "secondary",
       format: (row) => `${formatCompact(row.value)} Token`,
     })),
-  ));
-  children.push(h("div.grid-12", {},
     h("div.col-8", {}, tokenBreakdownCard(points, bucketSeconds)),
     h("div.col-4", {}, runtimeCard()),
   ));

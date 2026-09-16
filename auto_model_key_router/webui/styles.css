@@ -225,7 +225,9 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   padding: var(--sp-3);
   display: flex;
   flex-direction: column;
-  gap: var(--sp-3);
+  /* 与栅格间隙取同一个值：页面级的纵向节奏和卡片之间的横向间距一致，
+   * 否则会出现"横向 16px、纵向 24px"的错位感，看起来松。 */
+  gap: var(--sp-2);
 }
 .content > * { width: 100%; max-width: var(--content-max); }
 
@@ -238,13 +240,24 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .page-actions { display: flex; align-items: center; gap: var(--sp-1); margin-left: auto; flex-wrap: wrap; }
 
 /* ══ 仪表板栅格 ══ */
-/* 12 列栅格：看板卡片按列跨距排布，窄屏逐级塌缩。 */
+/* 12 列栅格：看板卡片按列跨距排布，窄屏逐级塌缩。
+ *
+ * 关键取舍：同排卡片等高（stretch）。早先是 align-items:start，矮卡片下面会留下
+ * 一大块空洞 —— 那一行的行高由最高的卡片决定，矮的只占自己那点高度，看上去就是
+ * "卡片之间间隙太大"。改成 stretch 后：卡片撑满行高，排内间距恒为 gap，
+ * 整排底边天然平齐。
+ *
+ * 注意这是"等高铺满"而不是 CSS 瀑布流（masonry）：真正的瀑布流让每张卡按自身内容
+ * 高度错落堆叠，底部必然参差，与"底部平齐"互斥。两者只能选一个，这里优先保证平齐。 */
 .grid-12 {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--sp-2);
-  align-items: start;
+  align-items: stretch;
 }
+/* 列容器撑满行高，里面的卡片再撑满列容器，撑满才能等高。 */
+.grid-12 > [class*="col-"] { display: flex; flex-direction: column; min-width: 0; }
+.grid-12 > [class*="col-"] > * { flex: 1 1 auto; min-width: 0; }
 .col-3 { grid-column: span 3; }
 .col-4 { grid-column: span 4; }
 .col-5 { grid-column: span 5; }
@@ -261,6 +274,9 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   box-shadow: var(--dp2);
   padding: var(--sp-3);
   transition: box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease);
+  /* 纵向 flex：被拉高到与同排最高卡等高时，内容能自行分配空间 */
+  display: flex;
+  flex-direction: column;
 }
 .card.is-flush { padding: 0; overflow: hidden; }
 .card.is-lift { cursor: pointer; }
@@ -285,6 +301,22 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   border-top: 1px solid var(--md-outline);
   font-size: 12px; color: var(--md-on-surface-variant);
 }
+/* 卡片被拉高到与同排最高卡等高时，多余高度得有地方去，否则只能堆在末尾，
+ * 看着仍像"底部多了一块空白"。两类处理：
+ *   1) 内容本来就该占满的（列表、请求流、表格滚动区）—— 让它们吸收高度；
+ *   2) 内容定量、无法拉伸的（定高图表、文字块）—— 让它在空间里居中。
+ * 图表刻意不吸收：chart-host 用的是像素定高，拉长只会让图内多出空白。 */
+.card > .bar-list,
+.card > .stream,
+.card > .table-scroll { flex: 1 1 auto; min-height: 0; }
+.card > .stack { flex: 1 1 auto; min-height: 0; justify-content: center; }
+/* 页脚永远贴底：内容不足时它下沉到卡片底部，而不是浮在中间。 */
+.card > .card-foot:last-child { margin-top: auto; }
+
+/* 请求流条数随流量增长，不限高会成为整排的高度上限：旁边的"延迟趋势"曾被
+ * 一起撑到近千像素，两张图被挤到底部、中间大片空白。限高 + 内部滚动，
+ * 让排高由常规内容决定，这才是"间隙突然变大"的实际来源。 */
+.stream { max-height: 520px; overflow-y: auto; }
 
 /* ══ KPI 瓦片 ══ */
 /* 显式列数而不是 auto-fit：看板瓦片数量固定为 8，auto-fit 会在宽屏排成 7+1 的
@@ -726,9 +758,12 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .stream-empty { padding: var(--sp-3) 0; text-align: center; color: var(--md-on-surface-variant); font-size: 13px; }
 
 /* ══ 空态 / 骨架 / 进度 ══ */
+/* 卡片内没有数据时，空态撑满剩余空间并把内容居中 —— 否则它只有一行高，
+ * 在等高的卡片里缩在顶部，下面空一大片。 */
 .empty {
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  padding: var(--sp-5) var(--sp-2);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  flex: 1 1 auto; min-height: 120px;
+  padding: var(--sp-4) var(--sp-2);
   text-align: center;
   color: var(--md-on-surface-variant);
   font-size: 13px;
@@ -736,6 +771,9 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   border-radius: var(--radius);
   box-shadow: var(--dp1);
 }
+/* 卡内空态不再自带海拔与背景：卡片本身已经是那个"面"，
+ * 里面再套一层白底描边会显得像卡片里又嵌了张卡片。 */
+.card .empty { background: transparent; box-shadow: none; border-radius: 0; }
 .empty .empty-icon { color: #bdbdbd; margin-bottom: 4px; }
 .empty .empty-hint { font-size: 12px; color: #9e9e9e; max-width: 52ch; }
 
