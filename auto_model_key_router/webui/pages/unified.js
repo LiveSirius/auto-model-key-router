@@ -1,6 +1,6 @@
 // 统一模型：主/回退/图像映射与推理强度。
 
-import { h, errorText } from "../dom.js";
+import { h, mount, errorText } from "../dom.js";
 import { api } from "../api.js";
 import { card, cardHead, notice, badge, empty, loading, render, toast, buttonNode, select, confirmDialog, kv } from "../ui.js";
 
@@ -93,7 +93,7 @@ function editor() {
       )),
     );
 
-    formHost.replaceChildren(
+    mount(formHost,
       h("div.form-grid", {},
         h("label.field", h("span", "模型"), modelSelect),
         h("label.field", h("span", "推理强度"), select(EFFORTS, {

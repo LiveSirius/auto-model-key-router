@@ -6,7 +6,7 @@
 // - 图表以真实像素宽度渲染（不用 preserveAspectRatio="none" 拉伸），
 //   因为拉伸会把描边和文字一起压扁，读数就不准了。
 
-import { h, svg, formatClock, formatClockSeconds, formatDateTime, clamp } from "./dom.js";
+import { h, svg, mount, formatClock, formatClockSeconds, formatDateTime, clamp } from "./dom.js";
 import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
   formatNumber, formatCompactNumber, formatPercentValue, formatDurationValue,
@@ -187,7 +187,9 @@ export function lineChart({
       const py = y(point.value);
       crosshair.setAttribute("x1", px); crosshair.setAttribute("x2", px); crosshair.setAttribute("opacity", 1);
       marker.setAttribute("cx", px); marker.setAttribute("cy", py); marker.setAttribute("opacity", 1);
-      tooltip.replaceChildren(
+      // 必须走 mount 而不是原生 replaceChildren：原生 API 会把 null 子项
+      // 字符串化成文本节点"null"，让每个已完结的点都多出一行 null。
+      mount(tooltip,
         h("span.tip-time", formatDateTime(point.at)),
         h("span.tip-value", withUnit(metric, point.value)),
         point.complete === false ? h("span.tip-flag", "累加中") : null,
@@ -281,7 +283,7 @@ export function stackedBars({ points, height = 200, series: seriesSpec, bucketSe
         });
         rect.addEventListener("pointerenter", () => {
           const total = values.reduce((sum, item) => sum + item.value, 0);
-          tip.replaceChildren(
+          mount(tip,
             h("span.tip-time", formatDateTime(point.started_at)),
             ...values.map(({ spec: inner, value: innerValue }) =>
               h("span.tip-value", `${inner.label} ${formatCompactNumber(innerValue)}`)),
