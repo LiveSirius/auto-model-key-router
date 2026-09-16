@@ -470,6 +470,57 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .donut-center span { font-size: 11px; color: var(--md-on-surface-variant); }
 .donut-caption { margin-top: 10px; font-size: 12px; color: var(--md-on-surface-variant); text-align: center; }
 
+/* ══ 热力图（星期 × 小时） ══ */
+/* 行列容器用 display:contents：表头、星期标签与 168 个格子共享同一套列轨道，
+ * 不需要给每个元素手写 grid-column，宽度变化时也不会错位。 */
+.heat-frame { position: relative; }
+.heatmap {
+  display: grid;
+  grid-template-columns: 40px repeat(24, minmax(0, 1fr));
+  gap: 2px;
+}
+.heat-row { display: contents; }
+.heat-corner, .heat-hour, .heat-day {
+  font-size: 10px;
+  color: var(--md-on-surface-variant);
+  line-height: 1.6;
+  white-space: nowrap;
+}
+/* 只每 3 格有文字，两侧是空列，所以溢出可见也不会撞上相邻标签；
+ * 若改成 hidden，窄屏下 "12:00" 会被自己的那一列裁掉。 */
+.heat-hour { text-align: center; overflow: visible; }
+.heat-day { display: flex; align-items: center; font-size: 11px; overflow: hidden; }
+.heat-cell {
+  display: block;
+  aspect-ratio: 1 / 1;
+  min-width: 0;
+  border-radius: 2px;
+  background: #f0f0f0;
+  transition: outline-color var(--dur) var(--ease);
+}
+/* 5 档单色阶（Material 主色的 5 级明度）。用同一色相而不是彩虹色：
+ * 热力图要读的是"深浅"，换色相会把注意力引到颜色分类上。 */
+.heat-cell.level-0 { background: #f0f0f0; }
+.heat-cell.level-1 { background: #d7c2fb; }
+.heat-cell.level-2 { background: #b18ff7; }
+.heat-cell.level-3 { background: #8a5cf0; }
+.heat-cell.level-4 { background: var(--md-primary); }
+/* 窗口没覆盖到的格子：斜纹而不是浅色。浅色会和"这一小时确实是 0"撞在一起，
+ * 而两者含义完全不同 —— 前者是没数据，后者是没流量。 */
+.heat-cell.is-coverless {
+  background: repeating-linear-gradient(135deg, #f0f0f0 0 3px, #e0e0e0 3px 6px);
+}
+/* 累加中的整点桶天然偏低：给它一个描边，不要让它看起来是"流量掉下来了"。 */
+.heat-cell.is-partial { outline: 1.5px dashed var(--md-on-surface-variant); outline-offset: -1px; }
+.heat-cell:hover { outline: 2px solid var(--md-on-surface); outline-offset: -1px; }
+.heat-legend {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: var(--sp-2);
+  font-size: 11px;
+}
+.heat-legend-scale { display: inline-flex; gap: 2px; }
+.heat-legend .heat-cell { width: 11px; height: 11px; aspect-ratio: auto; }
+
 /* ══ 图例 ══ */
 .legend { display: flex; gap: var(--sp-2); flex-wrap: wrap; font-size: 12px; }
 .legend-item { display: inline-flex; align-items: center; gap: 6px; }

@@ -81,7 +81,7 @@ global.document = {
 // 探针环境无 ResizeObserver：charts.js 会按测量宽度直接画一次，正是我们要的。
 global.ResizeObserver = undefined;
 
-const { lineChart, stackedBars } = await import(pathToFileURL(path.join(WEBUI, "charts.js")).href);
+const { lineChart, stackedBars, heatmap } = await import(pathToFileURL(path.join(WEBUI, "charts.js")).href);
 
 const checks = {};
 const check = (name, ok, detail = "") => {
@@ -148,6 +148,52 @@ if (barTip && bars.length) {
   bars[4].listeners.pointerenter[0]();
   check("bar_tip_marks_partial", barTip.textContent.includes("累加中"), barTip.textContent);
   check("bar_tip_partial_has_no_null_row", noStrayNull(barTip), barTip.textContent);
+}
+
+// —— 热力图 ——
+// 168 个格子必须与 (星期, 小时) 一一对应，且"窗口未覆盖"要与"这一小时是 0"
+// 区分开 —— 两者画成同一格就等于谎报。这里同时锁住落格顺序与格子档位。
+const heatMetric = {
+  id: "requests",
+  label: "请求数量",
+  pick: (point) => Number(point.requests) || 0,
+  format: (value) => `${value} 次`,
+};
+const heatHost = heatmap({
+  points: [
+    { started_at: "2026-01-01T10:00:00+08:00", requests: 15, complete: false },
+    { started_at: "2026-01-04T23:00:00+08:00", requests: 100, complete: true },
+  ],
+  metric: heatMetric,
+});
+// 只取矩阵里的格子：图例里也有 .heat-cell，按 DOM 顺序落在 .heatmap 之后。
+const heatGrid = findAll(heatHost, (n) => hasClass(n, "heatmap"))[0];
+const gridCells = heatGrid ? findAll(heatGrid, (n) => hasClass(n, "heat-cell")) : [];
+const heatTip = findAll(heatHost, (n) => hasClass(n, "chart-tip"))[0];
+check("heat_grid_present", Boolean(heatGrid));
+check("heat_cell_count", gridCells.length === 168, String(gridCells.length));
+check("heat_tip_present", Boolean(heatTip));
+
+if (gridCells.length === 168 && heatTip) {
+  // 2026-01-01 是周四 ⇒ weekday 3；10 时 ⇒ 索引 3*24+10。
+  const thursday10 = gridCells[3 * 24 + 10];
+  const sunday23 = gridCells[6 * 24 + 23];
+  const coverless = gridCells[0];
+  check("heat_thursday10_level1", hasClass(thursday10, "level-1"), thursday10.className);
+  check("heat_sunday23_is_max_level", hasClass(sunday23, "level-4"), sunday23.className);
+  check("heat_coverless_marked", hasClass(coverless, "is-coverless"), coverless.className);
+  check("heat_partial_marked", hasClass(thursday10, "is-partial"), thursday10.className);
+  check("heat_complete_not_partial", !hasClass(sunday23, "is-partial"), sunday23.className);
+
+  thursday10.listeners.pointerenter[0]();
+  check("heat_tip_shows_slot", heatTip.textContent.includes("周四 10:00"), heatTip.textContent);
+  check("heat_tip_shows_value", heatTip.textContent.includes("15 次"), heatTip.textContent);
+  check("heat_tip_marks_partial", heatTip.textContent.includes("累加中"), heatTip.textContent);
+  check("heat_tip_has_no_null_row", noStrayNull(heatTip), heatTip.textContent);
+
+  coverless.listeners.pointerenter[0]();
+  check("heat_tip_coverless_says_so", heatTip.textContent.includes("窗口未覆盖"), heatTip.textContent);
+  check("heat_tip_coverless_no_zero", !heatTip.textContent.includes("0 次"), heatTip.textContent);
 }
 
 const failed = Object.entries(checks).filter(([, value]) => value !== true);

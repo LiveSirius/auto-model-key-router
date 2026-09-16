@@ -16,12 +16,19 @@ import {
   buttonNode, segmented, freshness, progressBar, toast,
 } from "../ui.js";
 import { icon } from "../icons.js";
-import { lineChart, stackedBars, donut, barList, legend, chartSummary } from "../charts.js";
+import { lineChart, stackedBars, donut, barList, legend, chartSummary, heatmap } from "../charts.js";
 import {
-  TIME_RANGES, pickBucketSeconds, bucketLabel, METRIC_MAP,
+  TIME_RANGES, pickBucketSeconds, bucketLabel, METRIC_MAP, HEATMAP_METRICS,
   rank, statusGroups, formatPercentValue, formatCompactNumber, formatNumber,
   trend as computeTrend,
 } from "../chart-math.js";
+
+// 热力图固定看 7 天：它的价值就在于"周内节律"（工作日 vs 周末、白天 vs 夜间），
+// 跟着页头的 1h/6h 窗口走就没有可比性了。桶宽固定 1 小时，正好一格一个桶。
+export const HEATMAP_HOURS = 168;
+export const HEATMAP_BUCKET_SECONDS = 3600;
+// 最新一格的数是整点聚合值，一分钟内不会变，没必要跟着 10 秒轮询重算 169 个桶。
+const HEATMAP_TTL_MS = 60000;
 
 // 页面级状态：时间范围与主图指标是用户选择，需在轮询重绘间保持。
 const state = {
@@ -40,6 +47,12 @@ const state = {
   snapshotAt: null,
   loading: true,
   trendMode: "line",
+  // 热力图独立于上面的窗口：自己的 7 天数据、自己的指标、自己的刷新节奏。
+  heatMetric: "requests",
+  heatPoints: null,
+  heatError: null,
+  heatAt: null,
+  heatToken: 0,
 };
 
 let host = null;
@@ -70,6 +83,21 @@ async function loadWindow(force = false) {
   state.seriesBucket = series.bucket_seconds || bucket;
   state.snapshotAt = new Date().toISOString();
   state.loading = false;
+  draw();
+}
+
+// 热力图数据与主图分开取：它固定 7 天，且不需要每次都重算。
+// TTL 对失败同样生效（heatAt 记录的是"上次尝试"），否则接口报错时每次轮询都会重试。
+async function loadHeatmap(force = false) {
+  if (!force && state.heatAt && Date.now() - Date.parse(state.heatAt) < HEATMAP_TTL_MS) return;
+  const token = ++state.heatToken;
+  const series = await api
+    .series(HEATMAP_HOURS, HEATMAP_BUCKET_SECONDS)
+    .catch((error) => ({ __error: errorText(error) }));
+  if (token !== state.heatToken) return; // 已有更新的请求在途，丢弃过期响应
+  state.heatError = series.__error || null;
+  state.heatPoints = series.__error ? null : (series.points || []);
+  state.heatAt = new Date().toISOString();
   draw();
 }
 
@@ -360,6 +388,37 @@ function runtimeCard() {
   );
 }
 
+// —— 热力图：一周的用量节律 ——
+// 与页头窗口无关（见 HEATMAP_HOURS 的说明），所以徽标自己写死"7 天"，
+// 不跟 rangeLabel() 走 —— 否则切到 1h 时图上写着"最近 1 小时"、矩阵却是整周。
+function heatmapCard() {
+  const metric = HEATMAP_METRICS.find((item) => item.id === state.heatMetric) || HEATMAP_METRICS[0];
+  const points = state.heatPoints || [];
+  const body = state.heatError
+    ? notice(`热力图数据读取失败: ${state.heatError}`, "error")
+    : !state.heatPoints
+      ? skeleton("chart")
+      : heatmap({
+          points,
+          metric,
+          ariaLabel: `最近 7 天的${metric.label}热力图，按周内与小时分布`,
+        });
+
+  return card(
+    cardHead("用量热力图",
+      badge("最近 7 天", "muted"),
+      badge("1 小时/格", "muted"),
+      h("div.head-tools", {},
+        segmented(HEATMAP_METRICS.map((item) => ({ id: item.id, label: item.label })),
+          state.heatMetric,
+          (id) => { state.heatMetric = id; draw(); },
+          { "aria-label": "选择热力图指标" }),
+      ),
+    ),
+    body,
+  );
+}
+
 // —— 页面组装 ——
 export function renderOverview(context) {
   xtxRef = context;
@@ -369,8 +428,11 @@ export function renderOverview(context) {
   }
   if (!state.snapshot && !state.loading) state.loading = true;
   if (state.seriesHours !== state.hours) loadWindow();
+  loadHeatmap();
   // 指标轮询时刷新本页窗口数据（快照 + 序列一起，保持同屏口径一致）。
-  context.onTick?.(() => { loadWindow(true); });
+  // 热力图有自己的 60 秒 TTL，force 会绕过它 —— 但那时桶内容其实没变，
+  // 所以只在窗口数据真正变化时顺带刷新，避免每 10 秒重画 169 个格子。
+  context.onTick?.(() => { loadWindow(true); loadHeatmap(); });
   draw();
   return host;
 }
@@ -426,6 +488,9 @@ function draw() {
   // 整体节奏显得松散。合成一个栅格后，所有间隙统一为 gap。
   // 每排仍按最高卡等高（见 styles.css 的说明），因此排内底边平齐。
   children.push(h("div.grid-12", {},
+    // 热力图紧贴 KPI 瓦片下方并占满整行：它是"一眼看节律"的图，
+    // 放在页面末尾要滚到底才看得到；而 24 个小时列塞进 col-4 每格只剩十几像素。
+    h("div.col-12", {}, heatmapCard()),
     h("div.col-8", {}, trendCard()),
     h("div.col-4", {}, unifiedCard()),
     h("div.col-4", {}, compositionCard(metrics)),

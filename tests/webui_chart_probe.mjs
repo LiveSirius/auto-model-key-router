@@ -163,6 +163,54 @@ check("compact_small_int", m.formatCompactNumber(42) === "42");
 check("duration_seconds", m.formatDurationValue(2500) === "2.50s", m.formatDurationValue(2500));
 check("duration_ms", m.formatDurationValue(240) === "240ms");
 
+// —— 热力图：星期 × 小时的落格 ——
+// 最容易错的是"星期几/几点"取自哪里：后端时间戳带 +08:00，若读 Date 的
+// getDay/getHours，浏览器时区一变整张矩阵就平移。这里锁死按 Asia/Shanghai 取。
+// 2026-01-01 是周四，01-04 是周日。
+check("slot_beijing_thursday_10", JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")) === JSON.stringify({ weekday: 3, hour: 10 }),
+  JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")));
+check("slot_sunday_23", JSON.stringify(m.beijingSlot("2026-01-04T23:30:00+08:00")) === JSON.stringify({ weekday: 6, hour: 23 }),
+  JSON.stringify(m.beijingSlot("2026-01-04T23:30:00+08:00")));
+// 同一时刻换成 UTC 写法，格子必须完全一致。
+check("slot_same_for_utc_form",
+  JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")) === JSON.stringify(m.beijingSlot("2026-01-01T02:00:00Z")));
+// 00:30 属于 0 点那一格，不能被四舍五入到 1 点。
+check("slot_hour_zero_not_rounded", m.beijingSlot("2026-01-01T00:30:00+08:00").hour === 0);
+check("slot_bad_input_is_null", m.beijingSlot("not-a-date") === null);
+
+const heatPoints = [
+  { started_at: "2026-01-01T10:00:00+08:00", requests: 5, total_tokens: 500, complete: true },
+  { started_at: "2026-01-01T10:00:00+08:00", requests: 7, total_tokens: 700, complete: true },
+  { started_at: "2026-01-01T10:00:00+08:00", requests: 3, total_tokens: 300, complete: false },
+  { started_at: "2026-01-04T23:00:00+08:00", requests: 100, total_tokens: 9000, complete: true },
+];
+const cells = m.heatmapCells(heatPoints, { value: (p) => p.requests });
+check("heat_cells_shape", cells.length === 7 && cells.every((row) => row.length === 24));
+check("heat_sums_same_slot", cells[3][10].value === 15, String(cells[3][10].value));
+check("heat_counts_buckets", cells[3][10].buckets === 3, String(cells[3][10].buckets));
+check("heat_marks_partial", cells[3][10].partial === true);
+check("heat_other_cell_untouched", cells[6][23].value === 100 && cells[6][23].buckets === 1);
+// 没数据 ≠ 值为 0：buckets 为 0 才是"窗口未覆盖"，这一条决定了格子画斜纹还是纯色。
+check("heat_coverless_has_zero_buckets", cells[0][0].buckets === 0 && cells[0][0].value === 0);
+check("heat_cell_has_data_is_not_coverless", cells[3][10].buckets > 0);
+check("heat_undefined_point_ignored", m.heatmapCells([undefined, {}])[0][0].buckets === 0);
+check("heat_tokens_metric", m.heatmapCells(heatPoints, { value: m.HEATMAP_METRIC_MAP.tokens.pick })[3][10].value === 1500);
+
+// 色阶上限只看有数据的格子：空窗口不能因为"未覆盖"就给出非零上限。
+check("heat_scale_uses_data_max", m.heatmapScale(cells) === 100, String(m.heatmapScale(cells)));
+check("heat_scale_zero_when_no_data", m.heatmapScale(m.heatmapCells([])) === 0);
+check("heat_scale_ignores_coverless", m.heatmapScale(m.heatmapCells([
+  { started_at: "2026-01-01T10:00:00+08:00", requests: 4, complete: true },
+])) === 4);
+
+// 档位：0 单独一档（真·空闲），最大值必须落在最高档。
+check("heat_level_zero_is_zero", m.heatmapLevel(0, 100) === 0);
+check("heat_level_max_is_top", m.heatmapLevel(100, 100) === m.HEAT_LEVELS);
+check("heat_level_monotonic", [1, 25, 50, 75, 100].every((v, i, arr) =>
+  i === 0 || m.heatmapLevel(v, 100) >= m.heatmapLevel(arr[i - 1], 100)));
+check("heat_level_no_data_is_zero", m.heatmapLevel(5, 0) === 0);
+check("heat_levels_has_zero_and_top", m.HEAT_LEVELS >= 2);
+
 const failed = Object.entries(checks).filter(([, value]) => value !== true);
 console.log(JSON.stringify({ failed: failed.map(([name, detail]) => `${name} (${detail})`), total: Object.keys(checks).length }));
 process.exit(failed.length ? 1 : 0);

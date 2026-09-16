@@ -296,6 +296,93 @@ export function statusGroups(statusCodes) {
   return groups;
 }
 
+// —— 热力图：星期 × 小时的用量矩阵 ——
+// 数据来自 /metrics/series?hours=168&bucket_seconds=3600：一小时一个桶，每个桶的
+// started_at 本身就直接落在某个 (星期, 小时) 格子里，所以不需要客户端二次聚合，
+// 把桶放进格子求和即可。这也是唯一不需要改后端的做法。
+
+export const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+export const HEATMAP_DAYS = 7;
+export const HEATMAP_HOURS = 24;
+// 4 档 + 0 档。档数再多，浅色系里相邻两档的肉眼差异就没了。
+export const HEAT_LEVELS = 4;
+
+// 热力图的两个口径：直接取桶内原始计数，不做速率换算 —— 热力图回答的是
+// "这一小时发生了多少"，换算成每分钟只会把 24 格读数全除以 60。
+export const HEATMAP_METRICS = [
+  {
+    id: "requests",
+    label: "请求数量",
+    pick: (point) => number(point.requests),
+    format: (value) => `${formatCompactNumber(value)} 次`,
+  },
+  {
+    id: "tokens",
+    label: "Token 数量",
+    pick: (point) => number(point.total_tokens),
+    format: (value) => `${formatCompactNumber(value)} Token`,
+  },
+];
+
+export const HEATMAP_METRIC_MAP = Object.fromEntries(
+  HEATMAP_METRICS.map((metric) => [metric.id, metric]));
+
+// 按 Asia/Shanghai 取"星期几 + 几点"。不能读 Date 的 getDay/getHours：后端时间戳
+// 都带 +08:00，但浏览器时区可能不同，本地字段会把整张矩阵平移。
+const BEIJING_PARTS = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", hourCycle: "h23",
+});
+
+export function beijingSlot(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = {};
+  for (const part of BEIJING_PARTS.formatToParts(date)) parts[part.type] = part.value;
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const hour = Number(parts.hour);
+  if (![year, month, day, hour].every(Number.isFinite)) return null;
+  // 用 UTC 构造"北京那一天的零点"再取 UTC 星期，绕开浏览器本地时区对 Date 的影响；
+  // getUTCDay() 的 0 是周日，映射成 0=周一。
+  const weekday = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
+  return { weekday, hour };
+}
+
+// 每格记 { value, buckets, partial }：buckets 用来区分"没数据"与"确实是 0"，
+// 前者是窗口没覆盖到、后者是这一小时真的没有流量，画成同一种灰会谎报。
+export function heatmapCells(points, { value = (point) => number(point.requests) } = {}) {
+  const cells = Array.from({ length: HEATMAP_DAYS }, () =>
+    Array.from({ length: HEATMAP_HOURS }, () => ({ value: 0, buckets: 0, partial: false })));
+  for (const point of points || []) {
+    const slot = beijingSlot(point?.started_at);
+    if (!slot) continue;
+    const cell = cells[slot.weekday][slot.hour];
+    cell.value += value(point);
+    cell.buckets += 1;
+    // 累加中的整点桶天然偏低，格子要标出来，否则最新一小时会被读成"突然没流量"。
+    if (point.complete === false) cell.partial = true;
+  }
+  return cells;
+}
+
+// 色阶上限取有数据格子的最大值：热力图要看的是"什么时候是峰值"，按分位数归一
+// 会把所有格子摊平、反而看不出峰。
+export function heatmapScale(cells) {
+  const values = (cells || []).flat()
+    .filter((cell) => cell.buckets > 0)
+    .map((cell) => cell.value);
+  return values.length ? Math.max(...values) : 0;
+}
+
+// 0 单独一档（真·空闲），其余按最大值线性切 steps 档。没有数据时返回 0。
+export function heatmapLevel(value, max, steps = 4) {
+  if (!(max > 0)) return 0;
+  return Math.min(steps, Math.max(0, Math.ceil(value / (max / steps))));
+}
+
 // —— 数字格式化（纯函数，与 dom.js 的展示版保持一致精度）——
 
 export function formatNumber(value, digits = 1) {

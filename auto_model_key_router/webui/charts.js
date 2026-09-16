@@ -9,6 +9,7 @@
 import { h, svg, mount, formatClock, formatClockSeconds, formatDateTime, clamp } from "./dom.js";
 import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
+  heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_HOURS, HEAT_LEVELS,
   formatNumber, formatCompactNumber, formatPercentValue, formatDurationValue,
 } from "./chart-math.js";
 
@@ -386,6 +387,84 @@ export function barList(rows, { format = (row) => formatNumber(row.value, 0), to
     ));
   }
   return list;
+}
+
+// —— 热力图：星期 × 小时 ——
+// 用 CSS 栅格而不是 SVG：矩阵是 7×24 的规则格子，栅格天然处理"每格等宽"，
+// 而 SVG 得自己算 168 个矩形的坐标，宽度变化还要重算一遍。
+// 行容器设 display:contents，让行列的子元素直接落进同一个栅格：
+// 这样表头、星期标签与格子共享同一套列宽，不需要手算 span。
+export function heatmap({ points, metric, ariaLabel = "用量热力图" }) {
+  const cells = heatmapCells(points, { value: metric.pick });
+  const max = heatmapScale(cells);
+  const grid = h("div.heatmap", { role: "img", "aria-label": ariaLabel });
+
+  // 表头每 3 小时标一个：24 个标签在窄屏会糊成一片。
+  const head = h("div.heat-row", {}, h("span.heat-corner"));
+  for (let hour = 0; hour < HEATMAP_HOURS; hour += 1) {
+    head.append(h("span.heat-hour", {}, hour % 3 === 0 ? `${hour}:00` : ""));
+  }
+  grid.append(head);
+
+  const tip = h("div.chart-tip", { role: "status" });
+  const frame = h("div.heat-frame", {}, grid, tip);
+  const show = (cell, weekday, hour) => {
+    mount(tip,
+      h("span.tip-time", `${WEEKDAY_LABELS[weekday]} ${String(hour).padStart(2, "0")}:00`),
+      // "窗口未覆盖"与"这一小时确实是 0"必须分开说：前者是没数据，后者是没流量。
+      h("span.tip-value", cell.buckets ? metric.format(cell.value) : "窗口未覆盖"),
+      cell.partial ? h("span.tip-flag", "累加中") : null,
+    );
+    // 先显示再测量：display:none 时 getBoundingClientRect 全是 0，气泡会被钉在左上角。
+    tip.classList.add("is-visible");
+    const spot = cell.node.getBoundingClientRect();
+    const host = frame.getBoundingClientRect();
+    const box = tip.getBoundingClientRect();
+    tip.style.left = `${clamp(spot.left - host.left + spot.width / 2 - box.width / 2, 4, Math.max(4, host.width - box.width - 4))}px`;
+    tip.style.top = `${clamp(spot.top - host.top - box.height - 6, 0, Math.max(0, host.height - box.height))}px`;
+  };
+
+  cells.forEach((row, weekday) => {
+    const line = h("div.heat-row", {}, h("span.heat-day", WEEKDAY_LABELS[weekday]));
+    row.forEach((cell, hour) => {
+      cell.node = h("span.heat-cell", {
+        class: heatCellClass(cell, max),
+        // 格子本身不进无障碍树：整块矩阵有一个 aria-label，168 个无标签格子
+        // 只会把读屏淹没。
+        "aria-hidden": "true",
+      });
+      cell.node.addEventListener("pointerenter", () => show(cell, weekday, hour));
+      line.append(cell.node);
+    });
+    grid.append(line);
+  });
+  grid.addEventListener("pointerleave", () => tip.classList.remove("is-visible"));
+
+  const legendLevels = h("span.heat-legend-scale");
+  for (let level = 0; level <= HEAT_LEVELS; level += 1) {
+    legendLevels.append(h("i", { class: `heat-cell level-${level}`, "aria-hidden": "true" }));
+  }
+
+  return h("div.stack", {},
+    frame,
+    h("div.heat-legend", {},
+      h("span.muted", "少"),
+      legendLevels,
+      h("span.muted", "多"),
+      max > 0 ? h("span.muted", `· 峰值 ${metric.format(max)}`) : h("span.muted", "· 窗口内无数据"),
+      h("span.spacer"),
+      h("span.muted", { title: "斜纹格表示该时段不在统计窗口内" }, "斜纹 = 窗口未覆盖"),
+    ),
+  );
+}
+
+function heatCellClass(cell, max) {
+  return [
+    "heat-cell",
+    `level-${cell.buckets ? heatmapLevel(cell.value, max, HEAT_LEVELS) : 0}`,
+    cell.buckets ? "" : "is-coverless",
+    cell.partial ? "is-partial" : "",
+  ].filter(Boolean).join(" ");
 }
 
 // —— 图例 ——
