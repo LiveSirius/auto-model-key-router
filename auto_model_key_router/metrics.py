@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import math
 import sqlite3
+import threading
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -94,6 +95,8 @@ class MetricsStore:
             self.database_path.parent.mkdir(parents=True, exist_ok=True)
         self._started_at = _now_beijing()
         self._lock = asyncio.Lock()
+        # 见 _run：连接的真实互斥必须由线程锁保证，asyncio 锁挡不住被取消的调度。
+        self._thread_lock = threading.Lock()
         self._active_count = 0
         self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
         self._connection.row_factory = sqlite3.Row
@@ -111,6 +114,31 @@ class MetricsStore:
     @property
     def active_count(self) -> int:
         return self._active_count
+
+    async def _run(self, fn: Callable[..., Any], *args: Any) -> Any:
+        """在后台线程里执行一次连接操作，并保证线程真正结束后才返回。
+
+        不能直接用 asyncio.to_thread：它无法取消，任务被 cancel 时 await 立刻抛出，
+        但工作线程仍在用同一个 sqlite 连接。此时 close() 会拿到已释放的 asyncio 锁
+        并关闭连接，正在查询的线程随即触发 native access violation（进程级崩溃）。
+
+        因此互斥放进工作线程里（_thread_lock）：取消只能中断 await，中断不了线程，
+        而 close() 同样要抢这把锁，于是自然排在所有进行中的查询之后。取消路径还要
+        等线程收尾再抛出，避免把「已经在跑」的查询留给 close()。
+        """
+
+        def guarded() -> Any:
+            with self._thread_lock:
+                return fn(*args)
+
+        task = asyncio.ensure_future(asyncio.to_thread(guarded))
+        try:
+            return await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # gather(return_exceptions=True) 既等线程收尾，又消费掉它的异常，
+            # 避免 "Task exception was never retrieved" 噪音。
+            await asyncio.gather(task, return_exceptions=True)
+            raise
 
     async def record(
         self,
@@ -133,7 +161,7 @@ class MetricsStore:
         caller_type = caller_type if caller_type in {"local", "visitor"} else "local"
         failure = failed or status_code is None or status_code >= 400
         async with self._lock:
-            await asyncio.to_thread(
+            await self._run(
                 self._record_sync,
                 model_id,
                 key_name,
@@ -219,7 +247,7 @@ class MetricsStore:
     async def snapshot(self, hours: float | None = None, since: datetime | None = None) -> dict[str, Any]:
         async with self._lock:
             now = _now_beijing()
-            return await asyncio.to_thread(self._snapshot_sync, hours, since, now)
+            return await self._run(self._snapshot_sync, hours, since, now)
 
     async def key_stats(
         self,
@@ -228,7 +256,7 @@ class MetricsStore:
         hours: float | None = None,
     ) -> dict[str, Any]:
         async with self._lock:
-            return await asyncio.to_thread(
+            return await self._run(
                 self._key_stats_sync, model_id, key_name, hours
             )
 
@@ -251,7 +279,7 @@ class MetricsStore:
     ) -> dict[str, Any]:
         async with self._lock:
             now = _now_beijing()
-            return await asyncio.to_thread(
+            return await self._run(
                 self._request_history_sync,
                 hours,
                 caller_type,
@@ -287,7 +315,7 @@ class MetricsStore:
     ) -> dict[str, Any]:
         async with self._lock:
             now = _now_beijing()
-            return await asyncio.to_thread(
+            return await self._run(
                 self._time_series_sync,
                 hours,
                 bucket_seconds,
@@ -844,7 +872,9 @@ class MetricsStore:
         async with self._lock:
             if self._closed:
                 return
-            await asyncio.to_thread(self._connection.close)
+            # 走 _run（内部持 _thread_lock）：必须等所有在途查询真正结束再关连接，
+            # 否则正在执行 SQL 的线程会踩到已关闭的 sqlite 句柄而崩溃。
+            await self._run(self._connection.close)
             self._closed = True
 
     def _configure_connection(self) -> None:

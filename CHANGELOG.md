@@ -11,6 +11,8 @@
 
 ### Fixed
 
+- 修复 `EventBus.broadcast("client_count", ...)` 漏掉 `await`：`/ws/events` 的客户端数量事件从未真正发出（只在日志里留下 `RuntimeWarning: coroutine ... was never awaited`）。
+- 修复服务退出时的 sqlite **原生崩溃**（`Windows fatal exception: access violation`，进程直接挂掉）。`MetricsStore` 用 `asyncio.Lock` 串行化连接访问，再用 `asyncio.to_thread` 执行查询；但 `to_thread` 无法取消 —— 任务被 cancel 时 await 立刻抛出、锁随之释放，**工作线程仍在用同一个连接执行 SQL**，随后 `close()` 拿到刚释放的锁并关闭连接，正在查询的线程就踩到已失效的 sqlite 句柄。现在互斥下沉到工作线程（`threading.Lock`）：取消只能中断 await、中断不了线程，而 `close()` 同样要抢这把锁，于是自然排在所有在途查询之后；取消路径也会先等线程收尾再抛出。这个缺陷此前被上面那个漏掉的 `await` 掩盖着（时序恰好错开），修好 `await` 后立即暴露。
 - 修复 WebUI 图表读数气泡里多出一行 `null`：原生 `replaceChildren` 会把 `null` 子项字符串化成文本节点 `"null"`，与 `dom.js` 里会过滤空值的 `append()` 行为不同，于是每个**已完结**的点都在读数下多显示一行 `null`（只有「累加中」的尾桶才看不到）。折线图与 Token 堆叠柱两处气泡、以及统一模型编辑表单（路由方式非「固定 Key」时）都改用会过滤空值的 `mount()`。同时补上 `tests/webui_tip_probe.mjs`：用忠实还原 `replaceChildren` 语义的 DOM 垫片驱动真实的 `charts.js`，此前的垫片一律复用会过滤空值的 `append()`，恰好把这个 bug 藏了过去。
 - 修复发布只更新 `pyproject.toml` 而不更新 `uv.lock`：uv 把根项目也写进 `uv.lock`，于是打出的 tag 上 `pyproject.toml` 是 4.1.0、`uv.lock` 仍写着 4.0.3，`uv sync --locked` 会直接报 lock 过期；且此后任何 `uv run` 都会把它改回去，工作区永远脏一块。现在改版本号时同步 `uv.lock` 中根项目的 `version`（只改根项目那一处，不碰依赖），并且不调用 `uv lock` —— 只有根项目版本变化、依赖解析结果不变，联网跑 lock 反而可能因索引不可达而失败。
 - 修复推送失败的处理只认「错误文本里出现 `proxy` / `127.0.0.1`」：`schannel: failed to receive handshake, SSL/TLS connection failed` 这句话两者都不含，于是既不绕过代理、也不重试，一次瞬时网络抖动就把整个发布卡在最后一步，而提交和标签已经建好，留下「已提交已打标签、但没推上去」的半成品状态。现在把连接类失败（代理、TLS 握手、连接被拒/重置、超时、域名解析失败）统一识别：先临时绕过代理试一次，仍失败则退避重试，共 3 轮，并在最终报错里保留原始正文；鉴权被拒这类非连接错误仍不重试。

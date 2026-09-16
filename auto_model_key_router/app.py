@@ -117,7 +117,7 @@ def create_app(
         _metrics_dirty.set()
 
     async def _on_client_count_change(count: int) -> None:
-        app.state.event_bus.broadcast("client_count", {"count": count})
+        await app.state.event_bus.broadcast("client_count", {"count": count})
         if count > 0:
             await _broadcast_metrics_snapshot()
 
