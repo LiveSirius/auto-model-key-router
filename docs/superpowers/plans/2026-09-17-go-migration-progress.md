@@ -276,6 +276,19 @@ Python 侧基线：`python -X utf8 -m pytest -q` → **485 passed**（约 250 �
 5. 复测：`gofmt -l .`、`go vet ./...`、`go test ./...`、以及**剩余未退役门禁**全部仍为绿。
 6. 独立提交，提交信息写明删除依据（哪些测试/冒烟证明它已被 Go 取代）。
 
+### `scripts/` 清理清单（实测清单，Python 退役后）
+
+| 文件 | 行数 | 处置 |
+| --- | --- | --- |
+| `gen_*_corpus.py`（**18 个**） | 14,196 | 全部删除——它们 import 真实 Python 参照实现；语料已冻结在 `internal/*/testdata/` |
+| `release.py` | 639 | 删除；改为 Go 的发布流程（`release.yml` 的 Python 分支一并退役） |
+| `webui_preview.py` | 502 | 删除；其职责（托管前端静态资源）由 Go 二进制自身的 `/ui` 承担 |
+| `webui_preview_check.py` | 39 | 删除（依赖上面的预览服务） |
+| `webui_smoke.ps1` | 83 | 删除或改写为针对 Go 二进制 /ui 的冒烟（依赖预览服务与浏览器） |
+| **`webui_module_check.mjs`** | 66 | **保留**——纯 JS 检查前端 ES 模块 import 图，与后端语言无关，前端资产仍随包发布 |
+
+合计待清：**22 个脚本、约 15,400 行**。`webui_module_check.mjs` 是唯一与后端语言无关的，
+CI 里应保留它的 `node` 步骤。
 最终：`python` CI 作业整体删除，只剩 `go` 作业；`pyproject.toml` 与 `release.yml` 的 Python
 分支一并清理。
 ## 提交约定
