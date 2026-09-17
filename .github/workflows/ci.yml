@@ -1,0 +1,142 @@
+name: CI
+
+# 迁移期测试门禁：AMKR 正从 Python 迁到 Go，两侧代码同仓库共存、逐模块替换。
+# 一旦两边行为漂移而没人发现，兼容性就被静默破坏（配置读写、canonical 序列化、
+# key 选择这些地方出错都不报警，只表现为「偶尔不对」）。
+#
+# release.yml 只在 pyproject.toml 变更时触发，且流程里完全没有测试步骤：
+# 约 485 个 Python 测试与 Go 测试此前只在本地跑。这个工作流补上真正的红绿信号。
+#
+# 触发：推送到主分支（master）与所有 PR。刻意不加 paths 过滤 —— 任何文件都可能
+# 引入漂移（改实现没重生成语料、改 Dockerfile 影响打包测试等），漏跑等于没门禁。
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+# 同一分支上的旧运行直接取消：迁移期提交密集，避免排队堆积、浪费额度。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# 本工作流只读仓库，不推送任何产物。
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: Python 测试、WebUI 检查与语料新鲜度
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      # 仓库含大量中文（断言消息、语料内容、脚本提示）。pytest 与各语料脚本都会把
+      # 中文写到 stdout/stderr，编码不对时会抛 UnicodeEncodeError 或输出乱码，
+      # 让日志读不出真正的失败原因。命令里另外统一带 -X utf8 双保险。
+      PYTHONIOENCODING: utf-8
+
+    # 有意不纳入 CI 的两个脚本（都依赖 CI 上不存在的本机环境）：
+    #   * scripts/webui_smoke.ps1 —— 需本机 Chrome/Edge 可执行文件 + 预览服务，
+    #     托管 runner 无浏览器；且只能在 Windows 上跑。
+    #   * scripts/webui_preview_check.py —— 需先拉起预览服务再访问
+    #     127.0.0.1:8813（前台阻塞式服务），属于「依赖本机服务」。
+    # 它们的覆盖意图由上面的 node 探针与 pytest 承担，故不放进 CI。
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # 固定到与 pyproject.toml requires-python >=3.12 一致的解释器版本。
+          python-version: "3.12"
+          cache: pip
+          # 仓库没有 requirements.txt。setup-python 的 pip 缓存默认按
+          # **/requirements.txt 算缓存 key，这里显式指向 pyproject.toml，
+          # 缓存 key 才会真正跟随依赖清单变化（否则永远命中同一份缓存）。
+          cache-dependency-path: pyproject.toml
+
+      - name: 安装依赖
+        # 用 dev 依赖组：除 pytest 外还带 itsdangerous —— 它是 visitor 可选功能的
+        # 唯一标记（visitor.py 靠能否 import 它判断功能是否可用）。只装 [test]
+        # 会让 VISITOR_FEATURE_AVAILABLE 变成 False，与本地/发布环境不一致。
+        # -e 可编辑安装：确保 import 到的是工作区源码，而不是构建产物。
+        run: |
+          python -X utf8 -m pip install --upgrade pip
+          python -X utf8 -m pip install -e ".[dev]"
+
+      - name: Python 单元测试（pytest）
+        # tests/ 下另有 3 个 .mjs 探针（webui_auth_probe / webui_chart_probe /
+        # webui_tip_probe.mjs），都用 DOM 垫片 + 假 fetch，不依赖真实网络或本机
+        # 服务，因此适合进 CI。它们已由 test_webui.py、test_webui_charts.py 通过
+        # subprocess 调度，随本步一起跑，无需再写独立命令。
+        # 注意：这些用例在找不到 node 时会 pytest.skip —— GitHub 托管 runner
+        # 自带 node，故实际会真的执行；换自托管 runner 需自行保证 node 存在。
+        run: python -X utf8 -m pytest
+
+      - name: WebUI 模块加载检查（node）
+        # scripts/webui_module_check.mjs 逐个 import auto_model_key_router/webui
+        # 下的全部 16 个 ES 模块，抓语法错误与 import 图断裂。
+        # 为什么必须单独一条：pytest 的探针只 import app.js / api.js / charts.js
+        # / chart-math.js 及其传递依赖，**入口 main.js 不被任何探针加载**，
+        # 它出错（拼错导入、语法错）在现有测试里是盲区，而它坏了整站白屏。
+        # 该脚本自带浏览器垫片与假 fetch，纯本地文件读取、不碰网络，故适合 CI。
+        # 依赖 import.meta.dirname，需要 node >= 20.11（托管 runner 满足）。
+        run: node scripts/webui_module_check.mjs
+
+      # —— 语料新鲜度门禁 ——
+      # 各 gen_*_corpus.py 用 Python 参照实现的真实输出生成语料，Go 测试再逐条
+      # 断言复现同一结果。改了一侧实现却忘了重新生成语料时，对拍就失去意义：
+      # 要么 Go 测试拿旧语料比新实现（失败信息指向 Go，真凶却在 Python），
+      # 要么两侧一起漂移而「自我循环」永远为绿。
+      # --check 不写盘、只逐字节比对现有语料，任一脚本非 0 即整轮红。
+      # 拆成 4 个独立 step，失败时一眼能看出是哪一块语料过期。
+      - name: 语料新鲜度（canonical）
+        run: python -X utf8 scripts/gen_canonical_corpus.py --check
+
+      - name: 语料新鲜度（config）
+        run: python -X utf8 scripts/gen_config_corpus.py --check
+
+      - name: 语料新鲜度（config model）
+        run: python -X utf8 scripts/gen_config_model_corpus.py --check
+
+      - name: 语料新鲜度（keypool）
+        run: python -X utf8 scripts/gen_keypool_corpus.py --check
+
+  go:
+    name: Go 静态检查与测试
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          # 以 go.mod 的 go 指令为单一来源（当前 1.24.0）：避免工作流里再写一份
+          # 字面量、升级 Go 时漏改一处导致两处不一致。
+          go-version-file: go.mod
+          # 缓存 GOMODCACHE / GOCACHE，缓存 key 默认取 go.sum。
+          cache: true
+
+      - name: gofmt 格式检查
+        # gofmt -l 只列出「需要格式化」的文件，本身始终返回 0，所以必须自己判断
+        # 输出是否为空：有输出就说明有人没跑 gofmt，直接失败。
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "以下 Go 文件未按 gofmt 格式化，请运行 gofmt -w 后再提交："
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "gofmt 检查通过：所有 Go 文件均已格式化。"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Go 测试（go test）
+        # Go 侧测试是迁移的兼容性证据：它们逐条重放 Python 生成的语料。
+        run: go test ./...
