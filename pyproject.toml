@@ -24,13 +24,15 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "fastapi>=0.115.0",
-    "httpx>=0.27.0",
-    "rich>=13.7.0",
-    "tomlkit>=0.13.3",
+    # 作为别人的依赖项时主版本必须设上限：这些库的 minor 版本会改行为，
+    # 例如 Starlette 1.x 已经让 starlette.testclient 的 httpx 用法告警。
+    "fastapi>=0.115.0,<1.0.0",
+    "httpx>=0.27.0,<1.0.0",
+    "rich>=13.7.0,<15.0.0",
+    "tomlkit>=0.13.3,<1.0.0",
     "tzdata>=2025.2; platform_system == 'Windows'",
-    "uvicorn>=0.30.0",
-    "websockets>=12.0",
+    "uvicorn>=0.30.0,<1.0.0",
+    "websockets>=12.0,<16.0",
 ]
 
 [project.optional-dependencies]
