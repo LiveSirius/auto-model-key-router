@@ -253,14 +253,22 @@ func (c *Client) Transport() *http.Transport { return c.transport }
 // 在途请求不受影响，而这正是租约要保护的东西（manager.go:28-33）。
 func (c *Client) CloseIdleConnections() { c.transport.CloseIdleConnections() }
 
-// UpstreamURL 拼出上游 URL，query 逐字转发、绝不重编码。
+// UpstreamURL 拼出上游 URL；rawQuery 参数被**逐字**接上，本函数不做任何重编码。
 //
-// 路径拼接对齐 proxy_support.py:304-305 的 _join_url。query 部分刻意不做任何
-// 处理：参照实现把 Starlette 的 query_params 交给 httpx 的 params=
-// （proxy_support.py:355）；而在 Go 侧若走 url.Values.Encode() 会重排键序、把
-// %20 变成 +、改写转义大小写，并丢掉没有 = 的裸键。这里按 URL.RawQuery 原样透传
-// ——下游发什么字节，上游就收到什么字节。调用方直接把这个字符串交给
-// http.NewRequest 即可（url.Parse 不重写 RawQuery 中的转义）。
+// 路径拼接对齐 proxy_support.py:304-305 的 _join_url。query 部分本函数刻意不处理：
+// 调用方给什么就接什么。调用方直接把这个字符串交给 http.NewRequest 即可
+// （url.Parse 不重写 RawQuery 中的转义）。
+//
+// **更正（原注释的说法有误）**：这里曾写着「逐字转发是本实现优于参照实现的一处」，
+// 并据此断言「下游发什么字节，上游就收到什么字节」。实测证明后半句在整条链路上
+// **不成立**：参照实现把 Starlette 的 query_params 交给 httpx 的 params=
+// （proxy_support.py:355），httpx 对 Mapping 走 urlencode，因此会**重编码** query——
+// `y=%20z`→`y=+z`、同名键取最后值并保留首次位置、裸键补 `=`、`%7E`→`~`。
+//
+// 也就是说「是否重编码」是**调用方**的决定，不是本函数的属性：internal/proxy 实现了
+// 与 httpx 等价的 reencodeQuery（query.go），并在调用本函数前把 query 重编码好，从而
+// 与参照实现逐字一致。两侧必须一致——一个重编码、一个原样，会让同一个下游请求在两种
+// 实现下命中不同的上游缓存键。
 func UpstreamURL(baseURL, path, rawQuery string) string {
 	// TrimRight/TrimLeft 而不是 TrimSuffix/TrimPrefix：后者只去掉**一个**斜杠，而
 	// 参照实现的 rstrip/lstrip 去掉**全部**。实测
