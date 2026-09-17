@@ -6,29 +6,34 @@ import (
 	"strings"
 )
 
-// parseInt 对齐 Python 的 int() 语义。
+// parseInt 把**数字字面量**转成 int64，对齐 Python 的 int(number)。
 //
-// 与 parseFloat 分开的原因：Python 的 int("60.0") 会抛 ValueError（字符串只接受
-// 整数写法），而 int(60.0) 会截断成 60（浮点可以转）。两者必须区分，否则
-// config 里把 port 写成字符串 "8000.5" 时会被静默接受，而 Python 会直接报错。
+// 两种情况必须区分（Python 亦如此）：
+//   - 整数字面量精确解析，超出 int64 视为失败（Python 支持任意精度，Go 侧失败关闭）；
+//   - 浮点字面量向零截断：int(8080.0) == 8080、int(-3.7) == -3。
+//
+// 字符串来源不能走这里——Python 的 int("60.0") 抛 ValueError，而 int(60.0) 成功。
+// 字符串请用 ToInt / pyIntFromString。
 func parseInt(literal string) (int64, bool) {
-	s := strings.TrimSpace(literal)
-	if s == "" {
-		return 0, false
-	}
-	n, err := strconv.ParseInt(s, 10, 64)
-	if err == nil {
+	if isIntLiteral(literal) {
+		n, err := strconv.ParseInt(strings.TrimSpace(literal), 10, 64)
+		if err != nil {
+			return 0, false
+		}
 		return n, true
 	}
-	if !isIntLiteral(s) {
-		// 含小数点或指数的字面量：Python 只会经 float 转换才接受，
-		// 字符串来源不接受，这里同样拒绝。
+	f, ok := parseFloat(literal)
+	if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
 		return 0, false
 	}
-	return 0, false
+	// 越界时 Go 的浮点转整数结果未定义，先挡掉。
+	if f >= math.MaxInt64 || f <= math.MinInt64 {
+		return 0, false
+	}
+	return int64(f), true
 }
 
-// parseFloat 对齐 Python 的 float() 语义，并接受 NaN / Infinity 字面量。
+// parseFloat 对齐 Python 对数字字面量的 float() 语义，并接受 NaN / Infinity。
 func parseFloat(literal string) (float64, bool) {
 	s := strings.TrimSpace(literal)
 	switch s {
@@ -54,31 +59,6 @@ func isIntLiteral(literal string) bool {
 	return !strings.ContainsAny(literal, ".eE") &&
 		!strings.Contains(literal, "Infinity") &&
 		!strings.Contains(literal, "NaN")
-}
-
-// intFromNumber 把数字 Value 转成 int64，对齐 Python 的 int(number)。
-//
-// 整数走精确解析（大整数超出 int64 时失败）；浮点向零截断，与 Python 一致。
-func intFromNumber(v *Value) (int64, bool) {
-	if v == nil || v.Kind != KindNumber {
-		return 0, false
-	}
-	if isIntLiteral(v.Num) {
-		n, err := strconv.ParseInt(v.Num, 10, 64)
-		if err != nil {
-			return 0, false
-		}
-		return n, true
-	}
-	f, ok := parseFloat(v.Num)
-	if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
-		return 0, false
-	}
-	// 越界时 Go 的转换结果未定义，先挡掉。
-	if f >= math.MaxInt64 || f <= math.MinInt64 {
-		return 0, false
-	}
-	return int64(f), true
 }
 
 // NewObjectOf 按键值对构造对象，保持传入顺序。

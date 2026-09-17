@@ -130,45 +130,27 @@ func (v *Value) AsBool() (bool, bool) {
 	return v.Bool, true
 }
 
-// AsInt 返回整数解析结果。
+// AsInt 返回整数解析结果，等价于 Python 的 int(value) 成功路径。
 //
-// 对齐 Python 的 int(value)：浮点截断、整数字符串可解析、布尔视作 0/1。
-// 第二个返回值报告是否成功。
+// 第二个返回值报告是否成功；需要区分 ValueError 与 TypeError、或需要 Python 的
+// 原始错误文本时，请用 ToInt。
 func (v *Value) AsInt() (int64, bool) {
-	if v == nil {
+	parsed, err := ToInt(v)
+	if err != nil {
 		return 0, false
 	}
-	switch v.Kind {
-	case KindNumber:
-		return parseInt(v.Num)
-	case KindBool:
-		if v.Bool {
-			return 1, true
-		}
-		return 0, true
-	case KindString:
-		return parseInt(v.Str)
-	}
-	return 0, false
+	return parsed, true
 }
 
-// AsFloat 返回浮点解析结果，对齐 Python 的 float(value)。
+// AsFloat 返回浮点解析结果，等价于 Python 的 float(value) 成功路径。
+//
+// 与 AsInt 同理，需要错误分类时请用 ToFloat。
 func (v *Value) AsFloat() (float64, bool) {
-	if v == nil {
+	parsed, err := ToFloat(v)
+	if err != nil {
 		return 0, false
 	}
-	switch v.Kind {
-	case KindNumber:
-		return parseFloat(v.Num)
-	case KindBool:
-		if v.Bool {
-			return 1, true
-		}
-		return 0, true
-	case KindString:
-		return parseFloat(v.Str)
-	}
-	return 0, false
+	return parsed, true
 }
 
 // StringValue 返回 Python 的 str(value or "") 语义结果。
@@ -338,14 +320,16 @@ func isFloatLiteral(literal string) bool {
 		strings.Contains(literal, "Infinity")
 }
 
-// Python 里 list 迭代元素、str 迭代字符、dict 迭代键，其余（int/float/bool）
-// 抛 TypeError。第三项容易被忽略：池白名单写成字符串 "ab" 时，Python 会把它
-// 展开成 'a'、'b' 两个模型名。
+// Python 里 list 迭代元素、str 迭代字符、dict 迭代键，其余（None、int、float、
+// bool）抛 TypeError。后三点容易被忽略：池白名单写成字符串 "ab" 时，Python 会
+// 把它展开成 'a'、'b' 两个模型名；而 `for x in None` 同样是 TypeError，不是
+// 「空迭代」。
 //
-// 调用方负责先处理 None 与空值（Python 的 `x or []` 会先把它们替换成空列表）。
+// 若调用方要实现 “x or []“ 语义（None/空值先替换成空列表），应先做真值判断，
+// 见 config 包的 iterateOrEmpty。
 func PyIterate(v *Value) ([]string, error) {
-	if v == nil {
-		return nil, nil
+	if v == nil || v.Kind == KindNull {
+		return nil, errNotIterable(v)
 	}
 	switch v.Kind {
 	case KindArray:
