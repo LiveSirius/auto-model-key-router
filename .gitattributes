@@ -11,3 +11,15 @@ internal/canonical/testdata/** -text
 internal/config/testdata/** -text
 internal/keypool/testdata/** -text
 internal/proxysupport/testdata/** -text
+
+# Go 源码强制 LF 检出。
+#
+# 本仓库 core.autocrlf=true，默认会把文本文件检出成 CRLF，而 **gofmt 把 CRLF 视为
+# 「未格式化」**（已受控实测：同一内容下 gofmt -l 只列出 CRLF 版本）。后果是
+# Windows 上 `gofmt -l .` 会列出全部 .go 文件，CI 的 gofmt 门禁在本地变成噪声，
+# 开发者用 `gofmt -w` 去「修」又会把文件改回 LF 而产生困惑。
+#
+# 只对 *.go 声明 eol=lf：这些文件全部由本次 Go 迁移新增（最早 2026-09-17），
+# 没有既有的 CRLF .go 文件会被改写，所以不会产生大 diff——这正是上面那段说明里
+# 拒绝全仓库 *.py/*.go 策略的理由，对 *.go 不成立。
+*.go text eol=lf
