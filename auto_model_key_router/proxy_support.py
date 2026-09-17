@@ -19,6 +19,14 @@ from .protocol_compat import _adapt_message_payload
 from .visitor import is_visitor_api_key
 
 
+class UpstreamFirstByteTimeout(httpx.ReadTimeout):
+    """上游在首字节窗口内没有任何响应。
+
+    单独一个类型是为了让重试循环能区分「上游慢到超时」和「连接被拒/重置」：
+    前者重试同一个 key 只会把等待时间乘以重试次数，后者才值得原地重试。
+    """
+
+
 LOGGER = logging.getLogger("auto_model_key_router.app")
 
 
@@ -308,7 +316,7 @@ async def _send_upstream(
             async with asyncio.timeout(remaining):
                 response = await client.send(upstream_request, stream=True)
     except TimeoutError as exc:
-        raise httpx.ReadTimeout(
+        raise UpstreamFirstByteTimeout(
             "timed out waiting for upstream response headers",
             request=upstream_request,
         ) from exc

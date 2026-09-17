@@ -1426,6 +1426,83 @@ def test_stream_response_header_timeout_retries_next_key() -> None:
         assert response.text == "data: [DONE]\n\n"
         assert calls == ["Bearer sk-1", "Bearer sk-2"]
 
+def test_first_byte_timeout_with_single_key_does_not_retry_same_key() -> None:
+    """单 Key 上游首字节超时不应重试：重试只会把等待时间乘上重试次数。
+
+    上游慢到超时是「慢」，不是「这个 Key 坏了」，换不了 Key 就没有重试的理由。
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        calls: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.headers["authorization"])
+            await anyio.sleep(0.05)
+            return httpx.Response(200, content=b"data: [DONE]\n\n")
+
+        config = make_config(
+            Path(directory),
+            (KeyConfig("key-1", "sk-1", "https://upstream-one.test"),),
+            max_retries=2,
+            stream_first_byte_timeout=0.01,
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def requests(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": "test-model", "messages": [], "stream": True},
+            )
+
+        response = run_client(app, requests)
+
+        assert response.status_code == 502
+        assert calls == ["Bearer sk-1"]
+
+
+def test_first_byte_timeout_with_requested_key_does_not_retry_same_key() -> None:
+    """调用方显式指定 Key 时同样换不了 Key，首字节超时也不该重复重试同一个 Key。"""
+    with tempfile.TemporaryDirectory() as directory:
+        calls: list[str] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.headers["authorization"])
+            await anyio.sleep(0.05)
+            return httpx.Response(200, content=b"data: [DONE]\n\n")
+
+        config = make_config(
+            Path(directory),
+            (
+                KeyConfig("key-1", "sk-1", "https://upstream-one.test"),
+                KeyConfig("key-2", "sk-2", "https://upstream-two.test"),
+            ),
+            max_retries=2,
+            stream_first_byte_timeout=0.01,
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def requests(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer local-key"},
+                json={
+                    "model": "test-model[key-1]",
+                    "messages": [],
+                    "stream": True,
+                },
+            )
+
+        response = run_client(app, requests)
+
+        assert response.status_code == 502
+        assert calls == ["Bearer sk-1"]
+
 
 @pytest.mark.parametrize(
     ("path", "payload"),

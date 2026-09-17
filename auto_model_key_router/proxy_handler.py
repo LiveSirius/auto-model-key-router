@@ -32,6 +32,7 @@ from .protocol_compat import (
 )
 from .proxy_support import (
     UNSUPPORTED_ENDPOINT_STATUS_CODES,
+    UpstreamFirstByteTimeout,
     _authorization_mode,
     _is_stream_request,
     _is_tool_error,
@@ -91,6 +92,21 @@ class AttemptOutcome:
     response: Response | None = None
     retry_error: JSONResponse | None = None
     stream_owns_key: bool = False
+    # 首字节超时说明上游慢，重试同一个 key 只是把等待时间乘上重试次数。
+    retryable_same_key: bool = True
+
+
+def _rotates_keys(context: ProxyRequestContext) -> bool:
+    """本次请求是否可能在重试时换到另一个 Key。
+
+    多 Key 且调用方没有指定 Key、也不是 only_first 时，`_handle_single_target`
+    才会把已失败的 Key 排除掉，下一次选择才可能落到别的 Key 上。
+    """
+    return (
+        context.key_count > 1
+        and not context.requested_key_name
+        and not context.only_first
+    )
 
 
 async def handle_proxy_request(
@@ -142,15 +158,15 @@ async def _handle_single_target(context: ProxyRequestContext) -> Response:
         key = selected
         release_key = True
         try:
-            if (
-                context.key_count > 1
-                and not context.requested_key_name
-                and not context.only_first
-            ):
+            if _rotates_keys(context):
                 excluded.add(key.name)
             outcome = await _execute_attempt(context, key, attempt)
             if outcome.retry_error is not None:
                 last_error = outcome.retry_error
+                # 首字节超时且重试不会换 Key：再等一轮只是把同一个慢上游的等待
+                # 时间乘上重试次数，对调用方没有任何新信息。直接返回失败。
+                if not outcome.retryable_same_key and not _rotates_keys(context):
+                    return outcome.retry_error
                 continue
             release_key = not outcome.stream_owns_key
             if outcome.response is None:
@@ -482,7 +498,8 @@ async def _execute_attempt(
             retry_error=JSONResponse(
                 {"error": {"message": f"上游请求失败: {exc.__class__.__name__}"}},
                 status_code=502,
-            )
+            ),
+            retryable_same_key=not isinstance(exc, UpstreamFirstByteTimeout),
         )
 
     duration_ms = _elapsed_ms(started)
@@ -571,7 +588,8 @@ async def _execute_attempt(
                 retry_error=JSONResponse(
                     {"error": {"message": f"上游请求失败: {exc.__class__.__name__}"}},
                     status_code=502,
-                )
+                ),
+                retryable_same_key=not isinstance(exc, UpstreamFirstByteTimeout),
             )
         # 使用回退响应继续处理
         response = fallback_response
