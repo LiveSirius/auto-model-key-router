@@ -96,6 +96,9 @@ go/
 
 - 读写 `config_version: 4`；**迁移链 v1/v2 → v3 → v4 必须完整复刻**（`config.py:315` `migrate_config_data`、`config.py:434` `_migrate_v3_to_v4`）。重点是 v3 pool 白名单语义：`models` 键存在即过滤（含空数组），键缺失才不设限（`config.py:515`）——漏掉这条会让 v3 里被静默丢弃的死引用在升级后"复活"。
 - 保存格式：`json.dumps(data, indent=2, ensure_ascii=False) + "\n"`，写临时文件后 `os.replace`，带 4 次指数退避重试（`config.py:300`，应对 Windows 杀软占用）。Go 的 `os.Rename` 在 Windows 上有同样失败模式，**必须保留重试循环**。
+- **保存不排序**：与 4.2 的 canonical 路径相反，落盘保留键的插入顺序。Go 侧必须走顺序保留的缩进序列化（`canonical.DumpsIndent`），不能复用 `Dumps`。
+- 空容器在 indent 模式下仍写成紧凑的 `{}` / `[]`，不是多行。
+- **换行必须复刻文本模式翻译**：`Path.write_text` 以文本模式打开文件，会把 `"\n"` 翻译成 `os.linesep`，因此 Windows 上真实磁盘字节是 **CRLF**。实测 `save_config_data` 写出的字节为 `b'{\r\n  "config_version": 4,\r\n...\r\n}\r\n'`。Go 的 `os.WriteFile` 不做翻译，照搬会每个换行少一个 `\r`——文件功能等价，但字节级兼容不成立，且用户在两版之间切换时 git 会持续显示改动。字符串**内部**的真实换行在 JSON 里是转义的两字节（`\` 与 `n`），不受翻译影响。
 - 加载时若迁移产生变化会**写回磁盘**（`config.py:860`）。
 
 ### 4.2 canonical JSON（两处消费者）
@@ -117,7 +120,21 @@ go/
 - `NULL` 维度在 Python 快照里被字符串化成 `"None"`；Go 若映射成 `""` 或省略键，就改变了 `/metrics` 的 JSON 契约。
 - `_normalize_usage`（`metrics.py:1108`）的跨供应商 token 归一化（OpenAI `prompt_tokens` vs Anthropic `input_tokens` + 缓存字段）必须精确移植，否则历史 token 汇总会漂移。
 
-### 4.4 代理行为中必须显式决策的点
+### 4.4 配置解析（实测确认，均已在对拍语料中固化）
+
+以下行为由阅读代码无法推断，且差异不会报错，只会在两种实现下产生不同的路由/配置。Go 侧**刻意保持与 Python 一致**，相关断言见 `internal/config/model_test.go`、`internal/config/interop_test.go`：
+
+| 现象 | 位置 | 处理 |
+| --- | --- | --- |
+| 配置文件**顶层** `upstream_routes` 被 `from_dict` 完全忽略（从空字典起步，其后只从 providers 汇总）。v1/v2 迁移会写出该字段，即那些版本升级上来的路由配置**实际不生效** | `config.py:877`、`config.py:367` | 保持丢弃；`TestParseDroppedRoutesDocumented` 固化 |
+| **provider key 级** `upstream_routes` 恒为空：构造 `KeyConfig` 时未传该参数，令其后的合并循环成为死代码 | `config.py:963`、`config.py:840` | 保持丢弃；同上用例固化 |
+| 只有 **provider 级 `routes`** 真正生效 | `config.py:912` | 作为对照组断言，防止把"都没生效"误判为正确 |
+| `int()` 的 ValueError 文本会经管理 API **原样回给用户**（如 `invalid literal for int() with base 10: 'soon'`），属对外契约；而 `int(None)` 的 TypeError 只是解释器细节 | `config.py:873` | 两类异常分开建模：契约文本逐字复刻，内部错误仅失败关闭 |
+| `int(8080.0) == 8080`（浮点向零截断）但 `int("8080.5")` 抛错；字符串接受首尾空白、`+45`、数字间下划线、Unicode 十进制数字（全角 `４５`） | Python 内建 | 移植为 `canonical.ToInt` / `ToFloat`，40 个实测用例覆盖 |
+
+以上两项"丢弃"是既存缺陷，修复应作为**独立变更并在两种实现上同步进行**，不能在迁移中单方面修好——否则同一份配置文件会在两种实现下产生不同的上游请求路径。
+
+### 4.5 代理行为中必须显式决策的点
 
 代理层有三处**当前实现与直觉不符**的地方。它们在 Go 重写时要么被当作契约保留、要么作为 bug 修掉，但**必须在动手前明确决策**，否则会成为重写过程中的意外行为变更：
 
@@ -138,7 +155,7 @@ go/
 - 流式超时的两个阶段语义不同：**响应头阶段**用 `request_timeout`（`read=None`），**响应体阶段**首块沿用同一绝对 deadline、其后每块重置 `idle_timeout` 且**无总时长上限**。一旦下游已开始收到字节，**任何失败都不再重试**，中途错误会静默终止 SSE（不发错误帧）。
 - `first_token_ms` 记录的是**上游首字节**时间，而非下游首个事件时间。
 
-### 4.5 HTTP 与 CLI
+### 4.6 HTTP 与 CLI
 
 - 代理面：`/v1/chat/completions`、`/v1/messages`（含 `count_tokens`）、`/v1/responses`、`/v1/embeddings`、`/v1/images/*`、`/v1/models`、`/metrics`、`/metrics/requests`、`/metrics/series`、`HEAD /`、`/health`、`WS /ws/events`、`WS /v1/{path}`、通配 `ANY /v1/{path}`。
 - 管理面 **47 条** + 运维面 **7 条**，全部要求 full 权限；`config_revision` 语义是"变更前先比对，不一致 409"。
@@ -149,7 +166,7 @@ go/
 - **visitor 功能的"是否可用"是 Python 打包产物**：`visitor.py:17` 用 `itsdangerous` 是否可导入作为 runtime marker。Go 没有 extras 概念，需改为**编译期构建标签 + 运行期配置开关**，并让 `/health.visitor_feature_installed` 反映新语义（该字段被测试与发布流水线断言）。
 - WebSocket 事件总线（`/ws/events`）的鉴权契约要保留：首帧 `{"type":"auth","token":...}` + 10 秒超时，失败关闭码 `4001`（超时/非法消息）/ `4003`（鉴权失败）。事件类型为 `connected` / `client_count` / `metrics_snapshot` / `config_change`，节流为"≤1 次/秒、≥1 次/30 秒、无客户端时零开销"。
 
-### 4.6 混跑期的写冲突
+### 4.7 混跑期的写冲突
 
 两个进程都会按 mtime 热重载同一份配置，且都可能写盘。**过渡期必须指定单一写入方**：通过锁文件 + `--read-only-config` 开关，让 Go 侧先只读；待切换后再反转。`config_revision` 的不一致会让混跑的 WebUI/管理客户端互相报 409，这是设计约束而非缺陷。
 
