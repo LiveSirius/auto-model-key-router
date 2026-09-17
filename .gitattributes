@@ -14,6 +14,7 @@ internal/configops/testdata/** -text
 internal/formatting/testdata/** -text
 internal/keypool/testdata/** -text
 internal/logfiles/testdata/** -text
+internal/metrics/testdata/** -text
 internal/proxysupport/testdata/** -text
 internal/servicestatus/testdata/** -text
 
