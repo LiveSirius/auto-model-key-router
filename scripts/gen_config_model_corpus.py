@@ -804,6 +804,69 @@ def render(cases: list[dict]) -> str:
     return "\n".join(json.dumps(c, ensure_ascii=False, sort_keys=True) for c in cases) + "\n"
 
 
+# --------------------------------------------------------------------------- #
+# 落盘互操作夹具
+# --------------------------------------------------------------------------- #
+
+def persist_fixture_text() -> str:
+    """用参照实现真实写出一个配置文件，返回其文本内容。
+
+    这是「用户直接换二进制」承诺的直接证据：夹具由 Python 的
+    ``save_config_data`` 生成（含 indent=2、不排序、末尾换行等全部落盘细节），
+    Go 侧读取后再写回必须逐字节一致。
+
+    关于换行：Python 的 ``write_text`` 会把 "\\n" 翻译成 ``os.linesep``，因此在
+    Windows 上真实磁盘字节是 CRLF。这里刻意**统一以 LF 存入仓库**（读取时按
+    通用换行处理），原因有二：
+
+    * 仓库里的换行应保持 git 的规范形式，否则 ``core.autocrlf`` 会让同一份
+      夹具在不同机器上产生不同字节，``--check`` 随环境抖动；
+    * CRLF 翻译本身是平台相关行为，已由 Go 侧的 ``translateNewlines`` 复刻，
+      并由 internal/config/interop_test.go 的两个用例分别断言（平台翻译 +
+      逐字节一致）。
+
+    因此本夹具验证的是「结构 + 内容」的字节一致，平台换行差异在 Go 测试中
+    单独覆盖。
+    """
+    import tempfile
+
+    from auto_model_key_router.config import save_config_data
+
+    payload = {
+        "config_version": 4,
+        "host": "127.0.0.1",
+        "port": 8000,
+        "default_base_url": "https://api.openai.com",
+        "upstream_routes": {},
+        "request_timeout": 60,
+        "stream_first_byte_timeout": 45.5,
+        "stream_idle_timeout": 60,
+        "max_retries": 2,
+        "key_failure_threshold": 2,
+        "key_cooldown_seconds": 60,
+        "local_api_key": "amkr_fixture_key_for_golden_file",
+        "webui_enabled": False,
+        "ops_enabled": True,
+        "providers": {
+            "openai": {
+                "base_url": "https://api.openai.com",
+                "keys": {"main": {"api_key": "sk-fixture"}},
+                "routes": {"anthropic": "anthropic"},
+            }
+        },
+        "models": {"gpt-4o-mini": {"targets": [
+            {"provider": "openai", "key": "main", "upstream_model": "gpt-4o-mini"}
+        ]}},
+        "unicode_note": "中文注释与 emoji 🙂",
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        target = Path(tmp) / "router-config.json"
+        save_config_data(target, payload)
+        # 直接读字节再解码：Path.read_text 的 newline 参数要 3.13+，本项目支持 3.12。
+        # 把 CRLF 归一成 LF 后入库。
+        return target.read_bytes().decode("utf-8").replace("\r\n", "\n")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_DIR)
@@ -812,20 +875,28 @@ def main() -> int:
 
     path = args.output_dir / "model.jsonl"
     content = render(model_cases())
+    fixture_path = args.output_dir / "python_written_config.json"
+    fixture = persist_fixture_text()
+
+    outputs = [(path, content), (fixture_path, fixture)]
 
     if args.check:
-        if not path.exists():
-            print(f"语料缺失: {path}", file=sys.stderr)
-            return 1
-        if path.read_text(encoding="utf-8") != content:
-            print(f"语料已过期: {path}", file=sys.stderr)
-            return 1
-        print(f"语料最新: {path}")
-        return 0
+        stale = False
+        for target, expected in outputs:
+            if not target.exists():
+                print(f"语料缺失: {target}", file=sys.stderr)
+                stale = True
+            elif target.read_text(encoding="utf-8") != expected:
+                print(f"语料已过期: {target}", file=sys.stderr)
+                stale = True
+            else:
+                print(f"语料最新: {target}")
+        return 1 if stale else 0
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8", newline="\n")
-    print(f"已写入 {content.count(chr(10))} 条语料: {path}")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    for target, text in outputs:
+        target.write_text(text, encoding="utf-8", newline="")
+        print(f"已写入 {target}（{len(text.encode('utf-8'))} 字节）")
     return 0
 
 

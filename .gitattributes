@@ -1,0 +1,11 @@
+# 语料夹具必须逐字节稳定，否则对拍断言与 --check 会随 git 的检出配置抖动。
+#
+# 背景：core.autocrlf=true 时 git 会把文本文件检出成 CRLF，而语料由 Python 以 LF
+# 生成。Go 解析与 Python 的 read_text 都能容忍 CRLF（前者把 \r 当空白，后者做通用
+# 换行翻译），但逐字节往返断言会失败，且失败与否取决于开发者的 git 配置。
+#
+# 这里只对语料目录声明 -text，让 git 原样存取、不做换行转换。刻意不写全仓库的
+# *.py/*.go 策略：那会把既有的 CRLF 文件（如 scripts/release.py）一并改写，产生
+# 与本迁移无关的巨大 diff。
+internal/canonical/testdata/** -text
+internal/config/testdata/** -text
