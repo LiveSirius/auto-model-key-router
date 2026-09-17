@@ -9,11 +9,15 @@
 | 指标 | 数值 |
 | --- | --- |
 | Python 核心 | 15,630 行 / 41 文件 |
-| Go 生产代码 | 23,088 行 / 72 文件（**21 个包已提交**） |
-| Go 测试代码 | 17,445 行 / 49 文件 |
-| 已移植 Python 源 | ≈ 10,300 行（约 66%） |
-| 服务端待移植 | ≈ 5,298 行；其中 app.py 与 ops_api.py 正在做 |
-| Go 相关提交 | 34（触及 internal/、go.mod 或 cmd） |
+| Go 生产代码 | 32,275 行 / 113 文件（**26 个包已提交**） |
+| Go 测试代码 | 24,869 行 / 68 文件 |
+| 已移植 Python 源 | ≈ 13,500 行（约 86%） |
+| 服务端待移植 | **2,800 行**：service.py(720) + main.py(202) + config_editor.py(1,878)（正在做） |
+| 另有决策 7 砍掉、Go 永不实现 | dashboard.py(949) + logs_tui.py(614) = 1,563 行 |
+| Go 相关提交 | 44（触及 internal/、go.mod 或 cmd） |
+
+`internal/tui`、`internal/eventbus`、`internal/wsproxy` 已于本轮落地；`tui` 是 `service` /
+`main` / `config_editor` 三者的网关，故后两者现在才可开工。
 
 **代理面与管理面已全部落地**：`internal/proxy`（proxy_handler.py，81 条语料含逐条上游调用
 序列）与 `internal/api`（management_api.py，47 条路由，188 条语料）已提交并通过门禁。
@@ -65,6 +69,9 @@ proxy_handler、management_api 已完成并提交
 | `api` | `management_api.py` | 47 条管理路由；`ConfigPath`/`Reload`/`CheckUpdate` 等接缝 |
 | `webui` | `webui.py` | 静态资源服务（`fs.FS` 注入，不做目录列表） |
 | `updatecheck` | `update.py` 的版本检查 | 决策 8 只保留版本检查，砍自更新 |
+| `tui` | `tui.py` | 终端 UI（Bubble Tea）；22 个被其它模块 import 的符号全部有 Go 对应物 |
+| `eventbus` | `event_bus.py` | `/ws/events`；冻结契约（4001/4003、10 秒、节流）逐条具名测试 |
+| `wsproxy` | `websocket_proxy.py` | `WS /v1/{path}`；HTTP-over-WS，复用 proxysupport 的四个 helper |
 
 **更正（提交 a63e65b 的信息与实际内容不一致）**：该提交的正文写「96 条用例 /
 134,097 字节 / 153 个子测试 / D1-D7」，实际落在 HEAD 里的是 **91 条用例 / 135,535 字节 /
@@ -91,8 +98,8 @@ ops 路由、`agent_config.py` -> `internal/agentconfig`。
 | `GET /metrics` | 待 app 装配（依赖 metrics） |
 | `GET /metrics/requests` | 待 app 装配（依赖 metrics） |
 | `GET /metrics/series` | 待 app 装配（依赖 metrics） |
-| `WS /ws/events` | 待定（**非「能用」必需**，前端是轮询） |
-| `WS /v1/{path}` | 待定（同上） |
+| `WS /ws/events` | ✅ 包已提交（`internal/eventbus`），**路由待装配**（非「能用」必需，前端是轮询） |
+| `WS /v1/{path}` | ✅ 包已提交（`internal/wsproxy`），**路由待装配**（同上） |
 
 ### 管理面（47 条，`internal/api`）
 
@@ -206,6 +213,28 @@ Python 侧基线：`python -X utf8 -m pytest -q` → **485 passed**（约 250 �
 - 实际**只有** `providers[].routes` 生效。
 
 ## 下一批工作（按依赖顺序）
+
+**当前批次（进行中）**：
+- `service.py` → `internal/service` + `main.py` → 完整 `cmd/amkr` CLI。约束：`main.py`
+  import 了已按决策 7 砍掉的 `dashboard`/`logs_tui`，因此**只驱动那两个模块的子命令必须
+  一并去掉**，不能顺手把那 1,563 行也移植进来。`internal/api` 的 `RunServiceAction` 接缝
+  正等着它（当前 `POST /api/service/{action}` 是响亮 500）。
+- `config_editor.py` → `internal/configeditor`。**其中探测（probe）部分价值最高**：`api` 的
+  三个探测接缝（`ProbeKeyCapability` / `ProbeProviderKeyCapabilities` / `ProbeKeyAvailability`）
+  目前为 nil，导致 `/api/providers/{id}/probe`、`/api/providers/{id}/keys/{name}/probe`、
+  `/api/probes/keys` 三条路由接缝失败。它只需要 `service.restart_service_after_config_change`
+  一个函数，故用接缝解耦、可与上一项并行。
+
+**接线（装配层，等上面两项落地后由集成方做）**：
+1. `api.Server.RunServiceAction` ← `internal/service`
+2. `api.Server.Probe*` 三个接缝 ← `internal/configeditor`
+3. `api.Server.Integrations` ← `internal/agentconfig`（约 40 行字段适配器）
+4. `/ws/events` ← `internal/eventbus`；`WS /v1/{path}` ← `internal/wsproxy`（含 metrics
+   广播循环的启动，`metrics.Store.SetOnRecord` 是预留接缝）
+
+**然后是阶段 3**：按下面的顺序表依次删除 Python。
+## 历史批次（已完成）
+
 
 1. 收尾并提交 `internal/metrics`（SQLite 19 列 schema、7 索引、无 `user_version`、
    `created_at` 为 Asia/Shanghai 的 isoformat 字符串）。
