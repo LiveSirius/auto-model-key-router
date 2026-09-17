@@ -1,0 +1,455 @@
+package proxy
+
+import (
+	"log/slog"
+	"net/http"
+	"strconv"
+	"strings"
+
+	"github.com/Sparrived/auto-model-key-router/internal/auth"
+	"github.com/Sparrived/auto-model-key-router/internal/canonical"
+	"github.com/Sparrived/auto-model-key-router/internal/config"
+	"github.com/Sparrived/auto-model-key-router/internal/protocol"
+	"github.com/Sparrived/auto-model-key-router/internal/proxysupport"
+	"github.com/Sparrived/auto-model-key-router/internal/runtime"
+)
+
+// Handle 处理一条 /v1/{path} 代理请求。
+//
+// path 是 `{path}` 部分（不含前导 `/v1/`），与参照实现的 handle_proxy_request
+// 入参一致。函数是同步的：调用方在自己的 goroutine 里等它返回，流式响应也在这里
+// 写完后才返回——这正是「租约覆盖整条流」的落点（见 HandleResource 的 defer）。
+func (h *Handler) Handle(w http.ResponseWriter, request *http.Request, path string) {
+	h.handle(w, request, path)
+}
+
+// handle 是 Handle 的实现。
+func (h *Handler) handle(w http.ResponseWriter, request *http.Request, path string) {
+	lease, err := h.manager.Acquire()
+	if err != nil {
+		// runtime.ErrManagerClosed：关停中不再接受新请求。参照实现在关停时靠
+		// lifespan 取消，没有对应状态码，503 是最接近的语义。
+		writeJSON(w, http.StatusServiceUnavailable,
+			jsonErrorResponse("服务正在关停，不接受新请求"))
+		return
+	}
+	// defer 覆盖全部退出路径：流式响应也必须留到写完再释放，否则
+	// RuntimeManager.Close() 会在租约归零后关掉仍在使用的连接池。
+	defer lease.Release()
+
+	prepared := h.prepare(w, request, path, lease.Resources)
+	if prepared == nil {
+		return
+	}
+	result := h.handleSingleTarget(prepared)
+	status := result.statusCode()
+	if !IsRetryableStatus(status) {
+		result.writeTo(w)
+		return
+	}
+	if prepared.RequestedModelName == config.UNIFIED_MODEL_ID {
+		h.writeUnifiedFallback(w, prepared, result)
+		return
+	}
+	if prepared.TaskName != nil {
+		// 任务备选：首选重试失败后切到任务的备选模型，参数保持任务固定值。
+		h.writeTaskFallback(w, prepared, result)
+		return
+	}
+	result.writeTo(w)
+}
+
+// writeUnifiedFallback 在 unified-model 首选失败后切到备选计划。
+func (h *Handler) writeUnifiedFallback(w http.ResponseWriter, prepared *RequestContext, result attempt) {
+	plan, err := prepared.pool().ResolveUnifiedPlan(
+		proxysupport.RequestRouteKind(prepared.Path), prepared.RequestedKeyName)
+	if err != nil || plan.Fallback == nil {
+		result.writeTo(w)
+		return
+	}
+	h.runFallback(w, prepared, result, *plan.Fallback)
+}
+
+// writeTaskFallback 在任务首选失败后切到任务的备选模型。
+func (h *Handler) writeTaskFallback(w http.ResponseWriter, prepared *RequestContext, result attempt) {
+	plan, found := prepared.pool().TaskPlan(*prepared.TaskName)
+	if !found || plan.Fallback == nil {
+		result.writeTo(w)
+		return
+	}
+	h.runFallback(w, prepared, result, *plan.Fallback)
+}
+
+// runFallback 用备选目标重跑一次 _handle_single_target。
+//
+// 三处必须重算而不是沿用 primary 的值：
+//   - attempts：备选模型可能有不同的 key 数量与 none/only_first 路由模式
+//     （proxy_handler.py:148）；
+//   - cache_affinity_key：粘滞哈希的 basis 里含 model_id（proxy_handler.py:153）；
+//   - use_native：备选模型可能有自己的 native_first 设置（proxy_handler.py:156）。
+func (h *Handler) runFallback(w http.ResponseWriter, prepared *RequestContext, result attempt, target config.RouteTarget) {
+	pool := prepared.pool()
+	fallbackKeyCount := pool.KeyCount(target.Model)
+	if fallbackKeyCount == 0 {
+		result.writeTo(w)
+		return
+	}
+	fallbackOnlyFirst := pool.RoutingMode(target.Model) == "only_first"
+	fallbackKey := target.Key
+	attempts := runtime.RetryPolicy{MaxRetries: prepared.Config.MaxRetries}.Attempts(
+		fallbackKeyCount, &fallbackKey, fallbackOnlyFirst)
+
+	fallback := *prepared
+	fallback.ModelID = target.Model
+	fallback.RequestedKeyName = &fallbackKey
+	fallback.KeyCount = fallbackKeyCount
+	fallback.OnlyFirst = fallbackOnlyFirst
+	fallback.Attempts = attempts
+	fallback.CacheAffinityKey = cacheAffinityKey(prepared.Path, prepared.Payload, target.Model)
+	fallback.UseNative = prepared.Path == "messages" &&
+		prepared.Config.NativeFirstForModel(target.Model)
+	fallback.FallbackTarget = target.Model
+	// 上游调用预算是**整次下游请求**的口径（有意增补的观测项），因此备选沿用同一个
+	// 计数器，而不是重新计数——重置会让放大倍数被低估。
+	fallback.upstreamCalls = prepared.upstreamCalls
+
+	fallbackResult := h.handleSingleTarget(&fallback)
+	if fallbackResult.statusCode() < 400 {
+		fallbackResult.markFallback()
+	}
+	fallbackResult.writeTo(w)
+}
+
+// _rotates_keys 的对等实现：本次请求是否可能在重试时换到另一个 Key。
+//
+// 多 Key 且调用方没有指定 Key、也不是 only_first 时，_handle_single_target 才会
+// 把已失败的 Key 排除掉，下一次选择才可能落到别的 Key 上（proxy_handler.py:103）。
+func rotatesKeys(context *RequestContext) bool {
+	return context.KeyCount > 1 &&
+		(context.RequestedKeyName == nil || *context.RequestedKeyName == "") &&
+		!context.OnlyFirst
+}
+
+// prepare 完成鉴权、body 解析、路由解析与预算计算。
+//
+// 返回 nil 表示已经把错误响应写给下游。
+func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path string, resources *runtime.RuntimeResources) *RequestContext {
+	pool := keyPoolOf(resources)
+	if pool == nil {
+		// 装配错误：runtime.KeyPool 不是本包认识的 KeyPool 实现。宁可失败关闭，
+		// 也不能带着一个 nil 接口继续跑（那会在选 key 时 panic）。
+		h.logger.Error("装配错误：runtime 的 KeyPool 不满足 proxy.KeyPool 接缝",
+			"path", path)
+		writeJSON(w, http.StatusServiceUnavailable,
+			jsonErrorResponse("服务装配错误：key pool 不可用"))
+		return nil
+	}
+
+	authorization := h.authorize(request, resources.Config)
+	if authorization == nil {
+		writeJSON(w, http.StatusUnauthorized, jsonErrorResponse("本地 API key 验证失败"))
+		return nil
+	}
+	visitorOnly := authorization.VisitorOnly
+	callerType := "local"
+	if visitorOnly {
+		callerType = "visitor"
+	}
+
+	payload, body, flat, bodyErr := h.readRequestBody(request, request.Header.Get("Content-Type"))
+	if bodyErr != nil {
+		if coded, ok := bodyErr.(*bodyError); ok {
+			writeJSON(w, coded.statusCode, jsonErrorResponse(coded.message))
+			return nil
+		}
+		writeJSON(w, http.StatusBadRequest, jsonErrorResponse(bodyErr.Error()))
+		return nil
+	}
+	isStream := false
+	if !flat {
+		isStream = proxysupport.IsStreamRequest(payload)
+	}
+	requestedModelID, found := proxysupport.ResolveModelID(path, payload)
+	if !found {
+		writeJSON(w, http.StatusBadRequest,
+			jsonErrorResponse("请求体中缺少 model 字段"))
+		return nil
+	}
+
+	requestedModelName, requestedKeyName, hasKey := proxysupport.SplitRequestedModelKey(requestedModelID)
+	var requestedKey *string
+	if hasKey {
+		requestedKey = &requestedKeyName
+	}
+	if visitorOnly && requestedModelName == config.UNIFIED_MODEL_ID {
+		writeJSON(w, http.StatusForbidden,
+			jsonErrorResponse("访客 key 无权访问模型: "+config.UNIFIED_MODEL_ID))
+		return nil
+	}
+
+	// 任务名路由：模型与采样参数都由任务固定，调用方只能传任务名。必须在
+	// resolve_route 之前判断，否则任务的 key=None 会把调用方指定的 Key 冲掉。
+	// （proxy_handler.py:228）
+	var taskParams *canonical.Value
+	var taskName *string
+	if !visitorOnly {
+		if _, isTask := pool.TaskPlan(requestedModelName); isTask {
+			if requestedKey != nil {
+				writeJSON(w, http.StatusBadRequest, jsonErrorResponse(
+					"任务 "+requestedModelName+" 的参数由 AMKR 固定，不能指定 Key"))
+				return nil
+			}
+			taskParams = pool.TaskParams(requestedModelName)
+			name := requestedModelName
+			taskName = &name
+			if conflicts := proxysupport.TaskParamConflicts(payload, taskParams); len(conflicts) > 0 {
+				message := "任务 " + requestedModelName + " 已固定参数 " +
+					joinChineseEnumeration(conflicts) + "，调用方不能再传这些参数"
+				writeJSON(w, http.StatusBadRequest, jsonErrorResponse(message))
+				return nil
+			}
+		}
+	}
+
+	var modelID string
+	if visitorOnly {
+		resolved, ok := pool.ResolveVisitorModelID(requestedModelName)
+		if !ok {
+			writeJSON(w, http.StatusForbidden,
+				jsonErrorResponse("访客 key 无权访问模型: "+requestedModelName))
+			return nil
+		}
+		modelID = resolved
+	} else {
+		resolved, key, err := pool.ResolveRoute(requestedModelName, requestedKey, path)
+		if err != nil {
+			h.writeRouteError(w, path, requestedModelID, requestedModelName, err)
+			return nil
+		}
+		modelID = resolved
+		if requestedKey != nil {
+			value := key
+			requestedKey = &value
+		} else {
+			requestedKey = nil
+		}
+	}
+
+	configuredKeyCount := pool.KeyCount(modelID)
+	keyCount := configuredKeyCount
+	if visitorOnly {
+		keyCount = pool.VisitorKeyCount(modelID)
+	}
+	if configuredKeyCount == 0 {
+		h.logModelNotConfigured(path, requestedModelID, modelID, "no_configured_keys")
+		if taskParams != nil {
+			writeJSON(w, http.StatusNotFound, jsonErrorResponse(
+				"任务 "+requestedModelName+" 指向的模型 "+modelID+
+					" 未配置；请先在 AMKR 的任务路由中修正该任务"))
+			return nil
+		}
+		writeJSON(w, http.StatusNotFound, jsonErrorResponse(
+			"模型 "+requestedModelID+" 未配置；请先在 AMKR 的模型设置中配置该模型"))
+		return nil
+	}
+	if keyCount == 0 {
+		writeJSON(w, http.StatusForbidden,
+			jsonErrorResponse("访客 key 无权访问模型: "+requestedModelName))
+		return nil
+	}
+	if path == "messages/count_tokens" {
+		// 本地估算，不转发上游、也不写指标行（proxy_handler.py:311）。它位于鉴权与
+		// 模型校验之后，因此未配置的模型仍然 404——顺序不可前移。
+		writeJSON(w, http.StatusOK, countTokensResponse(payload))
+		return nil
+	}
+
+	onlyFirst := pool.RoutingMode(modelID) == "only_first"
+	attempts := runtime.RetryPolicy{MaxRetries: resources.Config.MaxRetries}.Attempts(
+		keyCount, requestedKey, onlyFirst)
+	useNative := path == "messages" && resources.Config.NativeFirstForModel(modelID)
+	affinity := cacheAffinityKey(path, payload, modelID)
+
+	return &RequestContext{
+		Path:               path,
+		Request:            request,
+		Runtime:            resources,
+		VisitorOnly:        visitorOnly,
+		CallerType:         callerType,
+		Payload:            payload,
+		IsStream:           isStream,
+		OriginalRaw:        body,
+		RequestedModelID:   requestedModelID,
+		RequestedModelName: requestedModelName,
+		RequestedKeyName:   requestedKey,
+		ModelID:            modelID,
+		Config:             resources.Config,
+		KeyCount:           keyCount,
+		OnlyFirst:          onlyFirst,
+		Attempts:           attempts,
+		CacheAffinityKey:   affinity,
+		UseNative:          useNative,
+		TaskName:           taskName,
+		TaskParams:         taskParams,
+		FlatPayload:        flat,
+		now:                h.now,
+		upstreamCalls:      &upstreamCallCounter{max: h.maxCalls, logger: h.logger},
+	}
+}
+
+// authorize 走可替换的鉴权判定。
+//
+// 默认实现直接转 internal/auth（hmac.Equal 的恒定时间比较）；Options.Authorizer
+// 非空时整体替换，对应参照实现的 create_app(authenticator=...)。
+func (h *Handler) authorize(request *http.Request, cfg *config.RouterConfig) *AuthorizerResult {
+	if h.authorizer != nil {
+		return h.authorizer(request, cfg.LocalAPIKey)
+	}
+	context := auth.Authenticate(nil, request, cfg.LocalAPIKey)
+	if context == nil {
+		return nil
+	}
+	return &AuthorizerResult{VisitorOnly: context.VisitorOnly()}
+}
+
+// writeRouteError 把 ResolveRoute / ResolveUnifiedPlan 的错误折算成下游响应。
+//
+// 参照实现（proxy_handler.py:270）没有捕获这里的异常，它由 FastAPI 的异常处理器
+// 兜底成 500。而 `resolve_route` 只在「unified-model 未配置 unified_model」时抛
+// `KeyError(UNIFIED_MODEL_ID)`——这是配置缺失，不是服务故障。用户看到
+// 「模型 unified-model 未配置；请先在 AMKR 的模型设置中配置该模型」比看到 500
+// 有用得多，因此这里**刻意分叉**为 404 + 该文案；对拍语料覆盖的路径不受影响
+// （那种配置不会出现在语料里）。
+func (h *Handler) writeRouteError(w http.ResponseWriter, path, requestedModelID, _ string, _ error) {
+	h.logModelNotConfigured(path, requestedModelID, "", "key_selection_failed")
+	writeJSON(w, http.StatusNotFound, jsonErrorResponse(
+		"模型 "+requestedModelID+" 未配置；请先在 AMKR 的模型设置中配置该模型"))
+}
+
+// logModelNotConfigured 记录模型路由被拒的原因。
+//
+// 文案与参照实现逐字一致（proxy_support.py:45），因为它是运维排查的主要线索。
+func (h *Handler) logModelNotConfigured(path, requestedModelID, modelID, reason string) {
+	h.logger.Warn("model routing rejected",
+		"path", "/v1/"+path,
+		"requested_model", requestedModelID,
+		"resolved_model", modelID,
+		"reason", reason)
+}
+
+// joinChineseEnumeration 用「、」连接参数名，对齐参照实现的 `'、'.join(...)`。
+func joinChineseEnumeration(items []string) string {
+	result := ""
+	for index, item := range items {
+		if index > 0 {
+			result += "、"
+		}
+		result += item
+	}
+	return result
+}
+
+// countTokensResponse 构造 count_tokens 的响应体。
+//
+// 参照实现返回 JSONResponse({"input_tokens": ...})，只有一个字段。
+func countTokensResponse(payload *canonical.Value) *canonical.Value {
+	tokens := protocol.EstimateAnthropicInputTokens(payload)
+	result := canonical.NewObject()
+	result.Obj.Set("input_tokens", canonical.NewIntValue(int64(tokens)))
+	return result
+}
+
+// cacheAffinityKey 计算 round-robin 粘滞用的哈希键。
+//
+// 移植 proxy_handler.py:348。只有 messages 路径参与粘滞；显式的
+// `prompt_cache_key` 直接作为键（前缀 `prompt_cache_key:`），否则对
+// {path, model, system, tools, tool_choice, messages[{role,content}]} 做
+// **canonical JSON 的 sha256**。任何序列化偏差都会让粘滞静默失效
+// （canonical 包顶部注释里的「两个消费者」之一）。
+func cacheAffinityKey(path string, payload *canonical.Value, modelID string) *string {
+	if path != "messages" || !payload.IsObject() {
+		return nil
+	}
+	promptCacheKey := payload.Lookup("prompt_cache_key")
+	if promptCacheKey.IsString() && strings.TrimSpace(promptCacheKey.Str) != "" {
+		value := "prompt_cache_key:" + strings.TrimSpace(promptCacheKey.Str)
+		return &value
+	}
+
+	basis := canonical.NewObject()
+	basis.Obj.Set("path", canonical.NewString(path))
+	basis.Obj.Set("model", canonical.NewString(modelID))
+	basis.Obj.Set("system", nullIfAbsent(payload.Lookup("system")))
+	basis.Obj.Set("tools", nullIfAbsent(payload.Lookup("tools")))
+	basis.Obj.Set("tool_choice", nullIfAbsent(payload.Lookup("tool_choice")))
+	basis.Obj.Set("messages", cacheAffinityMessages(payload.Lookup("messages")))
+	value := "messages:" + canonical.RevisionHash(basis)
+	return &value
+}
+
+// cacheAffinityMessages 只保留每条消息的 role 与 content。
+//
+// 移植 proxy_handler.py:371：非列表返回空列表；列表里的非对象项被跳过。
+func cacheAffinityMessages(messages *canonical.Value) *canonical.Value {
+	result := canonical.NewArray()
+	if !messages.IsArray() {
+		return result
+	}
+	items := make([]*canonical.Value, 0, messages.Len())
+	for _, message := range messages.Items() {
+		if !message.IsObject() {
+			continue
+		}
+		entry := canonical.NewObject()
+		entry.Obj.Set("role", nullIfAbsent(message.Lookup("role")))
+		entry.Obj.Set("content", nullIfAbsent(message.Lookup("content")))
+		items = append(items, entry)
+	}
+	return canonical.NewArray(items...)
+}
+
+// nullIfAbsent 把缺失字段表示为 JSON null。
+//
+// Python 的 `payload.get(k)` 在键缺失时给 None，而 dict 字面量里的 None 会序列化
+// 成 null——两者在 canonical JSON 里是同一个字节序列，所以这里显式补 null。
+func nullIfAbsent(value *canonical.Value) *canonical.Value {
+	if value == nil {
+		return canonical.NewNull()
+	}
+	return value
+}
+
+// upstreamCallCounter 统计单次下游请求发起的上游调用次数。
+//
+// **有意增补**（见 DefaultMaxUpstreamCallsPerRequest）：参照实现没有这个上限，
+// 也无从看出放大倍数。计数器挂在 RequestContext 上，因此备选路径共享同一个预算。
+type upstreamCallCounter struct {
+	max    int
+	count  int
+	logger *slog.Logger
+}
+
+// take 记一次上游调用；返回 false 表示已达上限、不应再发起调用。
+//
+// 达到上限时打一条 Warn：这是唯一能看出「一次下游请求放大了多少次上游调用」的
+// 信号，也是本增补项的观测面。
+func (c *upstreamCallCounter) take() bool {
+	if c == nil {
+		return true
+	}
+	c.count++
+	if c.count > c.max {
+		if c.logger != nil {
+			c.logger.Warn("上游调用次数达到上限，停止继续重试",
+				"count", c.count, "limit", c.max)
+		}
+		return false
+	}
+	return true
+}
+
+// exhaustedMessage 是达到上限时的错误文案。
+func (c *upstreamCallCounter) exhaustedMessage() string {
+	return "上游调用次数达到上限（本次请求已发起 " + strconv.Itoa(c.count) +
+		" 次，上限 " + strconv.Itoa(c.max) + "），已停止继续重试"
+}
