@@ -9,6 +9,7 @@ from .config import UNIFIED_MODEL_ID, KeyConfig, RoutePlan, RouteTarget, RouterC
 from .endpoint_capabilities import EndpointCapabilityCache
 from .endpoint_capability_store import EndpointCapabilityStore
 from .key_health import KeyHealthStore
+from .proxy_support import request_route_kind
 from .visitor import VISITOR_MODEL_PREFIX
 
 
@@ -70,6 +71,11 @@ class KeyPool:
 
         self._unified_default = canonical_plan(config.unified_model.default) if config.unified_model else None
         self._unified_image = canonical_plan(config.unified_model.image) if config.unified_model and config.unified_model.image else None
+        self._unified_embeddings = canonical_plan(config.unified_model.embeddings) if config.unified_model and config.unified_model.embeddings else None
+        self._task_plans = {
+            task.name: canonical_plan(task.plan) for task in config.tasks
+        }
+        self._task_params = {task.name: dict(task.params) for task in config.tasks}
 
     @property
     def model_ids(self) -> list[str]:
@@ -110,12 +116,28 @@ class KeyPool:
         self, model_id: str, key_name: str | None = None, *, path: str | None = None
     ) -> tuple[str, str | None]:
         if model_id == UNIFIED_MODEL_ID:
-            plan = self.resolve_unified_plan("image" if path in ("images/generations", "images/edits") else "default", key_name)
+            plan = self.resolve_unified_plan(
+                request_route_kind(path or ""), key_name
+            )
             return plan.primary.model, plan.primary.key
+        task_plan = self._task_plans.get(model_id)
+        if task_plan is not None:
+            # 任务固定模型，不接受调用方指定的 Key。
+            return task_plan.primary.model, task_plan.primary.key
         return self.resolve_model_id(model_id), key_name
 
+    def task_plan(self, task_name: str) -> RoutePlan | None:
+        """任务名的路由计划；返回 None 表示这个 model 名不是任务。"""
+        return self._task_plans.get(task_name)
+
+    def task_params(self, task_name: str) -> dict[str, Any]:
+        return dict(self._task_params.get(task_name) or {})
+
     def resolve_unified_plan(self, route_kind: str, key_name: str | None = None) -> RoutePlan:
-        plan = self._unified_image if route_kind == "image" and self._unified_image else self._unified_default
+        plan = {
+            "image": self._unified_image,
+            "embeddings": self._unified_embeddings,
+        }.get(route_kind) or self._unified_default
         if plan is None:
             raise KeyError(UNIFIED_MODEL_ID)
         if key_name is None:
@@ -134,6 +156,8 @@ class KeyPool:
         result: dict[str, Any] = {"default": serialize(self._unified_default)}
         if self._unified_image:
             result["image"] = serialize(self._unified_image)
+        if self._unified_embeddings:
+            result["embeddings"] = serialize(self._unified_embeddings)
         return result
 
     def key_count(self, model_id: str) -> int:

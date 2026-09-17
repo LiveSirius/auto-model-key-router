@@ -43,6 +43,8 @@ function editor() {
   let fallbackKey = state.unified?.default?.fallback?.key || "";
   let imageModel = state.unified?.image?.primary?.model || "";
   let imageKey = state.unified?.image?.primary?.key || "";
+  let embeddingModel = state.unified?.embeddings?.primary?.model || "";
+  let embeddingKey = state.unified?.embeddings?.primary?.key || "";
   let effort = state.models.find((model) => model.id === primaryModel)?.reasoning_effort || "";
 
   const errorHost = h("div");
@@ -136,6 +138,16 @@ function editor() {
           onChange: (event) => { imageKey = event.target.value; },
         })),
       ),
+      h("div.form-grid", {},
+        h("label.field", h("span", "嵌入模型"), select([{ value: "", label: "不配置映射" }].concat(modelOptions()), {
+          value: embeddingModel, disabled: state.saving,
+          onChange: (event) => { embeddingModel = event.target.value; embeddingKey = ""; drawForm(); },
+        })),
+        h("label.field", h("span", "嵌入 Key"), select(keyOptions(embeddingModel, true), {
+          value: embeddingKey, disabled: state.saving || !embeddingModel,
+          onChange: (event) => { embeddingKey = event.target.value; },
+        })),
+      ),
     );
 
     const validate = () => {
@@ -167,6 +179,9 @@ function editor() {
               },
               image: imageModel
                 ? { primary: { model: imageModel, key: imageKey || null } }
+                : null,
+              embeddings: embeddingModel
+                ? { primary: { model: embeddingModel, key: embeddingKey || null } }
                 : null,
             };
             await api.updateUnified(revision, payload);
@@ -232,6 +247,7 @@ function draw() {
         ["路由方式", statusText(unified)],
         ["回退模型", unified?.default?.fallback?.model || "未配置"],
         ["图像模型", unified?.image?.primary?.model || "未配置"],
+        ["嵌入模型", unified?.embeddings?.primary?.model || "未配置"],
       ]),
     ));
     if (unified) {

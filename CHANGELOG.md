@@ -4,16 +4,35 @@
 
 ### Added
 
-- WebUI 概览新增**用量热力图**（星期 × 小时矩阵，紧贴 KPI 瓦片下方整行铺开）：按「请求数量 / Token 数量」切换，一眼看出周内节律（工作日 vs 周末、白天 vs 夜间）与峰值时段。数据固定取最近 7 天、1 小时一格（不跟随页头的 1h–7d 窗口，否则切到 1h 就失去周内可比性），并给出每格读数与峰值。三种状态刻意区分：**斜纹格**是窗口未覆盖（没数据）、**最浅格**是这一小时确实是 0（没流量）、**描边虚框**是最新那个还在累加的整点桶（天然偏低，不能被读成流量骤降）。落格按 `Asia/Shanghai` 取星期与小时，浏览器时区不同也不会让矩阵平移。热力图走独立请求与 60 秒 TTL，不跟着 10 秒轮询重算 169 个桶。
+- 新增 **embeddings（嵌入）路由**：`POST /v1/embeddings` 走与图像同构的第三种 unified 目标 —— 请求 `unified-model` 时命中 `unified_model.embeddings` 计划（`primary` + 可选 `fallback`），未配置该计划则继承 `default.primary`（不继承 `default.fallback`），其余 Key 路由、重试与熔断语义与既有目标完全一致。上游路径默认 `v1/embeddings`，可按上游 URL 配置 `upstream_routes[base_url].embeddings` 覆盖（别名 `embedding` / `embed`），TUI / WebUI / 管理 API / `--unified-target` 都已能读写该计划。
+  - **关键修复**：嵌入请求体此前会被当成 chat 体做协议适配，`{"model": ..., "input": "..."}` 被改写成 `{"model": ..., "messages": [...]}` 发给上游 —— 上游收到一个没有 `input` 的 chat 请求，必然失败。现在嵌入路径只替换 `model`，`input` / `encoding_format` / `dimensions` 等字段原样转发。
+  - 原因值得记一笔：路径 → 目标类型的分类原本在 `KeyPool`、`proxy_handler` 里各写了一份 `"image" if path in ("images/generations", "images/edits") else "default"`，加第三类时必然漏一处。现已收敛为 `proxy_support.request_route_kind()` 一份。
+- 新增**任务路由**：把任务名（`TASK_XXXXXX`）直接当 `model` 传给 AMKR，由配置里的任务表决定真实模型（首选 + 一个备选）和一组固定采样参数（`temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`，以及 `reasoning_effort`）。调用方无需知道任何模型名，也拿不到改参数的余地：
+  - 任务固定的采样参数由 AMKR 覆写；调用方**再传同名参数会被 400 拒绝**，而不是被静默覆盖 —— 静默覆盖会让调用方以为自己传的值生效了。`max_tokens` 等不在白名单内的参数照常透传。
+  - `reasoning_effort` 是唯一的例外：它同样被任务覆写，但不拒绝调用方传入（Claude Code / Codex 这类客户端框架会自动带上它，拒绝等于让任务路由不可用）。
+  - 首选模型重试后仍返回可重试状态码时，自动切到任务的备选模型，响应带 `X-AMKR-Fallback: true`，与统一模型回退语义一致。
+  - 任务名不能与模型 ID、别名、隐藏别名或 `unified-model` 撞名：否则 `resolve_route` 的语义会取决于查表顺序。任务也不接受调用方指定 Key（`TASK_XXXXXX[main]` 会被 400 拒绝），Key 仍由模型自身的路由模式决定。
+  - 配置写在顶层可选的 `tasks` 键下（`config_version` 仍为 4，旧配置照常加载）。参数名写错（如 `temprature`）在**保存时**就会报错，不必等到请求时才发现。
+  - WebUI 新增「任务路由」页（配置组）用于增删改查；管理 API 新增 `GET/POST /api/tasks` 与 `GET/PUT/DELETE /api/tasks/{task_name}`，带与其它写接口一致的 `config_revision` 乐观并发控制。任务随 `/api/config/export`、`/api/config/import` 一起迁移（导入时引用不到模型的任务会被跳过，与「模型从未配置」一致）。
+  - 删除模型时会一并清理引用它的任务：首选模型没了则整个任务删除，只有备选没了则退化为单模型任务。
+  - 走原生 Anthropic（`/v1/messages`）时，任务固定的 `stop` 以 `stop_sequences` 发给上游（Anthropic 的叫法，发 `stop` 会被静默忽略）；`reasoning_effort` 在原生路径上不发，与模型级设置一致。
+- 新增 `mount_app(host, "/amkr", config, config_path)`：把 AMKR 挂进已有的 FastAPI/Starlette 服务，作为子路径提供整套 OpenAI 兼容接口与管理 API，不必单独起进程。它会额外处理一件容易被忽略的事 —— Starlette **不会**为 `Mount` 的子应用运行 lifespan，直接 `host.mount()` 会静默跳过 AMKR 的启动与收尾（指标广播任务不启动、退出时 httpx client 与 SQLite 连接不关闭）；`mount_app` 把子应用 lifespan 链进宿主，同时保留宿主自己的 lifespan。详见 `docs/API.md`。
+- `create_app` 新增 `enable_ops`（默认 `None` 表示跟随配置字段 `ops_enabled`，即 `True`，保持 CLI 行为不变）。运维接口（`/api/logs`、`/api/service/*`、`/api/integrations/*`、`/api/tool`）作用于「服务所在的这台机器」，嵌入到别人的进程里语义不成立，`mount_app` 默认将其关闭。
+- 新增 `--no-ops` 与配置字段 `ops_enabled`（默认 `true`），用于**整体**关闭运维接口：容器与反向代理后面，这些接口会读日志文件、启停本机进程、注册系统服务、改写本机 Claude Code / Codex 配置，语义不成立；逐个路径拉黑容易漏（漏一条就等于宿主机被接管），整体关掉才是可断言的做法。关闭后这些路径返回 `404`，`/health` 新增 `ops_enabled` 字段供部署校验。与 `--webui` 一样写入配置文件 —— 后台启动与系统服务的子进程只带 `--config`，开关不落盘就会静默失效。
+- `auto_model_key_router` 顶层导出 `create_app` / `mount_app` / `RouterConfig` / `KeyPool`，并附带 `py.typed` 标记。
 - 新增容器镜像，发布流程（`.github/workflows/release.yml`）在打完 wheel 后构建镜像并推送到 GHCR（`ghcr.io/sparrived/auto-model-key-router`，标签为版本号，仅正式版额外更新 `latest`）；推送前先在容器里起一次服务、请求 `/health` 校验状态码与版本号 —— 本机不装 Docker 也能发布，但「镜像起不来」必须在发布时而非用户拉取时发现。
   - 镜像步骤排在 `gh release create` **之前**：tag 是那一步才创建的，推送失败时 tag 与 release 都不存在，重跑不会被 `existing_release` 的跳过条件挡住。
   - 配置、指标库、日志与 PID 文件都经 `XDG_CACHE_HOME` 落在 `/data`（已声明为卷），删容器不丢配置；构建上下文由 `.dockerignore` 排除 `router-config.json`、`.env`、`*.sqlite3`、`*.log`，避免把真实上游 Key 打进镜像推到 registry。
   - 容器内以非 root 用户运行，并固定用 `--host 0.0.0.0` 覆盖默认的 `127.0.0.1` —— 不覆盖的话 `-p 8000:8000` 映射不进容器。
   - 构建时用 `--label org.opencontainers.image.source` 把包关联到仓库（值由 `GITHUB_REPOSITORY` 推出，不在 Dockerfile 里写死，换仓库或改名时无需改动）：GHCR 页面会带上仓库信息，也避免「命名空间下已有同名包但未关联仓库」时 `GITHUB_TOKEN` 无权推送。**可见性不随仓库继承** —— GHCR 容器包默认私有，本仓库虽是公开仓库也不代表镜像能匿名拉取，而且没有 API 能改，只能在包页面手动改一次（README 已写明步骤）。
+- `create_app` / `mount_app` 新增 `authenticator` 参数（**可插拔鉴权**）：嵌入宿主时，宿主通常已有自己的身份体系（session cookie、JWT、网关身份头），而此前的选择只有两个 —— 把 `local_api_key` 留空等于**整体关闭鉴权**，否则就得让调用方额外再持有一套 AMKR 的 key。钩子为 `async (request, config) -> AuthContext | None`，返回 `None` 即拒绝（401）。`AuthContext.mode` 沿用 `"full"` / `"visitor"` 词表：visitor 不是「权限更小的 full」，而是一套**模型级**规则（只能用 `allow_visitor` 的 Key 与 `amkr-{模型ID}`，不能用内部别名/真实模型 ID/`unified-model`，拿不到 `/metrics` 与管理接口），因此必须显式选择而不能用布尔值表达。钩子同时覆盖 WebSocket：`/ws/events` 的首帧 token 会被折算成 `Authorization` 头交给同一个钩子（宿主的 cookie 本就在握手头里，用 session 鉴权时握手即通过）。不传该参数时行为完全不变。
+- WebUI 概览新增**用量热力图**（星期 × 小时矩阵，紧贴 KPI 瓦片下方整行铺开）：按「请求数量 / Token 数量」切换，一眼看出周内节律（工作日 vs 周末、白天 vs 夜间）与峰值时段。数据固定取最近 7 天、1 小时一格（不跟随页头的 1h–7d 窗口，否则切到 1h 就失去周内可比性），并给出每格读数与峰值。三种状态刻意区分：**斜纹格**是窗口未覆盖（没数据）、**最浅格**是这一小时确实是 0（没流量）、**描边虚框**是最新那个还在累加的整点桶（天然偏低，不能被读成流量骤降）。落格按 `Asia/Shanghai` 取星期与小时，浏览器时区不同也不会让矩阵平移。热力图走独立请求与 60 秒 TTL，不跟着 10 秒轮询重算 169 个桶。
 
 ### Changed
 
 - 流式超时默认值由 `stream_first_byte_timeout=90` / `stream_idle_timeout=180` 下调为 **60 / 60**：单 Key 模型下 `max_retries=2` 意味着最坏要串行等 3 次首字节，按 90 秒计约 270 秒才返回失败，而实测上游健康请求的首字节 p95 已达 64 秒、p99 达 82.5 秒 —— 等待窗口长到既拖慢失败反馈、又让请求堆积。下调到 60 秒后失败能在约 3 分钟内给出（3 × 60），代价是个别本就慢于 60 秒的成功请求会被判超时，可按上游实际情况在 TUI 的 **CLI 设置 → 超时配置** 中调回。
+- 依赖补上主版本上界（`fastapi`、`httpx`、`rich`、`tomlkit`、`uvicorn`、`websockets`）：作为别人的依赖项时，这些库的 minor 升级会改行为，不设上限迟早会把宿主一起弄坏。
+- WebUI 前端的 API 基址改为按当前页面路径推导，不再写死绝对路径。此前页面能挂在 `/ui/` 只是因为独立运行时恰好同源同前缀，挂到 `/amkr/ui/` 后每个请求都会打到宿主根路径。
 - WebUI 看板卡片改为**同排等高铺满**，消除卡片之间的大片空隙：栅格原先用 `align-items: start`，行高由该行最高的卡片决定，矮卡片只占自身那点高度、下方留出一整块空白（例如「响应状态分布」是空态、约 200px，与约 390px 的「请求结果」同排时，下方空出近 200px）。现在列容器撑满行高、卡片再撑满列容器，排内间距恒为间隙值、整排底边天然平齐；卡片内部的富余高度也有处可去 —— 列表/请求流/表格滚动区吸收，竖向内容块居中，页脚用 `margin-top: auto` 钉到底部。
 - 概览与活动页的多段栅格合并为一个：分开写时排内间距是 16px、排间却是 `.content` 的 24px，横纵节奏对不上、整体显得松散；`.content` 的间距也改为与栅格同值，页面级纵向节奏与卡片横向间距一致。
 - 请求流限高 520px 并内部滚动：它条数随流量增长，不限高会成为整排的高度上限，把旁边的「延迟趋势」一起撑到近千像素、两张图被挤到底部（这也是"间隙突然变大"的实际来源）。
@@ -23,11 +42,11 @@
 
 - 修复 `GET /metrics` 省略 `hours` 时的**无界全表聚合**：默认会聚合全部历史，在本机 16 万行 / 65 MiB 的统计库上实测 3.1–5.2 秒，而 `snapshot()` 与 `record()` 共用 `MetricsStore._lock`，于是这个只读接口会把代理请求路径（每次落库）一起卡住 —— 实测无界查询进行中，一次 `record()` 要等 4.1 秒才拿到锁。现在默认窗口改为最近 `24` 小时（与 `/metrics/requests` 一致），全量改由显式的 `all_history=true` 触发。
 - 删除 `proxy_handler._broadcast_metrics()`：它从 `RuntimeResources` 上 `getattr(state, "event_bus", None)`，而 `event_bus` 只挂在 `app.state` 上，该函数因此恒为空操作；真正的节流广播在 `app.py`。留着它是个隐患 —— 一旦有人把 `event_bus` 挂到 `RuntimeResources`，每次上游失败都会在请求路径上同步跑一次无界 `snapshot()`，也就是一次 3–5 秒的全表扫描。
-
 - 修复 `EventBus.broadcast("client_count", ...)` 漏掉 `await`：`/ws/events` 的客户端数量事件从未真正发出（只在日志里留下 `RuntimeWarning: coroutine ... was never awaited`）。
 - 修复服务退出时的 sqlite **原生崩溃**（`Windows fatal exception: access violation`，进程直接挂掉）。`MetricsStore` 用 `asyncio.Lock` 串行化连接访问，再用 `asyncio.to_thread` 执行查询；但 `to_thread` 无法取消 —— 任务被 cancel 时 await 立刻抛出、锁随之释放，**工作线程仍在用同一个连接执行 SQL**，随后 `close()` 拿到刚释放的锁并关闭连接，正在查询的线程就踩到已失效的 sqlite 句柄。现在互斥下沉到工作线程（`threading.Lock`）：取消只能中断 await、中断不了线程，而 `close()` 同样要抢这把锁，于是自然排在所有在途查询之后；取消路径也会先等线程收尾再抛出。这个缺陷此前被上面那个漏掉的 `await` 掩盖着（时序恰好错开），修好 `await` 后立即暴露。
 - 修复 WebUI 图表读数气泡里多出一行 `null`：原生 `replaceChildren` 会把 `null` 子项字符串化成文本节点 `"null"`，与 `dom.js` 里会过滤空值的 `append()` 行为不同，于是每个**已完结**的点都在读数下多显示一行 `null`（只有「累加中」的尾桶才看不到）。折线图与 Token 堆叠柱两处气泡、以及统一模型编辑表单（路由方式非「固定 Key」时）都改用会过滤空值的 `mount()`。同时补上 `tests/webui_tip_probe.mjs`：用忠实还原 `replaceChildren` 语义的 DOM 垫片驱动真实的 `charts.js`，此前的垫片一律复用会过滤空值的 `append()`，恰好把这个 bug 藏了过去。
 - 修复发布只更新 `pyproject.toml` 而不更新 `uv.lock`：uv 把根项目也写进 `uv.lock`，于是打出的 tag 上 `pyproject.toml` 是 4.1.0、`uv.lock` 仍写着 4.0.3，`uv sync --locked` 会直接报 lock 过期；且此后任何 `uv run` 都会把它改回去，工作区永远脏一块。现在改版本号时同步 `uv.lock` 中根项目的 `version`（只改根项目那一处，不碰依赖），并且不调用 `uv lock` —— 只有根项目版本变化、依赖解析结果不变，联网跑 lock 反而可能因索引不可达而失败。
+- 修复携带**非 ASCII 凭据**的请求返回 500 而不是 401：HTTP 头是字节、由 Starlette 按 latin-1 解码，因此构造一个非 ASCII 的 `Authorization` 就能把字符串送到 `hmac.compare_digest` —— 它对含非 ASCII 的 `str` 直接抛 `TypeError`（实测可复现）。现在一律比较 UTF-8 字节，非 ASCII 凭据自然地判为不匹配。原先该缺陷被 `_authorization_mode` 的 `==` 掩盖（`==` 不会抛异常），改用 `compare_digest` 时暴露。
 - 修复推送失败的处理只认「错误文本里出现 `proxy` / `127.0.0.1`」：`schannel: failed to receive handshake, SSL/TLS connection failed` 这句话两者都不含，于是既不绕过代理、也不重试，一次瞬时网络抖动就把整个发布卡在最后一步，而提交和标签已经建好，留下「已提交已打标签、但没推上去」的半成品状态。现在把连接类失败（代理、TLS 握手、连接被拒/重置、超时、域名解析失败）统一识别：先临时绕过代理试一次，仍失败则退避重试，共 3 轮，并在最终报错里保留原始正文；鉴权被拒这类非连接错误仍不重试。
 
 ## [4.1.0] - 2026-09-16

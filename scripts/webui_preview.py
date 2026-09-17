@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlparse
 ROOT = Path(__file__).resolve().parents[1]
 WEBUI = ROOT / "auto_model_key_router" / "webui"
 
-MODELS = ["claude-sonnet-4-5", "gpt-5-codex", "gemini-2.5-pro", "deepseek-v3.2"]
+MODELS = ["claude-sonnet-4-5", "gpt-5-codex", "gemini-2.5-pro", "deepseek-v3.2", "text-embedding-3-small"]
 KEYS = ["primary-a", "backup-b", "spare-c"]
 UPSTREAMS = ["anthropic/claude-sonnet-4-5", "openai/gpt-5-codex", "google/gemini-2.5-pro"]
 PROVIDERS = ["anthropic", "openai", "google"]
@@ -344,6 +344,7 @@ HEALTH = {
     "unified_model": {
         "default": {"primary": {"model": "claude-sonnet-4-5", "key": None}, "fallback": {"model": "deepseek-v3.2", "key": "backup-b"}},
         "image": {"primary": {"model": "gemini-2.5-pro", "key": None}},
+        "embeddings": {"primary": {"model": "text-embedding-3-small", "key": None}},
     },
     "native_endpoint_states": {
         "anthropic": {"supported": True, "reason": None, "path": "/v1/messages"},
@@ -362,7 +363,7 @@ PROVIDERS_PAYLOAD = [
     {
         "id": "anthropic",
         "base_url": "https://api.anthropic.com",
-        "routes": {"openai": None, "anthropic": "/v1/messages", "responses": None, "images": None},
+        "routes": {"openai": None, "anthropic": "/v1/messages", "responses": None, "images": None, "embeddings": None},
         "keys": [
             {
                 "name": "primary-a",
@@ -385,7 +386,7 @@ PROVIDERS_PAYLOAD = [
     {
         "id": "openai",
         "base_url": "https://api.openai.com",
-        "routes": {"openai": None, "anthropic": None, "responses": "/v1/responses", "images": "/v1/images/generations"},
+        "routes": {"openai": None, "anthropic": None, "responses": "/v1/responses", "images": "/v1/images/generations", "embeddings": "/v1/embeddings"},
         "keys": [
             {
                 "name": "spare-c",

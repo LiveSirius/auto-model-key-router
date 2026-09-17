@@ -9,6 +9,7 @@ const ROUTE_MODES = [
   { id: "anthropic", label: "Anthropic 路径" },
   { id: "responses", label: "Responses 路径" },
   { id: "images", label: "Images 路径" },
+  { id: "embeddings", label: "Embeddings 路径" },
 ];
 
 const state = {

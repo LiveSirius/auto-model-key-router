@@ -7,8 +7,9 @@ from pathlib import Path
 
 from . import __version__
 from .config import DEFAULT_CONFIG_PATH, UNIFIED_MODEL_ID, RouterConfig
+from .config_operations import UNIFIED_TARGETS
 from .config_service import ConfigService
-from .dashboard import render_config, run_terminal_ui
+from .dashboard import render_config, run_terminal_ui, unified_model_status_panel
 from .logs_tui import render_logs
 from .service import background_status_panel, manage_system_service, service_status_panel, start_service_background, start_service_foreground, stop_background_service
 from .tui import clear_terminal_history, console, section_panel
@@ -45,7 +46,7 @@ def main() -> None:
     )
     parser.add_argument("--switch-model", metavar="MODEL", help=f"切换 {UNIFIED_MODEL_ID} 指向的已有模型或别名")
     parser.add_argument("--switch-key", metavar="KEY", help=f"切换 {UNIFIED_MODEL_ID} 使用的已有 key；传 auto 恢复自动路由")
-    parser.add_argument("--unified-target", choices=["default.primary", "default.fallback", "image.primary", "image.fallback"], default="default.primary", help="选择要修改的 unified 路由目标")
+    parser.add_argument("--unified-target", choices=list(UNIFIED_TARGETS), default="default.primary", help="选择要修改的 unified 路由目标")
     parser.add_argument("--show-unified-model", action="store_true", help=f"查看 {UNIFIED_MODEL_ID} 当前指向")
     parser.add_argument("--show-logs", nargs="?", const=20, type=int, help="进入调用日志，显示最近 N 行运行日志，调用统计明细固定 10 行/页")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -64,6 +65,13 @@ def main() -> None:
         dest="webui",
         action="store_false",
         help="关闭 WebUI（写入 webui_enabled，重启服务后生效）",
+    )
+    parser.add_argument(
+        "--no-ops",
+        dest="ops",
+        action="store_false",
+        default=None,
+        help="关闭运维接口 /api/logs、/api/service/*、/api/integrations/*、/api/tool（写入 ops_enabled，重启服务后生效）",
     )
     parser.add_argument("--serve-foreground", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--restart-service-after-update", action="store_true", help=argparse.SUPPRESS)
@@ -87,6 +95,11 @@ def main() -> None:
         if args.webui is not None:
             ConfigService(config_path).update(
                 lambda data: data.update(webui_enabled=args.webui)
+            )
+        # 同理：后台/系统服务启动只带 --config，开关不进配置就会静默失效。
+        if args.ops is not None:
+            ConfigService(config_path).update(
+                lambda data: data.update(ops_enabled=args.ops)
             )
         interactive_tui = not any(
             (
@@ -130,19 +143,15 @@ def main() -> None:
             except (OSError, ValueError) as exc:
                 console.print(section_panel(f"[red]{exc}[/red]", "统一模型切换失败", "red"))
                 raise SystemExit(1) from exc
-            unified = config.unified_model
-            key_text = unified.key if unified and unified.key else "自动路由"
-            console.print(section_panel(f"请求模型: [bold]{UNIFIED_MODEL_ID}[/bold]\n目标模型: [bold]{unified.model if unified else '-'}[/bold]\n使用 Key: [bold]{key_text}[/bold]", "统一模型已切换", "green"))
+            # 面板必须报整份配置：目标不止 default 一个，只打印 default 会在
+            # `--unified-target embeddings.primary` 时显示一份根本没变过的计划。
+            console.print(unified_model_status_panel(config, "统一模型已切换", "green"))
             return
         if args.show_api_key:
             print(config.local_api_key)
             return
         if args.show_unified_model:
-            unified = config.unified_model
-            if unified is None:
-                console.print(section_panel(f"[yellow]尚未配置 {UNIFIED_MODEL_ID}。[/yellow]", "统一模型", "yellow"))
-            else:
-                console.print(section_panel(f"请求模型: [bold]{UNIFIED_MODEL_ID}[/bold]\n目标模型: [bold]{unified.model}[/bold]\n使用 Key: [bold]{unified.key or '自动路由'}[/bold]", "统一模型", "cyan"))
+            console.print(unified_model_status_panel(config, "统一模型", "cyan"))
             return
 
         if args.update:

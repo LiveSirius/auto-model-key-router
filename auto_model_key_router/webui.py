@@ -50,6 +50,8 @@ def webui_status(app: FastAPI) -> dict[str, Any]:
 
     mounted 表示当前进程真的在提供 /ui；enabled 表示配置里的期望状态。两者不
     一致时说明改了开关但还没重启服务。
+
+    path 会带上嵌入时的挂载前缀（独立运行是 /ui，挂在 /amkr 下是 /amkr/ui）。
     """
     mounted = bool(getattr(app.state, "webui_mounted", False))
     configured = _configured(app)
@@ -58,8 +60,14 @@ def webui_status(app: FastAPI) -> dict[str, Any]:
         "webui_available": available,
         "webui_enabled": configured,
         "webui_mounted": mounted,
-        "webui_path": WEBUI_MOUNT_PATH if mounted else None,
+        "webui_path": webui_path(app) if mounted else None,
     }
+
+
+def webui_path(app: FastAPI) -> str:
+    """WebUI 的实际访问路径，含嵌入时的挂载前缀（无尾斜杠）。"""
+    prefix = str(getattr(app.state, "mount_path", "") or "").rstrip("/")
+    return f"{prefix}{WEBUI_MOUNT_PATH}"
 
 
 def _configured(app: FastAPI) -> bool:

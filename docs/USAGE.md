@@ -1,6 +1,6 @@
 # Auto Model Key Router 使用教程
 
-本文是一份从零开始的完整使用教程，覆盖安装、配置模型与 Key、启动服务、发送请求、查看统计、访客 Key、统一模型切换，以及 Claude Code / Codex / Pi Agent 接入。
+本文是一份从零开始的完整使用教程，覆盖安装、配置模型与 Key、启动服务、发送请求、查看统计、访客 Key、统一模型切换、任务路由，以及 Claude Code / Codex / Pi Agent 接入。
 
 如果只想查 CLI 参数或 HTTP API 字段，请参考 [`CLI.md`](CLI.md) 和 [`API.md`](API.md)。
 
@@ -14,6 +14,7 @@ Auto Model Key Router（简称 AMKR）是一个本地 OpenAI-compatible API 路�
 - 在某个 key 限流、鉴权失败或上游异常时自动切换到其他 key。
 - 给 Claude Code、Codex、Pi Agent 或其他 OpenAI-compatible 客户端提供一个稳定的本地入口。
 - 使用固定模型名 `unified-model`，在路由器里随时切换真实模型或指定 key，避免反复改客户端配置。
+- 为不同任务固化模型与采样参数：客户端传 `TASK_XXXXXX`，由路由器决定用哪个模型、用什么参数。
 - 统计本地调用、访客调用、重试、状态码、token 和耗时。
 
 ---
@@ -180,13 +181,15 @@ TUI 里最常用的入口：
 | 统一模型 | 设置 `unified-model` 当前指向的真实模型，并选择自动路由或固定 Key |
 | CLI 设置 | 管理监听地址、端口、本地鉴权、请求超时、配置迁移、版本更新等 |
 
+> 任务路由（[第 9 节](#9-任务路由)）目前只在 WebUI 的 **配置 → 任务路由** 页和管理 API 中维护，TUI 没有对应菜单。
+
 推荐的新手流程：
 
 1. 进入 **供应商 → 添加供应商**，输入供应商 ID、Base URL 和第一个 API Key；AMKR 会自动探测这个新 Key 可服务的模型，多选后自动建立本地模型并完成绑定（同一供应商以后再添加 Key 也会只探测该新 Key，互不复用探测结果）。
 2. 给同一模型继续添加 Key，或给模型绑定其他供应商的 Key：进入 **模型设置** 选择模型，用「管理 Key / 绑定 Key」调整。
 3. 进入 **统一模型**，把 `unified-model` 指向该模型。
 4. 进入 **一键配置 → 路由服务**，启动或注册本地路由服务。
-5. 用客户端请求 `http://127.0.0.1:8000/v1/...`，模型名可以写真实模型、别名或 `unified-model`。
+5. 用客户端请求 `http://127.0.0.1:8000/v1/...`，模型名可以写真实模型、别名、`unified-model` 或任务名 `TASK_XXXXXX`。
 
 > **能力探测与缓存（按 Key 独立）**：探测缓存按 Key 保存（磁盘为 `providers.<id>.keys.<key>.capabilities`，含该 Key 的模型清单 `models`、各路由可用性 `route_status`、`errors` 与 `checked_at`）。同一供应商的不同 Key 能访问的模型集可能不同（如免费/付费额度、不同订阅），所以每次添加 Key 时只探测这个新 Key，结果不复用、不折叠。
 >
@@ -266,6 +269,15 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ```json
 {
   "model": "unified-model",
+  "messages": [{"role": "user", "content": "hello"}]
+}
+```
+
+如果配置了任务路由，`model` 也可以直接写任务名（见 [第 9 节](#9-任务路由)）：
+
+```json
+{
+  "model": "TASK_000001",
   "messages": [{"role": "user", "content": "hello"}]
 }
 ```
@@ -415,10 +427,54 @@ auto-model-key-router --config router-config.json --switch-key auto
 - 如果切换到另一个模型且未传 `--switch-key`，旧的固定 Key 会自动清空，避免误用。
 - `unified_model` 只引用现有模型和 Key，不会复制或新增上游 Key。
 - 配置中不能把真实模型 ID 或 alias 命名为保留名 `unified-model`。
+- `unified_model` 下可选的 `image` 与 `embeddings` 计划把图像、嵌入请求指向各自的模型：`/v1/images/*` 用 `image`，`/v1/embeddings` 用 `embeddings`，其余请求用 `default`。未配置对应计划时该路径继承 `default.primary`（不继承 `default.fallback`）。用 `--unified-target` 指定要改的计划，例如把嵌入切到另一个模型：
+
+```bash
+auto-model-key-router --config router-config.json --switch-model text-embedding-3-small --unified-target embeddings.primary
+```
 
 ---
 
-## 9. 显式指定某个 Key
+## 9. 任务路由
+
+`unified-model` 适合「客户端固定一个入口、模型在 AMKR 侧切换」；任务路由解决的是另一个问题：**不同任务该用不同模型和不同的采样参数**。把模型名与参数一起固化在服务端，客户端只要传任务名，就不必（也不能）关心这些细节。
+
+在 WebUI 的 **配置 → 任务路由** 页新建一个任务：
+
+| 字段 | 说明 |
+| --- | --- |
+| 任务名 | 客户端要传的 `model`，如 `TASK_000001`；不能与模型 ID、别名、隐藏别名或 `unified-model` 撞名 |
+| 首选模型 | 任务实际调用的模型 |
+| 备选模型 | 可选；首选模型重试失败后自动切换，响应带 `X-AMKR-Fallback: true` |
+| 推理强度 | 可选，`none`…`max` |
+| 固定采样参数 | 可选，`temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop` |
+
+调用时把 `model` 写成任务名：
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer amkr_your-local-api-key" \
+  -d '{
+    "model": "TASK_000001",
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+```
+
+说明：
+
+- 任务名是**虚拟模型名**，不会出现在 `/v1/models` 里。这与「隐藏别名」不同：隐藏别名仍是一个模型的名字，任务名则是一整组路由与参数的别名；如果需要客户端直接调用的名字能在 `/v1/models` 里看到，请改用模型的别名或隐藏别名。
+- 任务 `params` 里固定了的采样参数会覆盖请求体中的同名参数；请求里**显式传了**这些参数会直接返回 `400`，而不是被静默忽略。`max_tokens` 等不在列表里的参数照常透传。
+- `reasoning_effort` 是唯一例外：任务同样会覆盖它，但不拒绝调用方传入 —— Claude Code、Codex 这类客户端框架会自动带上这个字段，拒绝等于让任务路由不可用。
+- 任务不接受调用方指定 Key（`TASK_000001[main]` 返回 `400`）。Key 仍由目标模型自身的路由模式（`round_robin` / `priority` / `only_first`）决定，与第 7 节一致。
+- 参数名写错（如 `temprature`）会在**保存时**就报错，不必等到请求时才发现。
+- 走原生 Anthropic（`/v1/messages`）时，固定的 `stop` 会以 `stop_sequences` 发给上游 —— 那是 Anthropic 的叫法，发 `stop` 会被静默忽略。`reasoning_effort` 在原生路径上不发（与模型级设置一致）。
+- 访客 Key 不能访问任务名。
+- 任务写在配置文件的顶层 `tasks` 键下，可选；删掉某个模型时，引用它的任务会被自动清理（首选模型没了删整个任务，只有备选没了则退化为单模型任务）。
+
+---
+
+## 10. 显式指定某个 Key
 
 如果只想让单次请求使用某个 Key，可以把 `model` 写成：
 
@@ -447,7 +503,7 @@ unified-model[key name]
 
 ---
 
-## 10. 本地鉴权
+## 11. 本地鉴权
 
 配置里有 `local_api_key` 时，下列接口需要鉴权：
 
@@ -474,7 +530,7 @@ x-api-key: amkr_your-local-api-key
 
 ---
 
-## 11. 查看健康状态和模型列表
+## 12. 查看健康状态和模型列表
 
 健康检查：
 
@@ -493,7 +549,7 @@ curl http://127.0.0.1:8000/v1/models \
 
 ---
 
-## 12. 查看统计和日志
+## 13. 查看统计和日志
 
 命令行查看配置摘要：
 
@@ -543,7 +599,7 @@ curl "http://127.0.0.1:8000/metrics/requests?hours=24&limit=50" \
 
 ---
 
-## 13. 使用访客 Key
+## 14. 使用访客 Key
 
 访客功能需要安装：
 
@@ -599,7 +655,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 ---
 
-## 14. 接入 Claude Code
+## 15. 接入 Claude Code
 
 AMKR 支持 Anthropic Messages 风格入口 `/v1/messages`，可供 Claude Code 使用。
 
@@ -637,7 +693,7 @@ unified-model 模式写入的核心环境变量包括：
 
 ---
 
-## 15. 接入 Codex
+## 16. 接入 Codex
 
 AMKR 支持 OpenAI Responses 风格入口 `/v1/responses`，可供 Codex 使用。
 
@@ -682,7 +738,7 @@ requires_openai_auth = true
 
 ---
 
-## 16. 接入 Pi Agent
+## 17. 接入 Pi Agent
 
 在 **一键配置 → Pi Agent** 中，AMKR 只提供 `unified-model` 模式，不提供原生模型模式。应用前需要先设置 `unified-model` 和本地鉴权 key；回退会恢复首次应用前的完整配置文件。
 
@@ -717,7 +773,7 @@ Pi 的 `/model` 会继续显示其内置及其他自定义提供商的模型；�
 
 ---
 
-## 17. 请求兼容说明
+## 18. 请求兼容说明
 
 AMKR 的代理入口是 `/v1/{path}`，主要兼容：
 
@@ -740,7 +796,7 @@ AMKR 的代理入口是 `/v1/{path}`，主要兼容：
 
 ---
 
-## 17. 常见问题
+## 19. 常见问题
 
 ### 请求返回 401 / 403
 
@@ -756,7 +812,21 @@ AMKR 的代理入口是 `/v1/{path}`，主要兼容：
 - 真实模型 ID；或
 - 该模型的 `aliases[]`；或
 - 已配置的 `unified-model`；或
+- 已配置的任务名（`TASK_XXXXXX`，见 [第 9 节](#9-任务路由)）；或
 - 访客模式下 `/v1/models` 返回的 `amkr-{真实模型ID}`。
+
+### 请求任务名返回 400
+
+任务路由会拒绝两类请求（见 [第 9 节](#9-任务路由)）：
+
+- **显式传了任务已固定的采样参数**：错误信息会列出冲突的参数名。任务固定了什么就不能再传什么，去掉这些字段即可（`max_tokens` 这类不在此列，照常透传）。
+- **写了 `TASK_XXXXXX[key]`**：任务不接受调用方指定 Key，Key 由目标模型自身的路由模式决定。
+
+`reasoning_effort` 是唯一的例外：任务会覆盖它，但不会因为你传了就报错。
+
+### 请求任务名返回 404
+
+任务指向的模型当前没有**启用**的 Key（一条都没绑定，或绑定的都被禁用了）。先在**模型设置**里给该模型绑定或启用 Key，或在**任务路由**页把任务改指向一个可用模型。删掉模型时引用它的任务会被自动清理，所以这个错误通常出现在「模型被解绑或禁用了所有 Key」的情况下。
 
 ### 请求返回 503 没有可用 Key
 

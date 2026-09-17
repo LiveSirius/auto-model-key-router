@@ -18,7 +18,8 @@
       "routes": {
         "openai": "v1/chat/completions",
         "responses": "v1/responses",
-        "images": "v1/images/generations"
+        "images": "v1/images/generations",
+        "embeddings": "v1/embeddings"
       },
       "keys": {
         "main": {
@@ -64,6 +65,15 @@
           "upstream_model": "gpt-4o-mini-2024-07-18"
         }
       ]
+    },
+    "text-embedding-3-small": {
+      "targets": [
+        {
+          "provider": "openai",
+          "key": "main",
+          "upstream_model": "text-embedding-3-small"
+        }
+      ]
     }
   },
   "unified_model": {
@@ -71,6 +81,23 @@
       "primary": {
         "model": "gpt-4o-mini",
         "key": null
+      }
+    },
+    "embeddings": {
+      "primary": {
+        "model": "text-embedding-3-small",
+        "key": null
+      }
+    }
+  },
+  "tasks": {
+    "TASK_000001": {
+      "model": "gpt-4o-mini",
+      "fallback_model": null,
+      "params": {
+        "temperature": 0.2,
+        "top_p": 0.9,
+        "reasoning_effort": "high"
       }
     }
   }

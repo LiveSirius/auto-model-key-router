@@ -47,13 +47,23 @@ function detailText(payload, status) {
   return `HTTP ${status}`;
 }
 
+// WebUI 可能被挂在子路径下（独立运行是 /ui/，嵌入宿主是 /amkr/ui/），因此 API
+// 基址必须从当前页面路径反推。写死绝对路径会让嵌入后的每个请求打到宿主根路径。
+function apiBase() {
+  const path = String(location.pathname || "");
+  const index = path.lastIndexOf("/ui/");
+  if (index >= 0) return path.slice(0, index);
+  if (path.endsWith("/ui")) return path.slice(0, -3);
+  return "";
+}
+
 async function request(path, { method = "GET", body, auth = true } = {}) {
   const headers = {};
   if (auth) headers.Authorization = `Bearer ${getKey()}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
   let response;
   try {
-    response = await fetch(path, {
+    response = await fetch(`${apiBase()}${path}`, {
       method,
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -198,7 +208,21 @@ export const api = {
 
   unified: () => request("/api/unified-model"),
   updateUnified: (revision, unified) =>
-    request("/api/unified-model", { method: "PUT", body: { config_revision: revision, default: unified.default, image: unified.image ?? null } }),
+    request("/api/unified-model", { method: "PUT", body: { config_revision: revision, default: unified.default, image: unified.image ?? null, embeddings: unified.embeddings ?? null } }),
   deleteUnified: (revision) =>
     request("/api/unified-model", { method: "DELETE", body: { config_revision: revision } }),
+
+  tasks: () => request("/api/tasks"),
+  createTask: (revision, payload) =>
+    request("/api/tasks", { method: "POST", body: { config_revision: revision, ...payload } }),
+  updateTask: (revision, taskName, payload) =>
+    request(`/api/tasks/${encodeURIComponent(taskName)}`, {
+      method: "PUT",
+      body: { config_revision: revision, ...payload },
+    }),
+  deleteTask: (revision, taskName) =>
+    request(`/api/tasks/${encodeURIComponent(taskName)}`, {
+      method: "DELETE",
+      body: { config_revision: revision },
+    }),
 };

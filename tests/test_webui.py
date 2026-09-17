@@ -143,6 +143,10 @@ PROBE_SCENARIOS = [
     "auth_disabled_no_login",
     "deeplink_without_key_stays_on_login",
     "unreachable_service_stays_on_login",
+    # 嵌入宿主时页面在 /<prefix>/ui/ 下，API 必须打到同一前缀。
+    "mounted_prefix_uses_prefixed_api",
+    # 任务路由页：列表、编辑与保存请求体的形状。
+    "tasks_page_lists_and_saves",
 ]
 
 

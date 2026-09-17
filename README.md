@@ -7,6 +7,7 @@
 - **按模型管理 Key**：Key 属于供应商（`providers.*.keys`），模型通过 `targets[]`（`{provider, key, upstream_model}`）绑定一个或多个 Key；同一 Key 可服务多个模型，支持 `round_robin`、`priority`、`only_first`。
 - **失败切换与冷却**：遇到 `401/403/429/5xx` 等可重试错误时自动重试或切换 Key，并在进程内临时冷却异常 Key。
 - **统一模型名**：客户端固定请求 `unified-model`，真实模型和固定 Key 可在路由器侧随时切换。
+- **任务路由**：把任务名（`TASK_XXXXXX`）直接当模型名传，由路由器决定用哪个模型（首选 + 备选）和哪组采样参数；调用方改不了这些参数。
 - **每个 Key 独立探测**：模型清单按 Key 缓存（同一供应商不同 Key 可见模型可能不同），添加 Key 时自动探测该 Key，可在 TUI 或管理 API 手动刷新。
 - **OpenAI-compatible 代理**：支持 `/v1/chat/completions`、`/v1/models`，并兼容 Claude Code 的 `/v1/messages` 与 Codex 的 `/v1/responses`；可为不同协议模式配置上游额外路径。
 - **Terminal UI 管理**：在 TUI 中配置供应商与 Key、模型、统一模型、服务注册和客户端接入。
@@ -108,6 +109,15 @@ docker exec amkr amkr --config /data/auto-model-key-router/router-config.json --
 ```
 
 配置、指标库、日志和 PID 文件都在 `/data/auto-model-key-router` 下，删容器不丢数据。容器内固定监听 `0.0.0.0`（否则端口映射进不去），**因此务必保留 `local_api_key`，不要把端口暴露到公网**；需要改端口时改配置里的 `port`，再同步调整 `-p`。
+
+容器里建议关掉运维接口：`/api/logs`、`/api/tool`、`/api/service/*`、`/api/integrations/*` 作用于「服务所在的这台机器」（读日志文件、启停进程、注册系统服务、改写本机 Claude Code / Codex 配置），在容器或反向代理后面语义不成立，逐个路径拉黑又容易漏：
+
+```bash
+amkr --config /data/auto-model-key-router/router-config.json --no-ops
+```
+
+开关写入配置字段 `ops_enabled`，重启后生效；关闭后这些路径返回 `404`，`/health` 的 `ops_enabled` 字段也会变成 `false`，便于部署时断言。代理、`/health`、`/metrics`、WebSocket 与 `/api/settings` 等配置管理接口不受影响。
+
 ## 快速开始
 
 ### 1. 启动 Terminal UI
@@ -137,8 +147,9 @@ amkr --config router-config.json
 1. **供应商 → 添加供应商**：输入供应商 ID、Base URL 与第一个 Key 的 API Key。添加时自动探测这个新 Key（可用模型列表 + 各路由可用性）并据此建立可服务模型；以后每添加一个 Key 都会只探测该新 Key（不同 Key 可见模型可能不同）。
 2. **模型设置**：管理模型别名、隐藏别名、路由模式、绑定/解绑 Key（绑定 Key 时可指定上游模型名）。
 3. **统一模型**：把 `unified-model` 指向一个真实模型，必要时固定到某个 Key。
-4. **一键配置 → 路由服务**：启动或注册本地代理服务。
-5. **一键配置 → Claude Code / Codex / Pi Agent**：按需自动写入客户端配置。
+4. **任务路由**（WebUI）：为 `TASK_XXXXXX` 指定模型与固定采样参数。
+5. **一键配置 → 路由服务**：启动或注册本地代理服务。
+6. **一键配置 → Claude Code / Codex / Pi Agent**：按需自动写入客户端配置。
 
 ### 3. 调用本地代理
 
@@ -161,6 +172,20 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 ```
 
 也可以把 `model` 写成真实模型 ID、模型 alias，或 `模型ID[key name]` 来显式指定某个 Key。
+
+如果配置了任务路由，还可以直接传任务名：
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer amkr_your-local-api-key" \
+  -d '{
+    "model": "TASK_000001",
+    "messages": [{"role": "user", "content": "hello"}]
+  }'
+```
+
+任务名对应的模型、备选模型和采样参数都在 AMKR 侧固定，调用方不需要知道真实模型名。详见 [`docs/USAGE.md`](docs/USAGE.md#9-任务路由)。
 
 ## 常用命令
 
@@ -221,7 +246,8 @@ auto-model-key-router --config router-config.json --switch-key auto
       "routes": {
         "openai": "v1/chat/completions",
         "responses": "v1/responses",
-        "images": "v1/images/generations"
+        "images": "v1/images/generations",
+        "embeddings": "v1/embeddings"
       },
       "keys": {
         "main": {
@@ -262,17 +288,32 @@ auto-model-key-router --config router-config.json --switch-key auto
         {"provider": "openai", "key": "main", "upstream_model": "gpt-4o-mini"},
         {"provider": "tokenplan", "key": "mimo", "upstream_model": "gpt-4o-mini"}
       ]
+    },
+    "text-embedding-3-small": {
+      "targets": [
+        {"provider": "openai", "key": "main", "upstream_model": "text-embedding-3-small"}
+      ]
     }
   },
   "unified_model": {
     "default": {
       "primary": {"model": "gpt-4o-mini", "key": null}
+    },
+    "embeddings": {
+      "primary": {"model": "text-embedding-3-small", "key": null}
+    }
+  },
+  "tasks": {
+    "TASK_000001": {
+      "model": "gpt-4o-mini",
+      "fallback_model": null,
+      "params": {"temperature": 0.2, "top_p": 0.9}
     }
   }
 }
 ```
 
-> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 TUI「供应商 → 刷新能力探测」（全部 Key 或指定 Key、可限端点范围）或管理 API 的 probe 接口手动刷新。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
+> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model, fallback_model?, params?}`；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`reasoning_effort`，写错键名会在保存时报错。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 TUI「供应商 → 刷新能力探测」（全部 Key 或指定 Key、可限端点范围）或管理 API 的 probe 接口手动刷新。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
 
 流式请求使用分段超时：`stream_first_byte_timeout`（默认 60 秒）覆盖等待上游响应头和第一块响应体的总时间，`stream_idle_timeout`（默认 60 秒）限制首块之后相邻响应块的等待时间，两者都必须大于 0。响应头返回前超时会按现有重试策略切换 Key；下游流建立后超时只结束当前流，不会自动重放请求。可在 TUI 的 **CLI 设置 → 超时配置** 中统一调整普通请求和两个流式超时。
 
@@ -288,7 +329,7 @@ auto-model-key-router --config router-config.json --switch-key auto
 
 安装 `auto-model-key-router[visitor]` 后，可以用固定 Key `amkr-visitor` 暴露受限公共模型。只有设置了 `allow_visitor: true` 的上游 Key 才能被访客使用，访客看到的模型名格式为 `amkr-{真实模型ID}`。
 
-详细限制和示例见 [完整使用教程：使用访客 Key](docs/USAGE.md#13-使用访客-key)。
+详细限制和示例见 [完整使用教程：使用访客 Key](docs/USAGE.md#14-使用访客-key)。
 
 ## 开发
 

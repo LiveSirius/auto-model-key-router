@@ -808,7 +808,7 @@ def test_config_transfer_matches_tui_append_semantics_and_keeps_machine_settings
     exported, imported = run_client(app, requests)
     assert exported.status_code == 200
     assert set(exported.json()["config"]).issubset(
-        {"config_version", "providers", "models", "upstream_routes", "routing_mode", "unified_model"}
+        {"config_version", "providers", "models", "upstream_routes", "routing_mode", "unified_model", "tasks"}
     )
     assert imported.status_code == 200
     saved = json.loads(path.read_text(encoding="utf-8"))
@@ -1443,6 +1443,33 @@ def test_unified_model_accepts_nested_api_payload(tmp_path: Path) -> None:
     assert response.json()["unified_model"]["default"]["primary"]["model"] == "model-a"
 
 
+def test_unified_model_nested_payload_round_trips_embeddings_plan(
+    tmp_path: Path,
+) -> None:
+    """嵌套 PUT 的 embeddings 计划应写入配置并在 GET 里回读。"""
+    app, path = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient):
+        response = await client.put(
+            "/api/unified-model",
+            headers=AUTH_HEADERS,
+            json={
+                "default": {"primary": {"model": "model-a"}},
+                "embeddings": {"primary": {"model": "model-a"}},
+            },
+        )
+        fetched = await client.get("/api/unified-model", headers=AUTH_HEADERS)
+        return response, fetched
+
+    response, fetched = run_client(app, requests)
+
+    assert response.status_code == 200
+    assert response.json()["unified_model"]["embeddings"]["primary"]["model"] == "model-a"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["unified_model"]["embeddings"]["primary"]["model"] == "model-a"
+    assert fetched.json()["unified_model"]["embeddings"]["primary"]["model"] == "model-a"
+
+
 def test_unified_model_update_preserves_shared_provider_key_targets(
     tmp_path: Path,
 ) -> None:
@@ -1515,3 +1542,167 @@ def test_unified_model_rejects_unknown_model(tmp_path: Path) -> None:
 
     assert response.status_code == 404
     assert "未配置模型" in response.json()["detail"]
+
+
+def test_task_crud_is_revision_protected(tmp_path: Path) -> None:
+    app, path = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient):
+        revision = (await client.get("/api/tasks", headers=AUTH_HEADERS)).json()[
+            "config_revision"
+        ]
+        created = await client.post(
+            "/api/tasks",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": revision,
+                "name": "TASK_000001",
+                "model": "model-a",
+                "params": {"temperature": 0.2, "reasoning_effort": "high"},
+            },
+        )
+        # 用过期 revision 写入必须被拒。
+        stale = await client.post(
+            "/api/tasks",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": revision,
+                "name": "TASK_000002",
+                "model": "model-a",
+            },
+        )
+        listed = await client.get("/api/tasks", headers=AUTH_HEADERS)
+        fetched = await client.get("/api/tasks/TASK_000001", headers=AUTH_HEADERS)
+        updated = await client.put(
+            "/api/tasks/TASK_000001",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": listed.json()["config_revision"],
+                "params": {"top_k": 7},
+            },
+        )
+        conflict = await client.put(
+            "/api/tasks/TASK_000001",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": listed.json()["config_revision"],
+                "params": {"top_k": 9},
+            },
+        )
+        deleted = await client.request(
+            "DELETE",
+            "/api/tasks/TASK_000001",
+            headers=AUTH_HEADERS,
+            json={"config_revision": updated.json()["config_revision"]},
+        )
+        missing = await client.get("/api/tasks/TASK_000001", headers=AUTH_HEADERS)
+        return created, stale, listed, fetched, updated, conflict, deleted, missing
+
+    created, stale, listed, fetched, updated, conflict, deleted, missing = run_client(
+        app, requests
+    )
+
+    assert created.status_code == 201
+    assert created.json()["name"] == "TASK_000001"
+    assert created.json()["model"] == "model-a"
+    assert created.json()["params"] == {"temperature": 0.2, "reasoning_effort": "high"}
+    assert stale.status_code == 409
+    assert [task["name"] for task in listed.json()["tasks"]] == ["TASK_000001"]
+    assert fetched.json()["model"] == "model-a"
+    assert updated.status_code == 200
+    # PUT 只带 params 时，其他字段保持不变。
+    assert updated.json()["params"] == {"top_k": 7}
+    assert conflict.status_code == 409
+    assert deleted.status_code == 204
+    assert missing.status_code == 404
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert "tasks" not in saved
+
+
+def test_task_endpoints_reject_bad_payloads(tmp_path: Path) -> None:
+    app, _ = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient):
+        revision = (await client.get("/api/tasks", headers=AUTH_HEADERS)).json()[
+            "config_revision"
+        ]
+
+        async def create(**payload: object) -> httpx.Response:
+            return await client.post(
+                "/api/tasks",
+                headers=AUTH_HEADERS,
+                json={"config_revision": revision, **payload},
+            )
+
+        # 拼错的参数名要在请求入口被拒，而不是写进配置等请求时才炸。
+        unknown_param = await create(
+            name="TASK_000010", model="model-a", params={"temprature": 0.2}
+        )
+        unknown_model = await create(name="TASK_000011", model="nope")
+        bad_effort = await create(
+            name="TASK_000012", model="model-a", params={"reasoning_effort": "extreme"}
+        )
+        # 任务名不能和模型 ID 或别名撞名。
+        clashes = [
+            await create(name="model-a", model="model-a"),
+            await create(name="alias-a", model="model-a"),
+        ]
+        # 空更新体（没带任何可改字段）应被拒，而不是静默成功。
+        empty_update = await client.put(
+            "/api/tasks/TASK_000001",
+            headers=AUTH_HEADERS,
+            json={"config_revision": revision},
+        )
+        return unknown_param, unknown_model, bad_effort, clashes, empty_update
+
+    unknown_param, unknown_model, bad_effort, clashes, empty_update = run_client(
+        app, requests
+    )
+
+    assert unknown_param.status_code == 422
+    assert unknown_model.status_code == 404
+    assert bad_effort.status_code == 422
+    assert [response.status_code for response in clashes] == [422, 422]
+    assert empty_update.status_code == 422
+
+
+def test_config_export_and_import_carry_tasks(tmp_path: Path) -> None:
+    app, path = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient):
+        revision = (await client.get("/api/tasks", headers=AUTH_HEADERS)).json()[
+            "config_revision"
+        ]
+        await client.post(
+            "/api/tasks",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": revision,
+                "name": "TASK_000020",
+                "model": "model-a",
+                "params": {"temperature": 0.3},
+            },
+        )
+        exported = await client.post("/api/config/export", headers=AUTH_HEADERS)
+        # 导回去（同 Key 会被跳过，但任务引用的是同一个模型 ID）应能落地。
+        imported = await client.post(
+            "/api/config/import",
+            headers=AUTH_HEADERS,
+            json={
+                "config_revision": exported.json()["config_revision"],
+                "config": exported.json()["config"],
+            },
+        )
+        return exported, imported
+
+    exported, imported = run_client(app, requests)
+
+    assert exported.status_code == 200
+    assert exported.json()["config"]["tasks"] == {
+        "TASK_000020": {"model": "model-a", "params": {"temperature": 0.3}}
+    }
+    assert imported.status_code == 200
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert saved["tasks"]["TASK_000020"]["model"] == "model-a"
+

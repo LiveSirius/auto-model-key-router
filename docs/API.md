@@ -49,6 +49,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/v1/messages` | 本地或 visitor | Anthropic Messages 兼容接口 |
 | `POST` | `/v1/messages/count_tokens` | 本地或 visitor | 本地估算 Anthropic 输入 token |
 | `POST` | `/v1/responses` | 本地或 visitor | OpenAI Responses 兼容接口 |
+| `POST` | `/v1/embeddings` | 本地或 visitor | OpenAI Embeddings 兼容接口 |
 | 多种 | `/v1/{path}` | 本地或 visitor | 其他 OpenAI-compatible 接口透传 |
 | `GET` | `/metrics` | 仅本地 | 查询 SQLite 聚合调用统计 |
 | `GET` | `/metrics/requests` | 仅本地 | 分页查询持久化上游调用明细 |
@@ -65,6 +66,8 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/providers/{provider_id}/keys/{key_name}/probe` | 仅本地 | 同步刷新指定 Key 的能力探测，可用 `modes` 限定路由检查范围 |
 | `GET/POST` | `/api/routes` | 仅本地 | 查询或创建模型路由 |
 | `GET/PUT/DELETE` | `/api/routes/{route_id}` | 仅本地 | 查询、更新或删除模型路由 |
+| `GET/POST` | `/api/tasks` | 仅本地 | 查询或创建任务路由（`TASK_XXXXXX` → 模型 + 固定参数） |
+| `GET/PUT/DELETE` | `/api/tasks/{task_name}` | 仅本地 | 查询、更新或删除任务路由 |
 | `GET/PUT` | `/api/settings` | 仅本地 | 查询或更新监听、超时和重试设置 |
 | `POST` | `/api/settings/local-api-key` | 仅本地 | 重置本地鉴权 Key；新 Key 仅在本次响应返回 |
 | `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 PyPI/GitHub 版本检查 |
@@ -87,7 +90,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `model` | string | 是 | 真实模型 ID、模型别名、隐藏别名（如各 target 的 `upstream_model`）、`unified-model`、`模型[Key名称]` 或 visitor 公共模型 ID |
+| `model` | string | 是 | 真实模型 ID、模型别名、隐藏别名（如各 target 的 `upstream_model`）、`unified-model`、任务名（`TASK_XXXXXX`）、`模型[Key名称]` 或 visitor 公共模型 ID |
 | `stream` | boolean | 否 | 为 `true` 时使用流式响应，并自动向上游补充 `stream_options.include_usage=true` |
 | `stream_options` | object | 否 | 流式选项；服务会保留已有字段并强制加入 `include_usage=true` |
 | `reasoning_effort` | string | 否 | 推理强度；模型配置中的非空值优先级更高 |
@@ -111,7 +114,26 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 {"model": "unified-model"}
 ```
 
+```json
+{"model": "TASK_000001"}
+```
+
 配置文件中的字段名仍为 `unified_model`；请求中的虚拟模型 ID 为 `unified-model`。
+
+### 任务路由
+
+任务名（`TASK_XXXXXX`）是配置 `tasks` 里定义的虚拟模型名。请求它时，真实模型和采样参数都由 AMKR 侧决定：
+
+```json
+{"model": "TASK_000001", "messages": [{"role": "user", "content": "hi"}]}
+```
+
+- 传给上游的 `model` 会是任务的 `model`；若该模型重试后仍返回可重试状态码，会再尝试任务的 `fallback_model`，此时响应带 `X-AMKR-Fallback: true`。
+- 任务 `params` 里固定了的采样参数（`temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`）会覆盖请求体中的同名参数。
+- 请求里**显式传了**这些参数会直接被拒绝（`400`），而不是被静默覆盖 —— 静默覆盖会让调用方以为自己的值生效了。`reasoning_effort` 是例外：它同样被任务覆盖，但不拒绝调用方传入（Claude Code / Codex 这类客户端框架会自动带上它）。
+- 不在任务 `params` 里的参数（如 `max_tokens`）照常透传。
+- 任务不接受调用方指定 Key（`TASK_000001[main]` 返回 `400`），Key 仍由目标模型自身的路由模式决定。
+- 访客 Key 不能访问任务名。
 
 成功选中路由后，服务会把传给上游的 `model` 改为真实模型 ID，并用选中 Key 的密钥替换鉴权头。其他兼容参数通常会继续传给上游。
 
@@ -209,6 +231,8 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 所有通用代理请求仍需在 JSON 请求体中提供 `model`。缺少该字段会返回 `400`。
 
+`POST /v1/embeddings` 不做协议转换：请求体本来就是 OpenAI 形状（`model`、`input`、`encoding_format` 等），AMKR 只替换 `model` 为上游真实模型名后原样转发，因此 `input` 不会被改写成 chat 的 `messages`。上游路径默认 `v1/embeddings`，可按上游 URL 配置 `upstream_routes[base_url].embeddings` 覆盖（别名 `embedding` / `embed`），例如 `"embeddings": "gateway/embed"` 会转发到 `base_url/gateway/embed/v1/embeddings`。请求 `unified-model` 时使用 `unified_model.embeddings` 计划；未配置该计划则继承 `default.primary`。
+
 ### WebSocket
 
 可连接 `ws://HOST:PORT/v1/{path}`。服务读取客户端发送的第一帧，将其按对应路径的 HTTP `POST` 请求处理，把响应内容逐块发回，然后关闭连接。
@@ -233,8 +257,9 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 | `visitor_feature_installed` | boolean | 是否安装 visitor 扩展 |
 | `visitor_access_enabled` | boolean | 是否存在启用且允许 visitor 的 Key |
 | `visitor_key_count` | integer | visitor 可用 Key 总数 |
-| `unified_model` | object/null | 当前真实模型和可选固定 Key |
+| `unified_model` | object/null | 当前真实模型和可选固定 Key；含 `default` 与可选的 `image` / `embeddings` 计划 |
 | `native_endpoint_states` | object | 上游原生端点能力缓存 |
+| `ops_enabled` | boolean | 运维接口是否注册（见 `--no-ops` / `enable_ops`） |
 
 Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或管理 API 暴露。长期启停 Key 请更新配置中的 `enabled`。
 
@@ -258,6 +283,8 @@ Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或�
 本地调用只返回当前有可用 Key 的真实模型、别名和已配置的 `unified-model`。visitor 只返回 `amkr-*` 公共模型 ID。
 
 隐藏别名（各 target 的 `upstream_model` 自动获得的叫法，以及模型 `hidden_aliases` 中手写的名字）可以直接调用，但不会出现在这里；见 [`docs/USAGE.md`](USAGE.md) 的「同一个模型的多个名字」。
+
+任务名（`TASK_XXXXXX`）同样不出现在这里：它是一整组路由与参数的别名，而不是某个模型的名字。如果客户端需要从 `/v1/models` 里看到可调用的名字，请改用模型的别名或隐藏别名。
 
 ## 调用统计
 
@@ -561,6 +588,40 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
 
 provider 对象不再含顶层 `capabilities`；探测缓存按 Key 存于 `keys[]` 中每个元素的 `capabilities`（该 Key 通过 `GET /v1/models` 看到的可服务模型清单与 openai/anthropic/responses 路由的可用性，`errors` / `checked_at` 记录探测错误与时间），未探测时为 `null`。同一供应商的不同 Key 能访问的模型集可能不同（如免费/付费额度、不同订阅），因此各 Key 独立探测、独立缓存，互不复用。v3 的 `pools` 字段已移除。
 
+#### TaskCreate
+
+| 字段 | 类型 | 必填 | 默认值/约束 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 非空；即客户端传的 `model`。不能与已有任务名、任何模型 ID、`aliases`、`hidden_aliases` 或 `unified-model` 重复 |
+| `model` | string | 是 | 首选模型，可写模型 ID 或别名；写回时规范化为模型 ID |
+| `fallback_model` | string/null | 否 | `null`；备选模型，与首选引用同一模型时忽略 |
+| `params` | object | 否 | `{}`；固定采样参数，见下节。留空表示全部透传 |
+| `config_revision` | string | 是 | 并发校验版本号 |
+
+`params` 只接受白名单内的键，写错键名返回 `422`（不会静默忽略）：
+
+| 键 | 类型 | 约束 |
+| --- | --- | --- |
+| `temperature`、`top_p`、`frequency_penalty`、`presence_penalty` | number | 任意数值 |
+| `top_k`、`seed` | integer | 必须是整数，`1.5` 这类值返回 `422` |
+| `stop` | string[] | 非空字符串数组；传字符串返回 `422`（配置文件路径会包成单元素数组，管理 API 不会） |
+| `reasoning_effort` | string | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；传 `""`、`default`、`downstream` 视为不固定 |
+
+#### TaskUpdate
+
+字段与 TaskCreate 的模型字段相同（`model`、`fallback_model`、`params`），全部可省略，但请求中至少需要出现一个，否则返回 `422`。`fallback_model: null` 清除备选，`params: {}` 清空全部固定参数。`name` 不可改 —— 它是调用方使用的 `model` 名，改名等于换了个任务。
+
+#### TaskResponse
+
+```json
+{
+  "name": "TASK_000001",
+  "model": "gpt-4o-mini",
+  "fallback_model": "claude-sonnet",
+  "params": {"temperature": 0.2, "reasoning_effort": "high"}
+}
+```
+
 ### 模型接口
 
 #### `GET /api/models`
@@ -639,6 +700,24 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 #### `DELETE /api/models/{model_id}/keys/{key_name}`
 
 成功返回 `204 No Content`。该接口与 TUI 的模型 Key 操作一致：解绑当前模型的这条 Key 绑定。若该 Key 不再被任何模型绑定，会连带删除供应商下的这个 Key；供应商随后没有 Key 时也会一并删除。若这是模型的最后一条绑定，模型会被自动删除。
+
+### 任务路由接口
+
+任务路由把「模型 + 固定采样参数」打包成一个可直接当 `model` 传的名字。任务名不能与模型 ID、别名、隐藏别名或 `unified-model` 撞名（否则路由语义会取决于查表顺序），也不能指定 Key。
+
+#### `GET /api/tasks`
+
+返回 `{"tasks": [TaskResponse]}`，另含 `config_revision`。
+
+#### `POST /api/tasks`
+
+请求体为 TaskCreate，成功返回 `201` 与 TaskResponse（含 `config_revision`）。
+
+#### `GET/PUT/DELETE /api/tasks/{task_name}`
+
+查询、更新或删除单个任务。`PUT` 请求体为 TaskUpdate + `config_revision`，成功返回 `200` 与更新后的 TaskResponse；`GET` 返回 TaskResponse；`DELETE` 请求体只需 `config_revision`，成功返回 `204`。任务不存在时返回 `404`（`{"detail": "任务不存在: <name>"}`）。
+
+任务随 `/api/config/export`、`/api/config/import` 一同迁移；导入时引用不到模型的任务会被跳过（与「该模型从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有备选没了则退化为单模型任务。
 
 ### 供应商接口与能力探测
 
@@ -740,10 +819,10 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 | `200/201` | 管理接口读写成功（创建类返回 `201`，同步探测 `POST /api/providers/{id}/probe` 与 `POST /api/providers/{id}/keys/{key_name}/probe` 返回 `200`） |
 | `202` | 异步探测任务已接受（`/api/probes/keys`） |
 | `204` | 删除成功 |
-| `400` | 缺少 `model`、更新体为空或配置校验失败 |
+| `400` | 缺少 `model`、更新体为空或配置校验失败；请求任务名时显式传了该任务已固定的采样参数，或指定了 Key（`TASK_XXXXXX[key]`） |
 | `401` | 本地 API key 验证失败 |
-| `403` | visitor 无权访问模型或 Key |
-| `404` | 模型、Key、供应商或探测不存在 |
+| `403` | visitor 无权访问模型或 Key（含任务名） |
+| `404` | 模型、Key、供应商或探测不存在；任务指向的模型没有启用的 Key |
 | `409` | 名称冲突、删除最后一个 Key、无法持久化嵌入式配置 |
 | `422` | 管理 API 请求字段类型错误、缺少必填字段或包含未知字段；供应商暂无 Key 时探测 |
 | `500` | 配置保存失败 |
@@ -891,3 +970,127 @@ http://127.0.0.1:8000/ui/
 ### `POST /api/integrations/{agent}/rollback`
 
 从备份恢复该 Agent 的原配置；没有备份时返回 `409`。
+
+## 作为中间件嵌入宿主应用
+
+AMKR 可以直接挂进一个已有的 FastAPI / Starlette 服务，把整套 OpenAI 兼容接口与
+管理 API 作为子路径提供，而不必单独起进程。
+
+```python
+from fastapi import FastAPI
+from auto_model_key_router import RouterConfig, mount_app
+
+host = FastAPI()
+mount_app(host, "/amkr", RouterConfig.load("router-config.json"), "router-config.json")
+```
+
+挂载后的路径：
+
+| 独立运行 | 挂载到 `/amkr` 后 |
+| --- | --- |
+| `POST /v1/chat/completions` | `POST /amkr/v1/chat/completions` |
+| `GET /health` | `GET /amkr/health` |
+| `GET /ui/` | `GET /amkr/ui/` |
+| `GET /api/settings` | `GET /amkr/api/settings` |
+| `WS /ws/events` | `WS /amkr/ws/events` |
+
+要自定义路由注册（例如换前缀、复用已有实例），用 `create_app`：
+
+```python
+from auto_model_key_router import create_app
+
+app = create_app(config, config_path, enable_ops=False)
+host.mount("/llm", app)   # 仍建议改用 mount_app，理由见下
+```
+
+### 必须用 `mount_app` 而不是 `host.mount()`
+
+Starlette **不会**为 `Mount` 的子应用运行 lifespan。直接 `host.mount(prefix, app)`
+会静默跳过 AMKR 的启动与收尾：指标广播任务不会启动（`/metrics` 与 WebSocket 推送
+没有数据），退出时 httpx client 与 SQLite 连接也不会关闭。`mount_app` 会把子应用的
+lifespan 链进宿主，宿主自身的 lifespan 仍会正常执行。
+
+如果确实要手动挂载，必须自己补上生命周期：
+
+```python
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(host_app):
+    async with amkr_app.router.lifespan_context(amkr_app):
+        yield
+```
+
+### 嵌入时的行为差异
+
+| 行为 | 说明 |
+| --- | --- |
+| 运维接口 | `mount_app` 与 `create_app(enable_ops=False)` 默认**不注册** |
+
+运维接口（`/api/logs`、`/api/service/*`、`/api/integrations/*`、`/api/tool`）作用于
+「服务所在的这台机器」——启停后台进程、注册系统服务、改写 Claude Code / Codex 的
+本地配置——嵌入到别人的进程里语义不成立，因此默认关闭。需要时显式开：
+`mount_app(host, "/amkr", config, enable_ops=True)`。
+
+`enable_ops` 为 `None` 时跟随配置字段 `ops_enabled`（默认 `true`）。独立部署想整体关掉
+运维面时用 `amkr --no-ops`，比逐个路径拉黑可靠；关闭后 `/health` 的 `ops_enabled`
+为 `false`。
+
+其余接口（代理、`/health`、`/metrics`、WebSocket、`/api/settings` 等配置管理接口）
+在挂载下与独立运行完全一致；`request.app.state` 会被正确解析到 AMKR 自己的实例。
+
+### 配置持久化
+
+管理接口写配置要求已知配置文件路径。通过 `mount_app(host, path, config)` 只传
+`config` 而不传 `config_path` 时，`GET /api/settings` 等读写接口会返回 `409`：
+
+> 传入 `config_path`（`mount_app(host, "/amkr", config, "router-config.json")`）
+> 即可获得完整的管理能力。
+
+WebUI 的前端会根据当前页面路径（`.../ui/`）自动推导 API 基址，因此挂载到任意前缀
+下都不需要额外配置。
+
+### 复用宿主的身份体系（可插拔鉴权）
+
+嵌入时宿主通常已经有自己的身份认证（session cookie、JWT、网关注入的身份头）。默认
+的「本地 API key」在这种场景下很别扭：把 `local_api_key` 留空等于**整体关闭鉴权**，
+否则就得让调用方额外再持有一套 AMKR 的 key。
+
+`authenticator` 可以整体替换鉴权判定：
+
+```python
+from fastapi import FastAPI
+from auto_model_key_router import AuthContext, RouterConfig, mount_app
+
+
+async def host_authenticator(request, config):
+    user = request.session.get("user")        # 宿主的身份体系
+    if user is None:
+        return None                            # None = 拒绝，返回 401
+    if user.is_admin:
+        return AuthContext("full")
+    return AuthContext("visitor")              # 受限，见下
+
+
+mount_app(host, "/amkr", RouterConfig.load(path), path,
+          authenticator=host_authenticator)
+```
+
+`AuthContext.mode` 只有两个取值，语义与默认鉴权完全一致：
+
+| mode | 权限 |
+| --- | --- |
+| `"full"` | 全部接口，全部模型 |
+| `"visitor"` | 仅 `/v1/models` 与 `/v1/*`，且只能用标记了 `allow_visitor` 的 Key 与 `amkr-{模型ID}` 形式；拿不到 `/metrics` 与配置管理接口 |
+
+`visitor` **不是「权限更小的 full」而是一套模型级规则**（visitor 不能用内部别名、
+真实模型 ID 或 `unified-model`），因此钩子必须显式选择它，不能用布尔值表达。
+
+同时覆盖 WebSocket：`/ws/events` 只对 `full` 开放。WebSocket 握手无法携带自定义头，
+所以 AMKR 的凭据只能走首帧 `{"type":"auth","token":"..."}`；该 token 会被折算成
+`Authorization: Bearer <token>` 后交给同一个钩子。宿主的 cookie 在握手头中，因此
+用 cookie / session 鉴权时握手即可通过，无需处理首帧。钩子拒绝时连接以 `4003` 关闭。
+
+默认行为在未传 `authenticator` 时保持不变（本地 key 或固定 visitor key），因此现有
+部署不受影响。
+

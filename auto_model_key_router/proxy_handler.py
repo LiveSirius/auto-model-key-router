@@ -30,10 +30,10 @@ from .protocol_compat import (
     _responses_usage,
     _stream_usage,
 )
+from .auth import authorize
 from .proxy_support import (
     UNSUPPORTED_ENDPOINT_STATUS_CODES,
     UpstreamFirstByteTimeout,
-    _authorization_mode,
     _is_stream_request,
     _is_tool_error,
     _join_url,
@@ -45,11 +45,13 @@ from .proxy_support import (
     _response_headers,
     _send_upstream,
     _split_requested_model_key,
+    _task_param_conflicts,
     _upstream_body,
     _upstream_body_with_filtered_tools,
     _upstream_headers,
     _upstream_path,
     _upstream_timeout,
+    request_route_kind,
     test_native_messages_support,
     test_native_responses_support,
 )
@@ -85,6 +87,8 @@ class ProxyRequestContext:
     attempts: int
     cache_affinity_key: str | None = None
     use_native: bool = False  # 是否使用原生 Anthropic 格式
+    task_name: str | None = None  # 命中的任务名（model 传的是 TASK_XXXXXX）
+    task_params: dict[str, Any] | None = None  # 任务固定的采样参数
 
 
 @dataclass(frozen=True)
@@ -116,29 +120,42 @@ async def handle_proxy_request(
     if isinstance(prepared, Response):
         return prepared
     response = await _handle_single_target(prepared)
-    if prepared.requested_model_name != UNIFIED_MODEL_ID or response.status_code not in RETRYABLE_STATUS_CODES:
+    if response.status_code not in RETRYABLE_STATUS_CODES:
         return response
-    plan = runtime.key_pool.resolve_unified_plan(
-        "image" if path in ("images/generations", "images/edits") else "default",
-        prepared.requested_key_name,
-    )
-    if plan.fallback is None:
+    if prepared.requested_model_name == UNIFIED_MODEL_ID:
+        plan = runtime.key_pool.resolve_unified_plan(
+            request_route_kind(path), prepared.requested_key_name
+        )
+    elif prepared.task_name is not None:
+        # 任务备选：首选重试失败后切到任务的备选模型，参数保持任务固定值。
+        plan = runtime.key_pool.task_plan(prepared.task_name)
+    else:
+        return response
+    if plan is None or plan.fallback is None:
         return response
     fallback_key_count = runtime.key_pool.key_count(plan.fallback.model)
     if fallback_key_count == 0:
         return response
+    fallback_only_first = (
+        runtime.key_pool.routing_mode(plan.fallback.model) == "only_first"
+    )
     fallback_context = replace(
         prepared,
         model_id=plan.fallback.model,
         requested_key_name=plan.fallback.key,
         key_count=fallback_key_count,
-        only_first=runtime.key_pool.routing_mode(plan.fallback.model) == "only_first",
+        only_first=fallback_only_first,
         attempts=RetryPolicy(runtime.config.max_retries).attempts(
             key_count=fallback_key_count,
             requested_key_name=plan.fallback.key,
-            only_first=runtime.key_pool.routing_mode(plan.fallback.model) == "only_first",
+            only_first=fallback_only_first,
         ),
         cache_affinity_key=_cache_affinity_key(path, prepared.payload, plan.fallback.model),
+        # 备选模型可能有自己的 native_first 设置，必须按它重算。
+        use_native=(
+            path == "messages"
+            and runtime.config.native_first_for_model(plan.fallback.model)
+        ),
     )
     response = await _handle_single_target(fallback_context)
     if response.status_code < 400:
@@ -184,12 +201,12 @@ async def _handle_single_target(context: ProxyRequestContext) -> Response:
 async def _prepare_proxy_request(
     path: str, request: Request, runtime: RuntimeResources
 ) -> ProxyRequestContext | Response:
-    authorization_mode = _authorization_mode(request, runtime.config.local_api_key)
+    authorization_mode = await authorize(request, runtime.config)
     if authorization_mode is None:
         return JSONResponse(
             {"error": {"message": "本地 API key 验证失败"}}, status_code=401
         )
-    visitor_only = authorization_mode == "visitor"
+    visitor_only = authorization_mode.visitor_only
     caller_type = "visitor" if visitor_only else "local"
     body = await request.body()
     payload = _json_body(body)
@@ -208,6 +225,36 @@ async def _prepare_proxy_request(
             {"error": {"message": f"访客 key 无权访问模型: {UNIFIED_MODEL_ID}"}},
             status_code=403,
         )
+    # 任务名路由：模型与采样参数都由任务固定，调用方只能传任务名。必须在
+    # resolve_route 之前判断，否则任务的 key=None 会把调用方指定的 Key 冲掉。
+    task_params: dict[str, Any] | None = None
+    if not visitor_only and runtime.key_pool.task_plan(requested_model_name) is not None:
+        if requested_key_name is not None:
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": (
+                            f"任务 {requested_model_name} 的参数由 AMKR 固定，"
+                            "不能指定 Key"
+                        )
+                    }
+                },
+                status_code=400,
+            )
+        task_params = runtime.key_pool.task_params(requested_model_name)
+        conflicts = _task_param_conflicts(payload, task_params)
+        if conflicts:
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": (
+                            f"任务 {requested_model_name} 已固定参数 "
+                            f"{'、'.join(conflicts)}，调用方不能再传这些参数"
+                        )
+                    }
+                },
+                status_code=400,
+            )
     if visitor_only:
         model_id = runtime.key_pool.resolve_visitor_model_id(requested_model_name)
         if model_id is None:
@@ -233,6 +280,18 @@ async def _prepare_proxy_request(
         _log_model_not_configured(
             path, requested_model_id, model_id, "no_configured_keys"
         )
+        if task_params is not None:
+            return JSONResponse(
+                {
+                    "error": {
+                        "message": (
+                            f"任务 {requested_model_name} 指向的模型 {model_id} 未配置；"
+                            "请先在 AMKR 的任务路由中修正该任务"
+                        )
+                    }
+                },
+                status_code=404,
+            )
         return JSONResponse(
             {
                 "error": {
@@ -281,6 +340,8 @@ async def _prepare_proxy_request(
         attempts=attempts,
         cache_affinity_key=_cache_affinity_key(path, payload, model_id),
         use_native=use_native,
+        task_name=requested_model_name if task_params is not None else None,
+        task_params=task_params,
     )
 
 
@@ -438,7 +499,12 @@ async def _execute_attempt(
     )
     if use_native:
         upstream_body = _upstream_body(
-            context.original_body, context.payload, upstream_model_id, native=True
+            context.original_body,
+            context.payload,
+            upstream_model_id,
+            native=True,
+            task_params=context.task_params,
+            path=context.path,
         )
     else:
         upstream_body = _upstream_body(
@@ -448,6 +514,8 @@ async def _execute_attempt(
             runtime.config,
             stream=context.is_stream,
             reasoning_model_id=context.model_id,
+            task_params=context.task_params,
+            path=context.path,
         )
 
     headers = _upstream_headers(context.request, key.api_key)
@@ -545,6 +613,8 @@ async def _execute_attempt(
             runtime.config,
             stream=context.is_stream,
             reasoning_model_id=context.model_id,
+            task_params=context.task_params,
+            path=context.path,
         )
         fallback_headers = _upstream_headers(context.request, key.api_key)
         fallback_started = perf_counter()
@@ -642,7 +712,9 @@ async def _execute_attempt(
         )
 
     # 400 错误且与工具有关时，尝试过滤非 function 工具重试
-    if response.status_code == 400:
+    # （embeddings 请求没有 tools 可言，且它的 input 会被当 Responses 的 input 改写，
+    #  所以这条重试路径对它不适用。）
+    if response.status_code == 400 and request_route_kind(context.path) == "default":
         content = await response.aread()
         if _is_tool_error(content):
             await _record_upstream_response(
@@ -668,6 +740,7 @@ async def _execute_attempt(
                 runtime.config,
                 stream=context.is_stream,
                 reasoning_model_id=context.model_id,
+                task_params=context.task_params,
             )
             retry_started = perf_counter()
             first_byte_deadline = (

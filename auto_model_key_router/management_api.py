@@ -31,7 +31,7 @@ from .config import (
 )
 from .config_service import ConfigService
 from . import config_operations as operations
-from .proxy_support import _authorization_mode
+from .auth import authorize
 
 
 ReloadConfig = Callable[[Any], Awaitable[None]]
@@ -96,6 +96,7 @@ class UnifiedModelUpdate(APIModel):
     image_key: str | None = None
     default: dict[str, Any] | None = None
     image: dict[str, Any] | None = None
+    embeddings: dict[str, Any] | None = None
 
 
 class ProbeKeysRequest(APIModel):
@@ -111,6 +112,32 @@ class ConfigImportRequest(APIModel):
 
 class RevisionPayload(APIModel):
     config_revision: str = Field(min_length=1)
+
+
+class TaskParams(APIModel):
+    """任务固定参数：白名单字段逐项声明，写错的参数名在请求入口就被拒。"""
+
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
+    stop: list[str] | None = None
+    reasoning_effort: str | None = None
+
+
+class TaskCreate(RevisionPayload):
+    name: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+    fallback_model: str | None = None
+    params: TaskParams | None = None
+
+
+class TaskUpdate(RevisionPayload):
+    model: str | None = Field(default=None, min_length=1)
+    fallback_model: str | None = None
+    params: TaskParams | None = None
 
 
 class ProviderCreate(RevisionPayload):
@@ -191,6 +218,8 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
         result = {"default": serialize_plan(unified.default)}
         if unified.image:
             result["image"] = serialize_plan(unified.image)
+        if unified.embeddings:
+            result["embeddings"] = serialize_plan(unified.embeddings)
         return result
 
     def find_config_model(config: RouterConfig, model_name: str) -> ModelConfig:
@@ -218,8 +247,9 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
         if fields.get("default") is not None:
             def nested_mutation(data: dict[str, Any]) -> None:
                 unified_data: dict[str, Any] = {"default": fields["default"]}
-                if fields.get("image") is not None:
-                    unified_data["image"] = fields["image"]
+                for plan_name in ("image", "embeddings"):
+                    if fields.get(plan_name) is not None:
+                        unified_data[plan_name] = fields[plan_name]
                 operations.set_unified_model(data, unified_data)
 
             config = await _update_config(
@@ -296,6 +326,103 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
     ) -> Response:
         def mutation(data: dict[str, Any]) -> None:
             operations.set_unified_model(data, None)
+
+        await _update_config(
+            request,
+            reload_config,
+            mutation,
+            config_revision=_payload_revision(payload) if payload else None,
+        )
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    # —— 任务路由 ——
+    # 任务把「模型 + 固定采样参数」打包成可直接当 model 传的名字。
+
+    @app.get("/api/tasks", tags=["management"])
+    async def list_tasks(request: Request) -> dict[str, Any]:
+        config = await _authorized_config(request, reload_config)
+        data = _management_config_data(request)
+        return _with_revision(
+            data, tasks=[_task_response(task) for task in config.tasks]
+        )
+
+    @app.post(
+        "/api/tasks", tags=["management"], status_code=status.HTTP_201_CREATED
+    )
+    async def create_task(request: Request, payload: TaskCreate) -> dict[str, Any]:
+        def mutation(data: dict[str, Any]) -> None:
+            operations.create_task(
+                data,
+                payload.name,
+                model=payload.model,
+                fallback_model=payload.fallback_model,
+                params=_task_params_payload(payload.params),
+            )
+
+        config = await _update_config(
+            request,
+            reload_config,
+            mutation,
+            config_revision=payload.config_revision,
+        )
+        data = _management_config_data(request)
+        return {
+            **_task_response(_find_task(config, payload.name)),
+            "config_revision": _config_revision(data),
+        }
+
+    @app.get("/api/tasks/{task_name}", tags=["management"])
+    async def get_task(request: Request, task_name: str) -> dict[str, Any]:
+        config = await _authorized_config(request, reload_config)
+        data = _management_config_data(request)
+        return {
+            **_task_response(_find_task(config, task_name)),
+            "config_revision": _config_revision(data),
+        }
+
+    @app.put("/api/tasks/{task_name}", tags=["management"])
+    async def update_task(
+        request: Request, task_name: str, payload: TaskUpdate
+    ) -> dict[str, Any]:
+        updates = _payload_dict(payload)
+        model = updates.get("model")
+        if model is None and "fallback_model" not in updates and "params" not in updates:
+            raise HTTPException(status_code=422, detail="至少需要提供一个要更新的字段")
+
+        def mutation(data: dict[str, Any]) -> None:
+            operations.update_task(
+                data,
+                task_name,
+                model=model,
+                fallback_model=updates.get("fallback_model"),
+                update_fallback="fallback_model" in updates,
+                params=_task_params_payload(payload.params),
+                update_params="params" in updates,
+            )
+
+        config = await _update_config(
+            request,
+            reload_config,
+            mutation,
+            config_revision=payload.config_revision,
+        )
+        data = _management_config_data(request)
+        return {
+            **_task_response(_find_task(config, task_name)),
+            "config_revision": _config_revision(data),
+        }
+
+    @app.delete(
+        "/api/tasks/{task_name}",
+        tags=["management"],
+        status_code=status.HTTP_204_NO_CONTENT,
+        response_class=Response,
+    )
+    async def delete_task(
+        request: Request, task_name: str, payload: RevisionPayload | None = None
+    ) -> Response:
+        def mutation(data: dict[str, Any]) -> None:
+            operations.delete_task(data, task_name)
 
         await _update_config(
             request,
@@ -904,7 +1031,8 @@ def register_management_api(app: FastAPI, reload_config: ReloadConfig) -> None:
         lease = await state.runtime_manager.acquire()
         try:
             config = lease.resources.config
-            if _authorization_mode(request, config.local_api_key) != "full":
+            auth = await authorize(request, config)
+            if auth is None or not auth.is_full:
                 raise HTTPException(status_code=401, detail="本地 API key 验证失败")
             _find_key(_find_model(config, model_id), key_name)
             hours: float | None = None
@@ -994,7 +1122,8 @@ async def _authorized_config(
     lease = await state.runtime_manager.acquire()
     try:
         config = lease.resources.config
-        if _authorization_mode(request, config.local_api_key) != "full":
+        auth = await authorize(request, config)
+        if auth is None or not auth.is_full:
             raise HTTPException(status_code=401, detail="本地 API key 验证失败")
         return config
     finally:
@@ -1282,6 +1411,30 @@ def _reject_null_fields(data: dict[str, Any], *fields: str) -> None:
             status_code=400,
             detail=f"字段不能为 null: {', '.join(null_fields)}",
         )
+
+
+def _task_response(task: Any) -> dict[str, Any]:
+    return {
+        "name": task.name,
+        "model": task.model,
+        "fallback_model": task.fallback_model,
+        "params": dict(task.params),
+    }
+
+
+def _task_params_payload(params: Any) -> dict[str, Any] | None:
+    """把 TaskParams 模型转成待写入配置的 dict；未提供的字段直接省略。"""
+    if params is None:
+        return None
+    values = _payload_dict(params)
+    return values or None
+
+
+def _find_task(config: RouterConfig, task_name: str) -> Any:
+    task = config.task_for(task_name)
+    if task is None:
+        raise HTTPException(status_code=404, detail=f"任务不存在: {task_name}")
+    return task
 
 
 def _model_response(model: ModelConfig) -> dict[str, Any]:

@@ -7,6 +7,7 @@ from urllib.parse import urlparse
 from .config import (
     CONFIG_VERSION,
     RouterConfig,
+    TaskConfig,
     migrate_config_data,
     normalize_upstream_base_url,
     normalize_upstream_routes,
@@ -162,9 +163,17 @@ def create_provider_key(
     return key
 
 
+UNIFIED_PLAN_NAMES = ("default", "image", "embeddings")
+UNIFIED_TARGETS = tuple(
+    f"{plan_name}.{role}"
+    for plan_name in UNIFIED_PLAN_NAMES
+    for role in ("primary", "fallback")
+)
+
+
 def _unified_targets(unified: dict[str, Any]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    for plan_name in ("default", "image"):
+    for plan_name in UNIFIED_PLAN_NAMES:
         plan = unified.get(plan_name)
         if not isinstance(plan, dict):
             continue
@@ -294,6 +303,16 @@ def fallback_model_id(data: dict[str, Any]) -> str | None:
     return None
 
 
+def repair_model_references(data: dict[str, Any]) -> None:
+    """模型被删改后，修好所有指向它的引用（统一模型 + 任务路由）。
+
+    顺序很重要：``repair_unified_model`` 要先把候选配置解析一遍才敢改，
+    而残留的失效任务会让那次解析直接失败、它于是什么都不修。先清任务。
+    """
+    repair_tasks(data)
+    repair_unified_model(data)
+
+
 def repair_unified_model(data: dict[str, Any]) -> None:
     unified = migrate_config_data(data).get("unified_model")
     if not isinstance(unified, dict):
@@ -315,10 +334,10 @@ def repair_unified_model(data: dict[str, Any]) -> None:
             data.pop("unified_model", None)
             return
         unified["default"] = {"primary": {"model": replacement, "key": None}}
-    for plan_name in ("default", "image"):
+    for plan_name in UNIFIED_PLAN_NAMES:
         plan = unified.get(plan_name)
         if not isinstance(plan, dict):
-            if plan_name == "image":
+            if plan_name != "default":
                 unified.pop(plan_name, None)
             continue
         for role in ("primary", "fallback"):
@@ -444,7 +463,7 @@ def set_key_service_models(
             all_models.pop(model_id, None)
             removed_models.append(model_id)
     if removed:
-        repair_unified_model(data)
+        repair_model_references(data)
     return {
         "added": sorted(added),
         "removed": sorted(removed),
@@ -475,7 +494,7 @@ def delete_provider_key(data: dict[str, Any], provider_id: str, key_name: str) -
             removed.add(str(model_id))
     if not keys:
         providers(data).pop(provider_id, None)
-    repair_unified_model(data)
+    repair_model_references(data)
     return removed
 
 
@@ -492,7 +511,7 @@ def delete_provider(data: dict[str, Any], provider_id: str) -> set[str]:
         if not targets:
             models(data).pop(model_id, None)
             removed.add(str(model_id))
-    repair_unified_model(data)
+    repair_model_references(data)
     return removed
 
 
@@ -533,7 +552,7 @@ def delete_model_target(data: dict[str, Any], model_id: str, target_index: int) 
     if target_index < 0 or target_index >= len(targets):
         raise ConfigOperationError("模型路由不存在", status_code=404)
     removed = targets.pop(target_index)
-    repair_unified_model(data)
+    repair_model_references(data)
     return removed
 
 
@@ -675,7 +694,7 @@ def update_model(data: dict[str, Any], model_id: str, *, new_id: str | None = No
 def delete_model(data: dict[str, Any], model_id: str) -> None:
     require_model(data, model_id)
     models(data).pop(model_id, None)
-    repair_unified_model(data)
+    repair_model_references(data)
 
 
 def provider_id_for_base_url(data: dict[str, Any], base_url: str) -> str:
@@ -863,7 +882,7 @@ def update_model_key_local(data: dict[str, Any], model_id: str, key_name: str, *
         set_upstream_routes_for_base_url(
             data, str(provider.get("base_url") or ""), upstream_routes
         )
-    repair_unified_model(data)
+    repair_model_references(data)
     return actual
 
 
@@ -894,7 +913,7 @@ def delete_model_key_local(data: dict[str, Any], model_id: str, key_name: str) -
                 providers(data).pop(provider_id, None)
     if not model_targets(model):
         models(data).pop(model_id, None)
-    repair_unified_model(data)
+    repair_model_references(data)
 
 
 def delete_model_key(data: dict[str, Any], model_id: str, key_name: str) -> None:
@@ -921,7 +940,15 @@ def transferable_config(data: dict[str, Any], *, include_visitor: bool) -> dict[
                 for key in provider_keys(provider).values():
                     if isinstance(key, dict):
                         key.pop("allow_visitor", None)
-    return {"config_version": CONFIG_VERSION, "providers": result_providers, "models": result_models}
+    result = {
+        "config_version": CONFIG_VERSION,
+        "providers": result_providers,
+        "models": result_models,
+    }
+    # 任务的模型引用与 models 一起走；不导出等于静默丢掉任务路由。
+    if existing_tasks(data):
+        result["tasks"] = deepcopy(existing_tasks(data))
+    return result
 
 
 def merge_transferable_config(current_data: dict[str, Any], transfer_data: dict[str, Any]) -> tuple[dict[str, Any], int, int, int]:
@@ -996,6 +1023,20 @@ def merge_transferable_config(current_data: dict[str, Any], transfer_data: dict[
             if identity not in identities:
                 targets.append(new_target)
                 identities.add(identity)
+    # 任务随 models 一起迁移。导入的任务可能引用别名、或引用没被带过来的模型，
+    # 统一交给 repair_tasks 规范化成模型 ID 并丢掉解析不了的任务。
+    transfer_tasks = transfer_data.get("tasks")
+    if isinstance(transfer_tasks, dict):
+        merged_tasks = existing_tasks(merged)
+        for task_name, source_task in transfer_tasks.items():
+            if not isinstance(source_task, dict):
+                continue
+            merged_tasks[str(task_name)] = deepcopy(source_task)
+        if merged_tasks:
+            merged["tasks"] = merged_tasks
+        repair_tasks(merged)
+    if not existing_tasks(merged):
+        merged.pop("tasks", None)
     try:
         RouterConfig.from_dict(merged)
     except (KeyError, TypeError, ValueError) as exc:
@@ -1016,6 +1057,8 @@ def set_unified_model(data: dict[str, Any], unified: dict[str, Any] | None) -> N
     canonical = {"default": _serialize_plan(parsed.unified_model.default)}
     if parsed.unified_model.image:
         canonical["image"] = _serialize_plan(parsed.unified_model.image)
+    if parsed.unified_model.embeddings:
+        canonical["embeddings"] = _serialize_plan(parsed.unified_model.embeddings)
     data["unified_model"] = canonical
 
 
@@ -1039,12 +1082,13 @@ def _validate_unified_key(config: RouterConfig, model_id: str, key_name: str) ->
 
 
 def switch_unified_target(data: dict[str, Any], target: str, model_name: str | None = None, key_name: str | None = None, *, update_key: bool = False) -> None:
-    if target not in {"default.primary", "default.fallback", "image.primary", "image.fallback"}:
+    valid_targets = {f"{name}.{role}" for name in UNIFIED_PLAN_NAMES for role in ("primary", "fallback")}
+    if target not in valid_targets:
         raise ConfigOperationError(f"无效 unified 目标: {target}", status_code=422)
     config = RouterConfig.from_dict(data)
     current = config.unified_model
     plan_name, role = target.split(".")
-    current_plan = current.default if current and plan_name == "default" else (current.image if current else None)
+    current_plan = getattr(current, plan_name) if current else None
     current_target = getattr(current_plan, role) if current_plan else None
     if model_name is None:
         if current_target is None:
@@ -1068,6 +1112,171 @@ def switch_unified_target(data: dict[str, Any], target: str, model_name: str | N
     if not isinstance(plan, dict):
         raise ConfigOperationError(f"unified_model.{plan_name} 必须是对象", status_code=422)
     plan[role] = {"model": model_id, "key": selected_key}
-    if plan_name == "image" and role == "fallback" and "primary" not in plan:
-        raise ConfigOperationError("配置 image.fallback 前必须先配置 image.primary", status_code=422)
+    if plan_name != "default" and role == "fallback" and "primary" not in plan:
+        raise ConfigOperationError(
+            f"配置 {plan_name}.fallback 前必须先配置 {plan_name}.primary",
+            status_code=422,
+        )
     set_unified_model(data, canonical)
+
+
+# —— 任务路由 ——
+# 任务把「模型 + 固定参数」打包成一个可直接当 model 传的名字。写路径全部先经过
+# RouterConfig.from_dict 校验，因此这里的检查只需负责给出更好的错误信息，
+# 真正的合法性（模型存在、参数取值范围）由 config.py 兜底。
+
+
+def existing_tasks(data: dict[str, Any]) -> dict[str, Any]:
+    """tasks 映射（缺省为空）。
+
+    刻意不 setdefault：这个访问器会被导出和配置版本号计算读到，凭空往配置里塞一个
+    空 ``tasks`` 会让版本号变化，调用方于是收到莫名其妙的 409。
+    """
+    value = data.get("tasks")
+    return value if isinstance(value, dict) else {}
+
+
+def require_task(data: dict[str, Any], task_name: str) -> dict[str, Any]:
+    task = existing_tasks(data).get(task_name)
+    if not isinstance(task, dict):
+        raise ConfigOperationError(f"任务不存在: {task_name}", status_code=404)
+    return task
+
+
+def _resolve_task_model(data: dict[str, Any], model_name: Any, field: str) -> str:
+    name = _non_empty(model_name, field)
+    configured = models(data)
+    for model_id, model in configured.items():
+        if name == model_id or name in (model.get("aliases") or []):
+            return str(model_id)
+    raise ConfigOperationError(f"{field} 引用了未配置的模型: {name}", status_code=404)
+
+
+def _validate_task(candidate: dict[str, Any]) -> None:
+    """用完整配置解析一次，把 config.py 的校验错误转成 422。"""
+    try:
+        RouterConfig.from_dict(candidate)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ConfigOperationError(str(exc), status_code=422) from exc
+
+
+def create_task(
+    data: dict[str, Any],
+    task_name: str,
+    *,
+    model: str,
+    fallback_model: str | None = None,
+    params: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    name = _non_empty(task_name, "任务名")
+    existing = existing_tasks(data)
+    if name in existing:
+        raise ConfigOperationError(f"任务已存在: {name}", status_code=409)
+    # 任务名与模型/别名/隐藏别名撞名由 config.py 统一校验（422）。
+    task: dict[str, Any] = {"model": _resolve_task_model(data, model, "model")}
+    if fallback_model:
+        resolved = _resolve_task_model(data, fallback_model, "fallback_model")
+        if resolved != task["model"]:
+            task["fallback_model"] = resolved
+    if params:
+        task["params"] = deepcopy(params)
+    # 先在候选配置上校验，再落盘；否则校验失败会在配置里留下半个任务。
+    _validate_task({**data, "tasks": {**existing, name: task}})
+    data["tasks"] = {**existing, name: task}
+    return task
+
+
+def update_task(
+    data: dict[str, Any],
+    task_name: str,
+    *,
+    model: str | None = None,
+    fallback_model: str | None = None,
+    update_fallback: bool = False,
+    params: dict[str, Any] | None = None,
+    update_params: bool = False,
+) -> str:
+    current = require_task(data, task_name)
+    updated = deepcopy(current)
+    if model is not None:
+        updated["model"] = _resolve_task_model(data, model, "model")
+    if update_fallback:
+        if fallback_model:
+            resolved = _resolve_task_model(data, fallback_model, "fallback_model")
+            if resolved != updated.get("model"):
+                updated["fallback_model"] = resolved
+            else:
+                updated.pop("fallback_model", None)
+        else:
+            updated.pop("fallback_model", None)
+    if update_params:
+        if params:
+            updated["params"] = deepcopy(params)
+        else:
+            updated.pop("params", None)
+    _validate_task({**data, "tasks": {**existing_tasks(data), task_name: updated}})
+    current.clear()
+    current.update(updated)
+    return task_name
+
+
+def delete_task(data: dict[str, Any], task_name: str) -> None:
+    require_task(data, task_name)
+    remaining = existing_tasks(data)
+    remaining.pop(task_name, None)
+    # 最后一个任务删掉后连 tasks 键一起清理，避免导出里出现空对象。
+    if remaining:
+        data["tasks"] = remaining
+    else:
+        data.pop("tasks", None)
+
+
+def repair_tasks(data: dict[str, Any]) -> set[str]:
+    """删掉引用已不存在模型（或参数非法）的任务，返回被清理的任务名。
+
+    与 unified_model 的既定行为一致：模型没了，指向它的任务留着只会在请求时
+    变成 404，不如在写模型时一起清掉。
+    """
+    configured = models(data)
+    alias_to_id = {
+        str(alias): str(model_id)
+        for model_id, model in configured.items()
+        for alias in (model_id, *(model.get("aliases") or []))
+    }
+    removed: set[str] = set()
+    current = existing_tasks(data)
+    for name, task in list(current.items()):
+        if not isinstance(task, dict):
+            current.pop(name, None)
+            removed.add(str(name))
+            continue
+        primary = alias_to_id.get(str(task.get("model") or ""))
+        if primary is None:
+            current.pop(name, None)
+            removed.add(str(name))
+            continue
+        task["model"] = primary
+        fallback_name = task.get("fallback_model")
+        if fallback_name is not None:
+            fallback = alias_to_id.get(str(fallback_name))
+            # 备选没了就退化成单模型任务；与首选撞车同理。
+            if fallback is None or fallback == primary:
+                task.pop("fallback_model", None)
+            else:
+                task["fallback_model"] = fallback
+        try:
+            TaskConfig(
+                name=str(name),
+                model=primary,
+                fallback_model=task.get("fallback_model"),
+                params=task.get("params") or {},
+            )
+        except ValueError:
+            current.pop(name, None)
+            removed.add(str(name))
+    # 全部清空后连 tasks 键一起移除，避免配置里留个空对象影响版本号与导出。
+    if current:
+        data["tasks"] = current
+    else:
+        data.pop("tasks", None)
+    return removed

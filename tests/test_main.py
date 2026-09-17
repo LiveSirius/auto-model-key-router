@@ -176,3 +176,31 @@ def test_serve_does_not_run_interactive_pool_repair(tmp_path, monkeypatch) -> No
     main_module.main()
 
     assert events == ["load", "serve"]
+
+
+def test_no_ops_flag_persists_to_config(tmp_path, monkeypatch) -> None:
+    """后台/系统服务启动只带 --config，开关不落盘就会静默失效。"""
+    config_path = tmp_path / "router-config.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["amkr", "--config", str(config_path), "--no-ops", "--show-config"],
+    )
+
+    main_module.main()
+
+    assert json.loads(config_path.read_text(encoding="utf-8"))["ops_enabled"] is False
+    assert main_module.RouterConfig.load(config_path).ops_enabled is False
+
+
+def test_ops_flag_absent_leaves_config_untouched(tmp_path, monkeypatch) -> None:
+    """不给开关就不写入：run_terminal_ui 等非启动路径不该顺手改配置。"""
+    config_path = tmp_path / "router-config.json"
+    config_path.write_text(json.dumps({"models": []}), encoding="utf-8")
+    monkeypatch.setattr(
+        sys, "argv", ["amkr", "--config", str(config_path), "--show-config"]
+    )
+
+    main_module.main()
+
+    assert "ops_enabled" not in json.loads(config_path.read_text(encoding="utf-8"))

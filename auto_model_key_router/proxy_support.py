@@ -16,7 +16,6 @@ from .config import (
     upstream_route_path,
 )
 from .protocol_compat import _adapt_message_payload
-from .visitor import is_visitor_api_key
 
 
 class UpstreamFirstByteTimeout(httpx.ReadTimeout):
@@ -90,18 +89,40 @@ def _upstream_body(
     stream: bool = False,
     native: bool = False,
     reasoning_model_id: str | None = None,
+    task_params: dict[str, Any] | None = None,
+    path: str = "",
 ) -> bytes:
     if not payload or "model" not in payload:
         return body
     upstream_payload = dict(payload)
     upstream_payload["model"] = model_id
     if native:
+        # 原生体是调用方自己那一套方言，AMKR 基本原样转发；只有任务的固定参数是
+        # 按配置里的 OpenAI 词汇写的，需要按目标方言调整：
+        # * reasoning_effort 在原生体里没有对应概念，模型级设置同样不发，这里一致。
+        # * Anthropic 的 messages 体只认 stop_sequences，直接塞 stop 会被上游静默
+        #   忽略（Responses 体没有等价字段，保持原样即可）。
+        anthropic_body = "messages" in upstream_payload
+        native_params = {
+            ("stop_sequences" if key == "stop" and anthropic_body else key): value
+            for key, value in (task_params or {}).items()
+            if key != "reasoning_effort"
+        }
+        upstream_payload = _apply_task_params(upstream_payload, native_params)
+        return json.dumps(
+            upstream_payload, ensure_ascii=False, separators=(",", ":")
+        ).encode("utf-8")
+    if request_route_kind(path) == "embeddings":
+        # embeddings 体本来就是 OpenAI 形状、只有 model/input/encoding_format 等字段，
+        # 走 _adapt_message_payload 会把 input 当成 Responses 的 input 改写成 messages，
+        # 上游于是收到一个没有 input 的 chat 请求。这里只替换 model，其余原样转发。
         return json.dumps(
             upstream_payload, ensure_ascii=False, separators=(",", ":")
         ).encode("utf-8")
     upstream_payload = _apply_reasoning_effort(
         upstream_payload, reasoning_model_id or model_id, config
     )
+    upstream_payload = _apply_task_params(upstream_payload, task_params)
     upstream_payload = _adapt_message_payload(upstream_payload)
     if stream:
         stream_options = upstream_payload.get("stream_options")
@@ -112,6 +133,37 @@ def _upstream_body(
     return json.dumps(
         upstream_payload, ensure_ascii=False, separators=(",", ":")
     ).encode("utf-8")
+
+
+def _apply_task_params(
+    payload: dict[str, Any], task_params: dict[str, Any] | None
+) -> dict[str, Any]:
+    """把任务的固定参数盖到请求体上。任务参数总是赢。"""
+    if not task_params:
+        return payload
+    return {**payload, **task_params}
+
+
+def _task_param_conflicts(
+    payload: dict[str, Any], task_params: dict[str, Any] | None
+) -> list[str]:
+    """列出调用方显式传了、但任务已经固定的采样参数。
+
+    这些参数任务说了算，静默覆盖会让调用方以为自己的值生效了，因此由调用方决定
+    是否拒绝（见 proxy_handler）。``max_tokens`` 一类不在白名单里的参数不算冲突。
+    """
+    if not task_params:
+        return []
+    conflicts: list[str] = []
+    for key in task_params:
+        if key == "reasoning_effort":
+            # 与模型级设置一致：推理强度可以静默覆盖，客户端框架常自动带上。
+            continue
+        if key in payload:
+            conflicts.append(key)
+        elif key == "stop" and "stop_sequences" in payload:
+            conflicts.append("stop_sequences")
+    return conflicts
 
 
 def _is_tool_error(content: bytes) -> bool:
@@ -154,6 +206,7 @@ def _upstream_body_with_filtered_tools(
     config: RouterConfig | None = None,
     stream: bool = False,
     reasoning_model_id: str | None = None,
+    task_params: dict[str, Any] | None = None,
 ) -> bytes:
     """创建过滤掉非 function 工具的请求体。"""
     if not payload or "model" not in payload:
@@ -163,6 +216,7 @@ def _upstream_body_with_filtered_tools(
     upstream_payload = _apply_reasoning_effort(
         upstream_payload, reasoning_model_id or model_id, config
     )
+    upstream_payload = _apply_task_params(upstream_payload, task_params)
     upstream_payload = _adapt_message_payload(upstream_payload)
     if stream:
         stream_options = upstream_payload.get("stream_options")
@@ -195,6 +249,19 @@ def _apply_reasoning_effort(
     return adapted
 
 
+def request_route_kind(path: str) -> str:
+    """把代理路径归类为 unified 路由类型：default / image / embeddings。
+
+    AMKR 的路径分类只此一份：KeyPool 与 proxy_handler 都调它，新增一类独立目标
+    只需要在这里加一条，不必再去改每个调用点。
+    """
+    if path in ("images/generations", "images/edits"):
+        return "image"
+    if path == "embeddings":
+        return "embeddings"
+    return "default"
+
+
 def _upstream_mode(path: str) -> str | None:
     if path == "chat/completions":
         return "openai"
@@ -204,6 +271,8 @@ def _upstream_mode(path: str) -> str | None:
         return "responses"
     if path in ("images/generations", "images/edits"):
         return "images"
+    if path == "embeddings":
+        return "embeddings"
     return None
 
 
@@ -216,6 +285,9 @@ def _upstream_path(
     mode = _upstream_mode(path)
     if path == "images/generations":
         return upstream_route_path(upstream_routes, "images")
+    # embeddings 没有转换语义：请求体本来就是 OpenAI 形状，直接按配置路径转发。
+    if path == "embeddings":
+        return upstream_route_path(upstream_routes, "embeddings")
     if native and mode is not None:
         return upstream_route_path(upstream_routes, mode)
     if (
@@ -252,21 +324,6 @@ def _upstream_headers(request: Request, api_key: str) -> dict[str, str]:
     headers["Authorization"] = f"Bearer {api_key}"
     headers["Accept-Encoding"] = "identity"
     return headers
-
-
-def _authorization_mode(request: Request, local_api_key: str) -> str | None:
-    if not local_api_key:
-        return "full"
-    authorization = request.headers.get("authorization", "")
-    if authorization.lower().startswith("bearer "):
-        api_key = authorization[7:].strip()
-    else:
-        api_key = request.headers.get("x-api-key", "")
-    if api_key == local_api_key:
-        return "full"
-    if is_visitor_api_key(api_key):
-        return "visitor"
-    return None
 
 
 def _response_headers(response: httpx.Response) -> dict[str, str]:

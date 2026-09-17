@@ -36,9 +36,10 @@ from .agent_config import (
     get_agent_config_status,
     rollback_agent,
 )
+from .auth import authorize
 from .config import RouterConfig
 from .config_service import ConfigService
-from .management_api import APIModel, ReloadConfig, _authorization_mode
+from .management_api import APIModel, ReloadConfig
 from .webui import webui_status
 
 
@@ -122,7 +123,8 @@ def register_ops_api(app: FastAPI, reload_config: ReloadConfig) -> None:
         lease = await state.runtime_manager.acquire()
         try:
             config = lease.resources.config
-            if _authorization_mode(request, config.local_api_key) != "full":
+            auth = await authorize(request, config)
+            if auth is None or not auth.is_full:
                 raise HTTPException(status_code=401, detail="本地 API key 验证失败")
             return config
         finally:

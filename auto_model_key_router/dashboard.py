@@ -299,16 +299,20 @@ def unified_model_status_panel(
                 f"\n熔断模型: [bold]{fallback.model}[/bold]\n"
                 f"熔断 Key: [bold green]{fallback.key or '自动路由'}[/bold green]"
             )
-        if config.unified_model.image_model:
+        for label, plan in (
+            ("图像", config.unified_model.image),
+            ("嵌入", config.unified_model.embeddings),
+        ):
+            if plan is None:
+                continue
             content += (
-                f"\n图像模型: [bold]{config.unified_model.image_model}[/bold]\n"
-                f"图像 Key: [bold green]{config.unified_model.image_key or '自动路由'}[/bold green]"
+                f"\n{label}模型: [bold]{plan.primary.model}[/bold]\n"
+                f"{label} Key: [bold green]{plan.primary.key or '自动路由'}[/bold green]"
             )
-            image_fallback = config.unified_model.image.fallback if config.unified_model.image else None
-            if image_fallback:
+            if plan.fallback:
                 content += (
-                    f"\n图像熔断模型: [bold]{image_fallback.model}[/bold]\n"
-                    f"图像熔断 Key: [bold green]{image_fallback.key or '自动路由'}[/bold green]"
+                    f"\n{label}熔断模型: [bold]{plan.fallback.model}[/bold]\n"
+                    f"{label}熔断 Key: [bold green]{plan.fallback.key or '自动路由'}[/bold green]"
                 )
     return section_panel(content, title, color)
 
@@ -477,10 +481,13 @@ def agent_config_status_panel(config: RouterConfig, agent: str) -> Any:
         applied_status = "[dim]尚未由 AMKR 接管[/dim]"
     unified_status = (
         f"[green]{UNIFIED_MODEL_ID} → {config.unified_model.model}[/green]"
-        + (
-            f" / 图像 → {config.unified_model.image_model}"
-            if config.unified_model.image_model
-            else ""
+        + "".join(
+            f" / {label} → {plan.primary.model}"
+            for label, plan in (
+                ("图像", config.unified_model.image),
+                ("嵌入", config.unified_model.embeddings),
+            )
+            if plan is not None
         )
         if config.unified_model is not None
         else f"[yellow]未配置 {UNIFIED_MODEL_ID}，暂时不能应用[/yellow]"
@@ -784,7 +791,8 @@ def upstream_mode_summary(
         if len(custom_paths) > 3:
             paths = f"{paths}\n[dim]+{len(custom_paths) - 3} 更多[/dim]"
         return f"[green]自定义原生[/green]\n{paths}{status}"
-    if mode == "openai":
+    if mode == "openai" or mode == "embeddings":
+        # 这两类没有方言转换：请求体本来就是 OpenAI 形状，直接按路径转发。
         return f"[green]原生[/green]\n{UPSTREAM_ROUTE_DEFAULT_PATHS[mode]}"
     if mode == "anthropic" and any(model.native_first for model, _ in items):
         return f"[cyan]自动探测[/cyan]\n{UPSTREAM_ROUTE_DEFAULT_PATHS[mode]}{status}"

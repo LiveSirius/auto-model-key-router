@@ -349,6 +349,9 @@ function unifiedCard() {
       unified?.image?.primary?.model
         ? h("div", {}, h("span.muted", "图像模型："), h("span.mono", unified.image.primary.model))
         : null,
+      unified?.embeddings?.primary?.model
+        ? h("div", {}, h("span.muted", "嵌入模型："), h("span.mono", unified.embeddings.primary.model))
+        : null,
     ),
     h("div.card-foot", {},
       h("span", `可用模型 ${(store.health?.models || []).length} 个`),

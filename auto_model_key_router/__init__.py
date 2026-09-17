@@ -23,3 +23,21 @@ def _resolve_version() -> str:
 
 
 __version__ = _resolve_version()
+
+# 嵌入场景的公开入口：宿主只需要 create_app / mount_app + RouterConfig，
+# 其余（TUI、CLI、运维接口）都不该被拖进它的进程里。
+from .app import create_app, mount_app  # noqa: E402
+from .auth import AuthContext, Authenticator, default_authenticator  # noqa: E402
+from .config import RouterConfig  # noqa: E402
+from .key_pool import KeyPool  # noqa: E402
+
+__all__ = [
+    "__version__",
+    "create_app",
+    "mount_app",
+    "RouterConfig",
+    "KeyPool",
+    "AuthContext",
+    "Authenticator",
+    "default_authenticator",
+]

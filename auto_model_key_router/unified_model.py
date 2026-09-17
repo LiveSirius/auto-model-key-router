@@ -41,7 +41,7 @@ def switch_unified_model(
     image_key_name: str | None = None,
     update_image_key: bool = False,
 ) -> RouterConfig:
-    """Compatibility wrapper for the default primary and image primary slots."""
+    """Compatibility wrapper for the default / image primary slots."""
 
     path = Path(config_path)
 

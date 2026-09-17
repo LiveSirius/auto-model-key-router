@@ -1455,6 +1455,7 @@ def test_stream_response_header_timeout_retries_next_key() -> None:
         assert response.text == "data: [DONE]\n\n"
         assert calls == ["Bearer sk-1", "Bearer sk-2"]
 
+
 def test_first_byte_timeout_with_single_key_does_not_retry_same_key() -> None:
     """单 Key 上游首字节超时不应重试：重试只会把等待时间乘上重试次数。
 
@@ -2744,6 +2745,81 @@ def test_unified_model_parses_nested_primary_and_fallback_routes() -> None:
     assert config.unified_model.image.primary.model == "image-model"
 
 
+def test_unified_model_parses_embeddings_plan_and_rejects_same_model_fallback() -> None:
+    config = RouterConfig.from_dict(
+        {
+            "unified_model": {
+                "default": {"primary": {"model": "chat-model"}},
+                "embeddings": {
+                    "primary": {"model": "embed-model"},
+                    "fallback": {"model": "backup-embed"},
+                },
+            },
+            "models": [
+                {"id": "chat-model", "keys": [{"name": "chat-key", "api_key": "sk-chat", "base_url": "https://chat.test"}]},
+                {"id": "embed-model", "keys": [{"name": "embed-key", "api_key": "sk-embed", "base_url": "https://embed.test"}]},
+                {"id": "backup-embed", "keys": [{"name": "backup-embed-key", "api_key": "sk-backup-embed", "base_url": "https://backup-embed.test"}]},
+            ],
+        }
+    )
+
+    assert config.unified_model is not None
+    assert config.unified_model.embeddings is not None
+    assert config.unified_model.embeddings.primary.model == "embed-model"
+    assert config.unified_model.embeddings.fallback is not None
+    assert config.unified_model.embeddings.fallback.model == "backup-embed"
+
+    # primary 与 fallback 指向同一模型属于无意义重复调用，加载阶段直接拒绝。
+    with pytest.raises(ValueError, match="同一模型"):
+        RouterConfig.from_dict(
+            {
+                "unified_model": {
+                    "default": {"primary": {"model": "chat-model"}},
+                    "embeddings": {
+                        "primary": {"model": "embed-model"},
+                        "fallback": {"model": "embed-model"},
+                    },
+                },
+                "models": [
+                    {"id": "chat-model", "keys": [{"name": "chat-key", "api_key": "sk-chat", "base_url": "https://chat.test"}]},
+                    {"id": "embed-model", "keys": [{"name": "embed-key", "api_key": "sk-embed", "base_url": "https://embed.test"}]},
+                ],
+            }
+        )
+
+
+def test_switch_unified_target_embeddings_requires_primary_before_fallback(
+    tmp_path: Path,
+) -> None:
+    from auto_model_key_router.unified_model import switch_unified_target
+
+    config_path = tmp_path / "router-config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "local_api_key": "local-key",
+                "models": [
+                    {"id": "main", "keys": [{"name": "main-key", "api_key": "sk-main", "base_url": "https://main.test"}]},
+                    {"id": "embed", "keys": [{"name": "embed-key", "api_key": "sk-embed", "base_url": "https://embed.test"}]},
+                ],
+                "unified_model": {"model": "main"},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # 没有 embeddings.primary 就先配 fallback：拒绝，避免生成一个没有主目标的计划。
+    with pytest.raises(Exception, match="embeddings.primary"):
+        switch_unified_target(config_path, "embeddings.fallback", "embed")
+
+    config = switch_unified_target(config_path, "embeddings.primary", "embed")
+
+    assert config.unified_model is not None
+    assert config.unified_model.embeddings is not None
+    assert config.unified_model.embeddings.primary.model == "embed"
+    assert config.unified_model.embeddings.fallback is None
+
+
 def test_unified_model_uses_fallback_after_primary_retryable_failure() -> None:
     with tempfile.TemporaryDirectory() as directory:
         upstream_models: list[str] = []
@@ -2793,6 +2869,468 @@ def test_unified_model_uses_fallback_after_primary_retryable_failure() -> None:
         assert response.status_code == 200
         assert response.headers["x-amkr-fallback"] == "true"
         assert upstream_models == ["primary-model", "primary-model", "fallback-model"]
+
+
+# —— 任务名路由 ——
+
+
+def task_config(tmp_path: Path, **task_kwargs: object) -> RouterConfig:
+    """两个模型 + 一个指向它们的任务，用于任务名路由的端到端断言。"""
+    task = {
+        "name": "TASK_000001",
+        "model": "task-primary",
+        "fallback_model": "task-fallback",
+        "params": {"temperature": 0.2, "top_p": 0.9, "reasoning_effort": "high"},
+    }
+    task.update(task_kwargs)
+    return RouterConfig.from_dict(
+        {
+            "config_version": 4,
+            "local_api_key": "local-key",
+            "max_retries": 0,
+            "providers": {
+                "vendor": {
+                    "base_url": "https://upstream.test",
+                    "keys": {"main": {"api_key": "sk-main"}},
+                }
+            },
+            "models": {
+                "task-primary": {
+                    "targets": [
+                        {
+                            "provider": "vendor",
+                            "key": "main",
+                            "upstream_model": "vendor-primary",
+                        }
+                    ]
+                },
+                "task-fallback": {
+                    "targets": [
+                        {
+                            "provider": "vendor",
+                            "key": "main",
+                            "upstream_model": "vendor-fallback",
+                        }
+                    ]
+                },
+            },
+            "tasks": {"TASK_000001": {k: v for k, v in task.items() if k != "name"}},
+            "metrics_db_path": str(tmp_path / "metrics.sqlite3"),
+            "endpoint_capabilities_path": str(tmp_path / "endpoint-capabilities.json"),
+            "log_file_path": str(tmp_path / "server.log"),
+        }
+    )
+
+
+def test_task_name_routes_to_task_model_and_applies_fixed_params(
+    tmp_path: Path,
+) -> None:
+    config = task_config(tmp_path)
+    app = create_app(config)
+    upstream_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        upstream_payloads.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer local-key"},
+            # max_tokens 不在任务的固定参数里，必须原样透传。
+            json={"model": "TASK_000001", "messages": [], "max_tokens": 64},
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 200
+    assert upstream_payloads == [
+        {
+            "model": "vendor-primary",
+            "messages": [],
+            "max_tokens": 64,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "reasoning_effort": "high",
+        }
+    ]
+
+
+def test_task_name_rejects_caller_supplied_sampling_params(tmp_path: Path) -> None:
+    config = task_config(tmp_path)
+    app = create_app(config)
+    upstream_calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal upstream_calls
+        upstream_calls += 1
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer local-key"},
+            json={
+                "model": "TASK_000001",
+                "messages": [],
+                "temperature": 0.9,
+                "top_p": 0.1,
+            },
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 400
+    message = response.json()["error"]["message"]
+    assert "TASK_000001" in message
+    assert "temperature" in message and "top_p" in message
+    # 冲突要在触达上游之前拦下。
+    assert upstream_calls == 0
+
+
+def test_task_name_uses_fallback_model_after_primary_failure(tmp_path: Path) -> None:
+    config = task_config(tmp_path)
+    app = create_app(config)
+    upstream_models: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        payload = json.loads(request.content.decode("utf-8"))
+        upstream_models.append(payload["model"])
+        if payload["model"] == "vendor-primary":
+            return httpx.Response(503, json={"error": {"message": "unavailable"}})
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer local-key"},
+            json={"model": "TASK_000001", "messages": []},
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 200
+    assert response.headers["x-amkr-fallback"] == "true"
+    assert upstream_models == ["vendor-primary", "vendor-fallback"]
+
+
+def test_task_name_rejects_caller_supplied_key(tmp_path: Path) -> None:
+    config = task_config(tmp_path)
+    app = create_app(config)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer local-key"},
+            json={"model": "TASK_000001[main]", "messages": []},
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 400
+    assert "不能指定 Key" in response.json()["error"]["message"]
+
+
+def test_task_name_is_callable_but_absent_from_model_list(tmp_path: Path) -> None:
+    # 任务名是虚拟模型名：能调用，但不该出现在 /v1/models 里，否则客户端会把
+    # 它当成一个真实模型去用。真实模型本身照常列出。
+    config = task_config(tmp_path)
+    app = create_app(config)
+
+    async def request(client: httpx.AsyncClient) -> list[str]:
+        response = await client.get(
+            "/v1/models", headers={"Authorization": "Bearer local-key"}
+        )
+        assert response.status_code == 200
+        return [item["id"] for item in response.json()["data"]]
+
+    listed = run_client(app, request)
+
+    assert "TASK_000001" not in listed
+    assert {"task-primary", "task-fallback"}.issubset(listed)
+
+
+def test_task_params_reject_unknown_names_at_config_load() -> None:
+    data = {
+        "config_version": 4,
+        "models": {
+            "task-primary": {
+                "keys": [
+                    {
+                        "name": "main",
+                        "api_key": "sk-main",
+                        "base_url": "https://upstream.test",
+                    }
+                ]
+            }
+        },
+        "tasks": {
+            "TASK_000001": {
+                "model": "task-primary",
+                "params": {"temprature": 0.2},
+            }
+        },
+    }
+
+    with pytest.raises(ValueError, match="不支持的参数: temprature"):
+        RouterConfig.from_dict(data)
+
+
+def test_task_referencing_unknown_model_is_rejected() -> None:
+    data = {
+        "config_version": 4,
+        "models": {
+            "task-primary": {
+                "keys": [
+                    {
+                        "name": "main",
+                        "api_key": "sk-main",
+                        "base_url": "https://upstream.test",
+                    }
+                ]
+            }
+        },
+        "tasks": {"TASK_000001": {"model": "nope"}},
+    }
+
+    with pytest.raises(ValueError, match="引用了未配置的模型: nope"):
+        RouterConfig.from_dict(data)
+
+
+def test_task_allows_caller_reasoning_effort_but_still_overrides_it(
+    tmp_path: Path,
+) -> None:
+    # reasoning_effort 是唯一不拒绝的采样参数：Claude Code / Codex 会自动带上它，
+    # 拒绝等于让任务路由不可用。但任务的值仍然生效。
+    config = task_config(tmp_path)
+    app = create_app(config)
+    upstream_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        upstream_payloads.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer local-key"},
+            json={
+                "model": "TASK_000001",
+                "messages": [],
+                "reasoning_effort": "low",
+                "max_tokens": 32,
+            },
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 200
+    assert upstream_payloads[0]["reasoning_effort"] == "high"
+    assert upstream_payloads[0]["max_tokens"] == 32
+
+
+def test_task_seed_must_be_an_integer() -> None:
+    data = {
+        "config_version": 4,
+        "models": {
+            "task-primary": {
+                "keys": [
+                    {
+                        "name": "main",
+                        "api_key": "sk-main",
+                        "base_url": "https://upstream.test",
+                    }
+                ]
+            }
+        },
+        "tasks": {"TASK_000001": {"model": "task-primary", "params": {"seed": 1.5}}},
+    }
+
+    with pytest.raises(ValueError, match="seed 必须是整数"):
+        RouterConfig.from_dict(data)
+
+
+def test_task_params_apply_on_the_native_messages_path(tmp_path: Path) -> None:
+    config = task_config(tmp_path)
+    app = create_app(config)
+    upstream_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        upstream_payloads.append(json.loads(request.content.decode("utf-8")))
+        # 原生 messages 路径要回 Anthropic 形状的响应，否则会被判为无法转换。
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "ok"}],
+                "model": "vendor-primary",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+    # messages 走原生 Anthropic 路径时，采样参数同样要落到上游请求体里。
+    # 先把该 base_url 的原生支持标记为已探测通过，避免真的去探测上游。
+    pool = app.state.runtime_manager.current.key_pool
+    anyio.run(pool.update_native_endpoint, "https://upstream.test", True, "v1/messages")
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer local-key"},
+            json={"model": "TASK_000001", "messages": [], "max_tokens": 16},
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 200
+    assert upstream_payloads[0]["temperature"] == 0.2
+    assert upstream_payloads[0]["top_p"] == 0.9
+    assert upstream_payloads[0]["max_tokens"] == 16
+    # 原生路径上不发 reasoning_effort（与模型级设置一致）。
+    assert "reasoning_effort" not in upstream_payloads[0]
+
+
+def test_task_stop_is_renamed_for_the_native_anthropic_body(tmp_path: Path) -> None:
+    # 配置里的 stop 是 OpenAI 词汇，原生 Anthropic 体只认 stop_sequences；不改名
+    # 上游会静默忽略这个固定参数。
+    config = task_config(tmp_path, params={"stop": ["\n\n"], "temperature": 0.2})
+    app = create_app(config)
+    upstream_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        upstream_payloads.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_1",
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "text", "text": "ok"}],
+                "model": "vendor-primary",
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+    pool = app.state.runtime_manager.current.key_pool
+    anyio.run(pool.update_native_endpoint, "https://upstream.test", True, "v1/messages")
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer local-key"},
+            json={"model": "TASK_000001", "messages": [], "max_tokens": 16},
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 200
+    assert upstream_payloads[0]["stop_sequences"] == ["\n\n"]
+    assert "stop" not in upstream_payloads[0]
+    assert upstream_payloads[0]["temperature"] == 0.2
+
+
+def test_task_params_reach_the_native_responses_body(tmp_path: Path) -> None:
+    # Responses 体没有 messages，stop 没有等价字段，保持原样即可。
+    config = task_config(tmp_path, params={"temperature": 0.3})
+    app = create_app(config)
+    upstream_payloads: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        upstream_payloads.append(json.loads(request.content.decode("utf-8")))
+        return httpx.Response(
+            200,
+            json={
+                "id": "resp_1",
+                "object": "response",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": "ok"}],
+                    }
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        )
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+    pool = app.state.runtime_manager.current.key_pool
+    anyio.run(pool.update_native_endpoint, "https://upstream.test", True, "v1/responses")
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/responses",
+            headers={"Authorization": "Bearer local-key"},
+            json={"model": "TASK_000001", "input": []},
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 200
+    assert upstream_payloads[0]["temperature"] == 0.3
+
+
+def test_task_stop_conflicts_with_anthropic_stop_sequences(tmp_path: Path) -> None:
+    # stop 与 stop_sequences 是同一件事的两种写法，不能只认其中一个。
+    config = task_config(tmp_path, params={"stop": ["\n\n"]})
+    app = create_app(config)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"id": "ok"})
+
+    app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler)
+    )
+
+    async def request(client: httpx.AsyncClient) -> httpx.Response:
+        return await client.post(
+            "/v1/messages",
+            headers={"Authorization": "Bearer local-key"},
+            json={
+                "model": "TASK_000001",
+                "messages": [],
+                "stop_sequences": ["END"],
+            },
+        )
+
+    response = run_client(app, request)
+
+    assert response.status_code == 400
+    assert "stop_sequences" in response.json()["error"]["message"]
 
 
 def test_acquired_key_is_released_when_proxy_raises() -> None:
@@ -4151,3 +4689,265 @@ def test_images_edits_proxies_to_correct_upstream_path() -> None:
 
         assert response.status_code == 200
         assert upstream_urls[0] == "https://upstream.test/v1/images/edits"
+
+
+def test_embeddings_proxies_body_unchanged_to_upstream() -> None:
+    """嵌入请求体只有 model/input：转发时不能被改写成 chat 的 messages。"""
+    with tempfile.TemporaryDirectory() as directory:
+        upstream_bodies: list[dict] = []
+        upstream_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            upstream_urls.append(str(request.url))
+            upstream_bodies.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(
+                200,
+                json={
+                    "object": "list",
+                    "data": [{"object": "embedding", "index": 0, "embedding": [0.1, 0.2]}],
+                    "model": "embed-upstream",
+                    "usage": {"prompt_tokens": 2, "total_tokens": 2},
+                },
+            )
+
+        config = make_config(
+            Path(directory),
+            (KeyConfig("key-1", "sk-1", "https://upstream.test"),),
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def request(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/embeddings",
+                headers={"Authorization": "Bearer local-key"},
+                json={
+                    "model": "test-model",
+                    "input": ["a white cat", "a black dog"],
+                    "encoding_format": "float",
+                },
+            )
+
+        response = run_client(app, request)
+
+        assert response.status_code == 200
+        assert response.json()["data"][0]["embedding"] == [0.1, 0.2]
+        assert upstream_urls[0] == "https://upstream.test/v1/embeddings"
+        assert upstream_bodies[0]["model"] == "test-model"
+        assert upstream_bodies[0]["input"] == ["a white cat", "a black dog"]
+        assert upstream_bodies[0]["encoding_format"] == "float"
+        assert "messages" not in upstream_bodies[0]
+
+
+def test_embeddings_custom_upstream_route() -> None:
+    """自定义 upstream_routes 中的 embeddings 路径应被正确使用。"""
+    with tempfile.TemporaryDirectory() as directory:
+        upstream_urls: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            upstream_urls.append(str(request.url))
+            return httpx.Response(200, json={"object": "list", "data": []})
+
+        config = make_config(
+            Path(directory),
+            (KeyConfig("key-1", "sk-1", "https://upstream.test"),),
+            upstream_routes={
+                "https://upstream.test": {"embeddings": "gateway/v2/embed"}
+            },
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def request(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/embeddings",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": "test-model", "input": "hi"},
+            )
+
+        response = run_client(app, request)
+
+        assert response.status_code == 200
+        assert upstream_urls[0] == "https://upstream.test/gateway/v2/embed/v1/embeddings"
+
+
+def test_embeddings_400_does_not_trigger_tool_filter_retry() -> None:
+    """带 "tool" 字样的 400 不该触发「过滤工具」重试：那会把 input 改写成 messages。"""
+    with tempfile.TemporaryDirectory() as directory:
+        upstream_bodies: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            upstream_bodies.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(
+                400,
+                json={"error": {"message": "tool not allowed here", "param": "tools"}},
+            )
+
+        config = make_config(
+            Path(directory),
+            (KeyConfig("key-1", "sk-1", "https://upstream.test"),),
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def request(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/embeddings",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": "test-model", "input": "hi"},
+            )
+
+        response = run_client(app, request)
+
+        assert response.status_code == 400
+        # 只有一次上游调用，且请求体保持嵌入形状。
+        assert len(upstream_bodies) == 1
+        assert upstream_bodies[0]["input"] == "hi"
+        assert "messages" not in upstream_bodies[0]
+
+
+def test_embeddings_failover_across_keys() -> None:
+    """嵌入请求同样按现有 Key 路由重试，第一个 Key 失败后换第二个。"""
+    with tempfile.TemporaryDirectory() as directory:
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            if request.headers.get("authorization") == "Bearer sk-bad":
+                return httpx.Response(403, json={"error": "forbidden"})
+            return httpx.Response(
+                200,
+                json={"object": "list", "data": [{"embedding": [1.0]}]},
+            )
+
+        config = make_config(
+            Path(directory),
+            (
+                KeyConfig("bad-key", "sk-bad", "https://upstream.test"),
+                KeyConfig("good-key", "sk-good", "https://upstream.test"),
+            ),
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def request(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/embeddings",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": "test-model", "input": "hi"},
+            )
+
+        response = run_client(app, request)
+
+        assert response.status_code == 200
+        assert call_count == 2
+
+
+def test_unified_model_routes_embeddings_to_configured_model() -> None:
+    """unified-model 的嵌入请求应命中 embeddings 计划，而不是 default。"""
+    with tempfile.TemporaryDirectory() as directory:
+        upstream_bodies: list[dict] = []
+        authorization_headers: list[str] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            authorization_headers.append(request.headers.get("authorization", ""))
+            upstream_bodies.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(200, json={"object": "list", "data": []})
+
+        config = replace(
+            make_config(
+                Path(directory),
+                (
+                    KeyConfig("chat-key", "sk-chat", "https://upstream.test"),
+                    KeyConfig("embed-key", "sk-embed", "https://upstream.test"),
+                ),
+                unified_model=UnifiedModelConfig(
+                    model="test-model",
+                    embeddings=RoutePlan(RouteTarget("alias-model")),
+                ),
+            ),
+            models=(
+                ModelConfig(
+                    id="test-model",
+                    keys=(KeyConfig("chat-key", "sk-chat", "https://upstream.test"),),
+                ),
+                ModelConfig(
+                    id="alias-model",
+                    keys=(
+                        KeyConfig("embed-key", "sk-embed", "https://upstream.test"),
+                    ),
+                ),
+            ),
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def requests(
+            client: httpx.AsyncClient,
+        ) -> tuple[httpx.Response, httpx.Response]:
+            chat_resp = await client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer local-key"},
+                json={
+                    "model": "unified-model",
+                    "messages": [{"role": "user", "content": "hi"}],
+                },
+            )
+            embed_resp = await client.post(
+                "/v1/embeddings",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": "unified-model", "input": "hi"},
+            )
+            return chat_resp, embed_resp
+
+        chat_resp, embed_resp = run_client(app, requests)
+
+        assert chat_resp.status_code == 200
+        assert embed_resp.status_code == 200
+        assert upstream_bodies[0]["model"] == "test-model"
+        assert upstream_bodies[1]["model"] == "alias-model"
+        assert authorization_headers == ["Bearer sk-chat", "Bearer sk-embed"]
+
+
+def test_unified_model_embeddings_without_plan_uses_default() -> None:
+    """未配置 embeddings 计划时，嵌入请求继承 default，保持既有行为。"""
+    with tempfile.TemporaryDirectory() as directory:
+        upstream_bodies: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            upstream_bodies.append(json.loads(request.content.decode("utf-8")))
+            return httpx.Response(200, json={"object": "list", "data": []})
+
+        config = make_config(
+            Path(directory),
+            (KeyConfig("key-1", "sk-1", "https://upstream.test"),),
+            unified_model=UnifiedModelConfig(model="test-model"),
+        )
+        app = create_app(config)
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+        async def request(client: httpx.AsyncClient) -> httpx.Response:
+            return await client.post(
+                "/v1/embeddings",
+                headers={"Authorization": "Bearer local-key"},
+                json={"model": "unified-model", "input": "hi"},
+            )
+
+        response = run_client(app, request)
+
+        assert response.status_code == 200
+        assert upstream_bodies[0]["model"] == "test-model"
+        assert upstream_bodies[0]["input"] == "hi"

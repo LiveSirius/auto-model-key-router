@@ -193,3 +193,47 @@ def test_integration_apply_validates_agent_and_mode(tmp_path: Path) -> None:
     assert unknown.status_code == 404
     assert bad_mode.status_code == 422
     assert "集成模式必须是 native 或 unified-model" in bad_mode.json()["detail"]
+
+
+def test_ops_can_be_disabled_by_config(tmp_path: Path) -> None:
+    """容器/反代场景整体关掉运维面：漏一条路径就等于宿主机被接管。"""
+    data = config_data(tmp_path)
+    data["ops_enabled"] = False
+    path = tmp_path / "router-config.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    app = create_app(RouterConfig.load(path), path)
+
+    async def requests(client: httpx.AsyncClient) -> dict[str, int]:
+        return {
+            "logs": (await client.get("/api/logs", headers=AUTH_HEADERS)).status_code,
+            "tool": (await client.get("/api/tool", headers=AUTH_HEADERS)).status_code,
+            "service": (
+                await client.post("/api/service/start_amkr", headers=AUTH_HEADERS)
+            ).status_code,
+            "integrations": (
+                await client.get("/api/integrations", headers=AUTH_HEADERS)
+            ).status_code,
+            # 管理接口不受影响，否则关运维等于把服务关成只读砖头。
+            "settings": (
+                await client.get("/api/settings", headers=AUTH_HEADERS)
+            ).status_code,
+            "health": (await client.get("/health")).status_code,
+        }
+
+    results = run_client(app, requests)
+
+    assert results["logs"] == 404
+    assert results["tool"] == 404
+    assert results["service"] == 404
+    assert results["integrations"] == 404
+    assert results["settings"] == 200
+    assert results["health"] == 200
+
+
+def test_ops_enabled_reported_on_health(tmp_path: Path) -> None:
+    app, _ = create_file_backed_app(tmp_path)
+
+    async def requests(client: httpx.AsyncClient) -> dict[str, object]:
+        return (await client.get("/health")).json()
+
+    assert run_client(app, requests)["ops_enabled"] is True

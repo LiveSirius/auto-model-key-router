@@ -57,7 +57,12 @@ const define = (name, value) =>
   Object.defineProperty(global, name, { value, writable: true, configurable: true });
 
 let reloads = 0;
-define("location", { hash: "#/settings", reload() { reloads += 1; } });
+define("location", {
+  hash: "#/settings",
+  // 独立运行时 WebUI 在 /ui/ 下；嵌入场景会覆盖成 /<prefix>/ui/。
+  pathname: "/ui/",
+  reload() { reloads += 1; },
+});
 define("window", { addEventListener() {}, isSecureContext: true, location: global.location });
 define("navigator", { clipboard: null });
 
@@ -90,6 +95,11 @@ const server = {
   authEnabled: true,
   accepted: new Set(["good-key"]),
   requests: [],
+  // 嵌入宿主时的挂载前缀；独立运行是空串。
+  prefix: "",
+  // 任务路由探针用的假数据与写入记录。
+  tasks: [],
+  writes: [],
 };
 
 function respond(status, payload) {
@@ -105,8 +115,13 @@ global.fetch = async (url, options = {}) => {
   const bearer = (headers.Authorization || "").replace(/^Bearer /, "");
   server.requests.push({ url, bearer });
 
+  // 前缀必须体现在真实请求上：这里剥掉前缀再匹配，未加前缀的请求会落到 401。
+  const path = server.prefix && url.startsWith(server.prefix)
+    ? url.slice(server.prefix.length)
+    : url;
+
   if (server.offline) throw new TypeError("fetch failed");
-  if (url === "/health") {
+  if (path === "/health") {
     return respond(200, {
       status: "ok",
       version: "4.0.3",
@@ -117,10 +132,31 @@ global.fetch = async (url, options = {}) => {
   if (server.authEnabled && !server.accepted.has(bearer)) {
     return respond(401, { detail: "本地 API key 验证失败" });
   }
-  if (url.startsWith("/api/settings")) {
+  if (path.startsWith("/api/settings")) {
     return respond(200, {
       config_revision: "rev-1",
       settings: { host: "127.0.0.1", port: 28881, max_retries: 2, local_auth_enabled: true },
+    });
+  }
+  if (path.startsWith("/api/models")) {
+    return respond(200, {
+      config_revision: "rev-1",
+      models: [
+        { id: "model-a", aliases: [], keys: [], routing_mode: "round_robin" },
+        { id: "model-b", aliases: [], keys: [], routing_mode: "round_robin" },
+      ],
+    });
+  }
+  if (path.startsWith("/api/tasks")) {
+    if (options.method === "POST" || options.method === "PUT") {
+      server.writes.push(JSON.parse(options.body));
+      // 需要观察"保存进行中"的状态时，把响应挂住，由用例自己放行。
+      if (server.holdSave) return new Promise((resolve) => { server.releaseSave = () => resolve(respond(200, { config_revision: "rev-2" })); });
+      return respond(options.method === "POST" ? 201 : 200, { config_revision: "rev-2" });
+    }
+    return respond(200, {
+      config_revision: "rev-1",
+      tasks: server.tasks,
     });
   }
   return respond(200, {});
@@ -173,10 +209,33 @@ const setup = {
     server.offline = true;
     storage.set("amkr.apiKey", "good-key");
   },
+  // 嵌入宿主：页面位于 /amkr/ui/，API 必须打到 /amkr 下而不是根路径。
+  mounted_prefix_uses_prefixed_api: () => {
+    server.prefix = "/amkr";
+    global.location.pathname = "/amkr/ui/";
+    storage.set("amkr.apiKey", "good-key");
+  },
+  // 任务路由页：直接驱动真实页面模块，锁住表单与请求体形状。
+  tasks_page_lists_and_saves: () => {
+    global.location.hash = "#/tasks";
+    storage.set("amkr.apiKey", "good-key");
+    server.tasks = [
+      {
+        name: "TASK_000001",
+        model: "model-a",
+        fallback_model: null,
+        params: { temperature: 0.2, reasoning_effort: "high" },
+      },
+    ];
+  },
 };
 setup[scenario]?.();
 
 await boot();
+// 页面首屏的读取是异步的，且可能会渲染不止一次；这里把在途的微任务排空，让断言
+// 看到的是稳定后的页面（否则断言的就是"恰好还没画完"的中间态）。
+const settle = async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); };
+await settle();
 
 const checks = {};
 if (scenario === "stale_key_prompts_login") {
@@ -206,6 +265,15 @@ if (scenario === "stale_key_prompts_login") {
   checks.reasonShown = text().includes("无法连接");
   checks.keyKept = storage.get("amkr.apiKey") === "good-key";
   checks.retryOffered = buttons().some((b) => b.textContent.includes("重试连接"));
+} else if (scenario === "mounted_prefix_uses_prefixed_api") {
+  // 嵌入宿主时页面在 /amkr/ui/ 下，若 API 基址写死绝对路径，每个请求都会打到宿主
+  // 根路径（404/401），页面直接停在"读取设置失败"。
+  checks.authorized = store.authorized === true;
+  checks.pageRendered = text().includes("设置");
+  checks.requestsArePrefixed = server.requests.length > 0
+    && server.requests.every((r) => String(r.url).startsWith("/amkr"));
+  checks.healthPrefixed = server.requests.some((r) => r.url === "/amkr/health");
+  checks.settingsPrefixed = server.requests.some((r) => r.url === "/amkr/api/settings");
 } else if (scenario === "valid_key_renders_page") {
   checks.noLoginCard = !text().includes("连接到 AMKR");
   checks.authorized = store.authorized === true;
@@ -245,6 +313,66 @@ if (scenario === "stale_key_prompts_login") {
   checks.authorized = store.authorized === true;
   checks.pageRendered = text().includes("设置");
   checks.hasAppBar = byClass("app-bar").length === 1;
+} else if (scenario === "tasks_page_lists_and_saves") {
+  checks.authorized = store.authorized === true;
+  checks.onTasksPage = store.page === "tasks";
+  // 已有任务要列出来，并显示它的固定参数。
+  checks.listsTask = text().includes("TASK_000001");
+  checks.showsParams = text().includes("temperature") && text().includes("reasoning_effort");
+
+  // 打开编辑器，改一个固定参数并保存。
+  await clickButton("编辑");
+  checks.explainsRejection = text().includes("会被直接拒绝");
+  checks.hasAllParamFields = inputs().filter((node) => node.attrs.placeholder === "留空表示不固定").length === 6;
+  const taskInput = inputs().find((node) => node.value === "TASK_000001");
+  // 编辑时任务名不可改（它是调用方用的 model 名，改名等于换了个任务）。
+  checks.taskNameReadOnly = Boolean(taskInput) && taskInput.disabled === true;
+  const tempInput = inputs().find((node) => node.attrs.placeholder === "留空表示不固定");
+  checks.tempPrefilled = tempInput?.value === "0.2";
+  if (tempInput) tempInput.value = "0.7";
+
+  // 切首选模型不能重建表单：重建会把手填的参数一起清掉。这里先填一个只在内存里的
+  // 值，再切模型，确认那个输入框还是同一个节点、值还在。
+  const selects = findAll(root, (n) => n.tagName === "select");
+  const primarySelect = selects[0];
+  checks.primarySelectListsAllModels = primarySelect?.children.length === 2;
+  if (primarySelect) {
+    primarySelect.value = "model-b";
+    for (const handler of primarySelect.listeners.change || []) await handler({ target: primarySelect });
+  }
+  checks.survivesModelChange = inputs().find((node) => node.attrs.placeholder === "留空表示不固定") === tempInput;
+  checks.valueKeptOnModelChange = tempInput?.value === "0.7";
+  // 备选下拉必须排掉当前首选，否则会存出「首选 == 备选」的任务。
+  checks.fallbackExcludesPrimary = selects[1]?.children.every((option) => option.attrs.value !== "model-b");
+
+  // 保存期间表单要锁住：请求已经在路上，此时让用户继续改只会造成"改了却没生效"。
+  // 这里把响应挂住，趁机检查锁定状态，再放行。
+  server.holdSave = true;
+  const saving = clickButton("保存任务");
+  await settle();
+  checks.nameStillReadOnly = inputs().find((node) => node.value === "TASK_000001")?.disabled === true;
+  // 输入框、两个模型下拉、以及编辑器自己的两个按钮都要锁住（导航按钮不参与）。
+  checks.formLockedWhileSaving = inputs().every((node) => node.disabled === true)
+    && selects.every((node) => node.disabled === true)
+    && ["保存中…", "取消"].every((label) =>
+      buttons().find((node) => node.textContent.trim() === label)?.disabled === true);
+  checks.saveButtonShowsProgress = buttons().some((node) => node.textContent.includes("保存中"));
+  server.holdSave = false;
+  server.releaseSave();
+  await saving;
+  await settle();
+
+  const write = server.writes.at(-1);
+  checks.wroteTask = Boolean(write);
+  // 保存走的是 PUT /api/tasks/<name>（新建才用 POST + 任务名放 body）。
+  checks.wroteUpdateUrl = server.requests.some((r) => r.url === "/api/tasks/TASK_000001");
+  checks.writeHasModel = write?.model === "model-b";
+  checks.writeHasNewTemperature = write?.params?.temperature === 0.7;
+  checks.writeKeptEffort = write?.params?.reasoning_effort === "high";
+  // 留空的参数不该被写成 null 塞进配置。
+  checks.writeOmitsBlankParams = write !== undefined && !("top_p" in (write.params || {}));
+  // 保存成功后编辑器关闭，表单不再锁着。
+  checks.editorClosedAfterSave = !buttons().some((node) => node.textContent.trim() === "保存任务");
 }
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);

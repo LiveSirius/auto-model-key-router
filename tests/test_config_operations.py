@@ -367,3 +367,129 @@ def test_updating_provider_key_api_key_drops_stale_capabilities() -> None:
     assert renamed["capabilities"]["models"] == ["gpt-b"]
     assert renamed["enabled"] is False
     RouterConfig.from_dict(data)
+
+
+def task_data() -> dict:
+    return {
+        "config_version": 4,
+        "providers": {
+            "gateway": {
+                "base_url": "https://gateway.example.test",
+                "keys": {"main": {"api_key": "sk-main"}},
+            }
+        },
+        "models": {
+            "primary": {
+                "aliases": ["fast"],
+                "targets": [
+                    {"provider": "gateway", "key": "main", "upstream_model": "up-main"}
+                ],
+            },
+            "backup": {
+                "targets": [
+                    {"provider": "gateway", "key": "main", "upstream_model": "up-backup"}
+                ],
+            },
+        },
+    }
+
+
+def test_task_operations_round_trip_through_validation() -> None:
+    data = task_data()
+
+    operations.create_task(
+        data,
+        "TASK_000001",
+        model="fast",
+        fallback_model="backup",
+        params={"temperature": 0.2, "stop": ["\n\n"]},
+    )
+
+    # 别名要落成真实模型 ID，后面删模型时才能对上号。
+    assert data["tasks"]["TASK_000001"] == {
+        "model": "primary",
+        "fallback_model": "backup",
+        "params": {"temperature": 0.2, "stop": ["\n\n"]},
+    }
+    config = RouterConfig.from_dict(data)
+    task = config.task_for("TASK_000001")
+    assert task is not None
+    assert task.plan.primary.model == "primary"
+    assert task.plan.fallback.model == "backup"
+
+    operations.update_task(
+        data, "TASK_000001", params={"top_k": 5}, update_params=True
+    )
+    assert data["tasks"]["TASK_000001"]["params"] == {"top_k": 5}
+
+    # 清空备选与参数要把字段一起移除，而不是留个空壳。
+    operations.update_task(
+        data, "TASK_000001", fallback_model=None, update_fallback=True
+    )
+    operations.update_task(data, "TASK_000001", params=None, update_params=True)
+    assert data["tasks"]["TASK_000001"] == {"model": "primary"}
+    RouterConfig.from_dict(data)
+
+    operations.delete_task(data, "TASK_000001")
+    # 最后一个任务删掉后连 tasks 键一起清理，避免导出里出现空对象。
+    assert "tasks" not in data
+
+
+def test_task_operations_reject_bad_input() -> None:
+    data = task_data()
+
+    for kwargs, reason in (
+        ({"model": "nope"}, "未配置的模型"),
+        ({"model": "primary", "params": {"temprature": 0.2}}, "不支持的参数"),
+        ({"model": "primary", "params": {"reasoning_effort": "extreme"}}, "reasoning_effort"),
+    ):
+        try:
+            operations.create_task(data, "TASK_000002", **kwargs)
+        except operations.ConfigOperationError as exc:
+            assert reason in str(exc), (reason, str(exc))
+        else:
+            raise AssertionError(f"应当拒绝: {kwargs}")
+
+    assert "tasks" not in data
+
+    # 任务名不能和模型 ID 或别名撞名，否则路由要靠查找顺序决定。
+    operations.create_task(data, "TASK_000003", model="primary")
+    for name in ("TASK_000003", "primary", "fast"):
+        try:
+            operations.create_task(data, name, model="primary")
+        except operations.ConfigOperationError:
+            continue
+        raise AssertionError(f"应当拒绝任务名: {name}")
+
+
+def test_deleting_a_model_cleans_up_tasks_that_reference_it() -> None:
+    data = task_data()
+    operations.create_task(
+        data, "TASK_000001", model="primary", fallback_model="backup"
+    )
+    operations.create_task(data, "TASK_000002", model="backup")
+
+    operations.delete_model(data, "primary")
+
+    # 首选没了 → 整个任务删除；备选没了 → 退化成单模型任务。
+    assert "TASK_000001" not in data["tasks"]
+    assert data["tasks"]["TASK_000002"] == {"model": "backup"}
+    RouterConfig.from_dict(data)
+
+    operations.delete_model(data, "backup")
+    assert "tasks" not in data
+
+
+def test_deleting_a_model_repairs_unified_model_even_with_stale_tasks() -> None:
+    # 回归：repair_unified_model 要先解析候选配置才敢改，残留的失效任务会让那次
+    # 解析失败，于是它什么都不修 —— 统一模型仍指向已删模型，配置直接不可加载。
+    data = task_data()
+    data["unified_model"] = {"default": {"primary": {"model": "primary", "key": None}}}
+    operations.create_task(data, "TASK_000001", model="primary")
+
+    operations.delete_model(data, "primary")
+
+    assert data["unified_model"]["default"]["primary"]["model"] == "backup"
+    assert "tasks" not in data
+    RouterConfig.from_dict(data)
+

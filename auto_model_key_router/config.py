@@ -38,18 +38,34 @@ def default_config_path() -> Path:
 LEGACY_CONFIG_PATH = Path("router-config.json")
 DEFAULT_CONFIG_PATH = default_config_path()
 UNIFIED_MODEL_ID = "unified-model"
-UPSTREAM_ROUTE_MODES = ("openai", "anthropic", "responses", "images")
+REASONING_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh", "max")
+# 任务名路由：客户端把 model 传成 TASK_XXXXXX，由任务表决定真实模型与采样参数。
+# 采样参数由任务固定，调用方再传就是冲突；reasoning_effort 同样固定，但沿用既有
+# 模型级设置的覆盖语义（不报错），因为它常由客户端框架自动带上。
+TASK_SAMPLING_PARAMS = (
+    "temperature",
+    "top_p",
+    "top_k",
+    "frequency_penalty",
+    "presence_penalty",
+    "seed",
+    "stop",
+)
+TASK_PARAM_KEYS = (*TASK_SAMPLING_PARAMS, "reasoning_effort")
+UPSTREAM_ROUTE_MODES = ("openai", "anthropic", "responses", "images", "embeddings")
 UPSTREAM_ROUTE_LABELS = {
     "openai": "OpenAI Chat",
     "anthropic": "Anthropic Messages",
     "responses": "OpenAI Responses",
     "images": "OpenAI Images",
+    "embeddings": "OpenAI Embeddings",
 }
 UPSTREAM_ROUTE_DEFAULT_PATHS = {
     "openai": "v1/chat/completions",
     "anthropic": "v1/messages",
     "responses": "v1/responses",
     "images": "v1/images/generations",
+    "embeddings": "v1/embeddings",
 }
 UPSTREAM_ROUTE_MODE_ALIASES = {
     "chat": "openai",
@@ -68,6 +84,9 @@ UPSTREAM_ROUTE_MODE_ALIASES = {
     "images/generations": "images",
     "image_generation": "images",
     "image-generation": "images",
+    "embedding": "embeddings",
+    "embed": "embeddings",
+    "embeddings": "embeddings",
 }
 
 
@@ -76,7 +95,7 @@ def normalize_upstream_route_mode(value: Any) -> str:
     mode = UPSTREAM_ROUTE_MODE_ALIASES.get(mode, mode)
     if mode not in UPSTREAM_ROUTE_MODES:
         raise ValueError(
-            "upstream_routes 模式必须是 openai、anthropic、responses 或 images"
+            "upstream_routes 模式必须是 openai、anthropic、responses、images 或 embeddings"
         )
     return mode
 
@@ -115,6 +134,60 @@ def normalize_upstream_routes(raw: Any) -> dict[str, str]:
         mode = normalize_upstream_route_mode(raw_mode)
         routes[mode] = normalize_upstream_route_path(mode, raw_route)
     return routes
+
+
+def normalize_task_params(raw: Any, *, task_name: str = "") -> dict[str, Any]:
+    """校验并规整任务的固定参数。
+
+    只认白名单里的键：写错的名字（比如 ``temprature``）在这里就报错，而不是等请求
+    打过来才静默地不生效。
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"任务 {task_name} 的 params 必须是对象")
+    result: dict[str, Any] = {}
+    for raw_key, value in raw.items():
+        key = str(raw_key).strip()
+        if key not in TASK_PARAM_KEYS:
+            raise ValueError(
+                f"任务 {task_name} 的 params 不支持的参数: {key}"
+                f"（可用: {', '.join(TASK_PARAM_KEYS)}）"
+            )
+        if value is None:
+            continue
+        if key == "reasoning_effort":
+            effort = str(value).strip()
+            if effort in {"", "default", "downstream"}:
+                continue
+            if effort not in REASONING_EFFORTS:
+                raise ValueError(
+                    f"任务 {task_name} 的 reasoning_effort 必须是 "
+                    f"{'、'.join(REASONING_EFFORTS)}"
+                )
+            result[key] = effort
+            continue
+        if key == "stop":
+            values = value if isinstance(value, list) else [value]
+            stops = [str(item) for item in values if str(item)]
+            if stops:
+                result[key] = stops
+            continue
+        if key in {"top_k", "seed"}:
+            try:
+                number = float(value)
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"任务 {task_name} 的 {key} 必须是整数") from exc
+            # int(1.5) 会静默截断成 1，那是在替调用方改参数值，宁可报错。
+            if not number.is_integer():
+                raise ValueError(f"任务 {task_name} 的 {key} 必须是整数")
+            result[key] = int(number)
+            continue
+        try:
+            result[key] = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"任务 {task_name} 的 {key} 必须是数字") from exc
+    return result
 
 
 def normalize_upstream_base_url(value: Any) -> str:
@@ -197,6 +270,7 @@ def empty_config_dict() -> dict[str, Any]:
         "log_file_path": default_log_file_path(),
         "local_api_key": generate_local_api_key(),
         "webui_enabled": False,
+        "ops_enabled": True,
         "providers": {},
         "models": {},
     }
@@ -664,15 +738,39 @@ class RoutePlan:
     fallback: RouteTarget | None = None
 
 
+@dataclass(frozen=True)
+class TaskConfig:
+    """任务名路由：``model`` 传任务名时改用这里的模型与固定参数。"""
+
+    name: str
+    model: str
+    fallback_model: str | None = None
+    params: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "params", normalize_task_params(self.params, task_name=self.name)
+        )
+
+    @property
+    def plan(self) -> RoutePlan:
+        return RoutePlan(
+            RouteTarget(self.model),
+            RouteTarget(self.fallback_model) if self.fallback_model else None,
+        )
+
+
 @dataclass(frozen=True, init=False)
 class UnifiedModelConfig:
     default: RoutePlan
     image: RoutePlan | None = None
+    embeddings: RoutePlan | None = None
 
     def __init__(
         self,
         default: RoutePlan | None = None,
         image: RoutePlan | None = None,
+        embeddings: RoutePlan | None = None,
         *,
         model: str | None = None,
         key: str | None = None,
@@ -688,6 +786,7 @@ class UnifiedModelConfig:
             image = RoutePlan(RouteTarget(image_model, image_key))
         object.__setattr__(self, "default", default)
         object.__setattr__(self, "image", image)
+        object.__setattr__(self, "embeddings", embeddings)
 
     @property
     def model(self) -> str:
@@ -724,7 +823,12 @@ class RouterConfig:
     providers: tuple[ProviderConfig, ...] = ()
     upstream_routes: dict[str, dict[str, str]] = field(default_factory=dict)
     unified_model: UnifiedModelConfig | None = None
+    tasks: tuple[TaskConfig, ...] = ()
     webui_enabled: bool = False
+    # 运维接口（/api/logs、/api/service/*、/api/integrations/*、/api/tool）会启停
+    # 本机进程、注册系统服务、改写本机 Agent 配置。容器/反代场景要能整体关掉，
+    # 逐个路径拉黑容易漏（漏一条就是宿主机被接管）。默认 True 保持既有行为。
+    ops_enabled: bool = True
     reasoning_effort_by_model: dict[str, str] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -923,7 +1027,53 @@ class RouterConfig:
                 if raw_unified_model.get("image") is not None
                 else None
             )
-            unified_model = UnifiedModelConfig(default_plan, image_plan)
+            embeddings_plan = (
+                parse_plan(raw_unified_model["embeddings"], "unified_model.embeddings")
+                if raw_unified_model.get("embeddings") is not None
+                else None
+            )
+            unified_model = UnifiedModelConfig(default_plan, image_plan, embeddings_plan)
+
+        tasks: list[TaskConfig] = []
+        raw_tasks = raw.get("tasks")
+        if raw_tasks is not None:
+            if not isinstance(raw_tasks, dict):
+                raise ValueError("tasks 必须是对象")
+            task_model_ids_by_name = {
+                name: model.id
+                for model in models
+                for name in (model.id, *model.aliases)
+            }
+
+            def resolve_task_model(value: Any, field_name: str) -> str:
+                model_name = str(value or "").strip()
+                model_id = task_model_ids_by_name.get(model_name)
+                if model_id is None:
+                    raise ValueError(f"{field_name} 引用了未配置的模型: {model_name}")
+                return model_id
+
+            for raw_task_name, task in raw_tasks.items():
+                task_name = str(raw_task_name).strip()
+                if not task_name:
+                    raise ValueError("任务名不能为空")
+                if not isinstance(task, dict):
+                    raise ValueError(f"任务 {task_name} 必须是对象")
+                model_id = resolve_task_model(task.get("model"), f"tasks.{task_name}.model")
+                fallback_model = (
+                    resolve_task_model(
+                        task["fallback_model"], f"tasks.{task_name}.fallback_model"
+                    )
+                    if task.get("fallback_model") is not None
+                    else None
+                )
+                tasks.append(
+                    TaskConfig(
+                        name=task_name,
+                        model=model_id,
+                        fallback_model=fallback_model,
+                        params=task.get("params") or {},
+                    )
+                )
 
         config = cls(
             host=str(raw.get("host", "127.0.0.1")),
@@ -948,7 +1098,9 @@ class RouterConfig:
             providers=tuple(providers),
             upstream_routes=upstream_routes,
             unified_model=unified_model,
+            tasks=tuple(tasks),
             webui_enabled=bool(raw.get("webui_enabled", False)),
+            ops_enabled=bool(raw.get("ops_enabled", True)),
         )
         config.validate()
         return config
@@ -969,7 +1121,7 @@ class RouterConfig:
                 raise ValueError("模型 id 不能为空")
             if model.routing_mode not in {"priority", "round_robin", "only_first"}:
                 raise ValueError(f"模型 {model.id} 的 routing_mode 必须是 priority、round_robin 或 only_first")
-            if model.reasoning_effort is not None and model.reasoning_effort not in {"none", "minimal", "low", "medium", "high", "xhigh", "max"}:
+            if model.reasoning_effort is not None and model.reasoning_effort not in REASONING_EFFORTS:
                 raise ValueError(f"模型 {model.id} 的 reasoning_effort 必须是 none、minimal、low、medium、high、xhigh 或 max")
             for name in (model.id, *model.aliases):
                 if name in model_names:
@@ -1014,11 +1166,38 @@ class RouterConfig:
             for route_mode, route_path in routes.items():
                 normalize_upstream_route_path(route_mode, route_path)
 
+        # 任务名必须能被唯一解析：与模型 ID/别名撞名会让 resolve_route 的语义变得
+        # 取决于查表顺序，因此直接禁止。
+        task_names: set[str] = set()
+        for task in self.tasks:
+            if not task.name:
+                raise ValueError("任务名不能为空")
+            if task.name in task_names:
+                raise ValueError(f"任务名重复: {task.name}")
+            if task.name in model_names or task.name in self.hidden_model_names():
+                raise ValueError(f"任务名与模型名称冲突: {task.name}")
+            if task.name == UNIFIED_MODEL_ID:
+                raise ValueError(f"任务名不能使用保留名称: {UNIFIED_MODEL_ID}")
+            task_names.add(task.name)
+            if task.model not in models_by_id:
+                raise ValueError(f"任务 {task.name} 引用了未配置的模型: {task.model}")
+            if task.fallback_model is not None:
+                if task.fallback_model not in models_by_id:
+                    raise ValueError(
+                        f"任务 {task.name} 的备选引用了未配置的模型: {task.fallback_model}"
+                    )
+                if task.fallback_model == task.model:
+                    raise ValueError(f"任务 {task.name} 的首选和备选不能引用同一模型")
+
         if self.unified_model is None:
             return
         if UNIFIED_MODEL_ID in model_names:
             raise ValueError(f"启用 unified_model 时，模型 ID 和别名不能使用保留名称: {UNIFIED_MODEL_ID}")
-        for plan_name, plan in (("default", self.unified_model.default), ("image", self.unified_model.image)):
+        for plan_name, plan in (
+            ("default", self.unified_model.default),
+            ("image", self.unified_model.image),
+            ("embeddings", self.unified_model.embeddings),
+        ):
             if plan is None:
                 continue
             if plan.fallback and plan.primary.model == plan.fallback.model:
@@ -1038,6 +1217,12 @@ class RouterConfig:
         for model in self.models:
             if model_name == model.id or model_name in model.aliases:
                 return model.id
+        return None
+
+    def task_for(self, name: str) -> TaskConfig | None:
+        for task in self.tasks:
+            if task.name == name:
+                return task
         return None
 
     def hidden_model_names(self) -> dict[str, str]:

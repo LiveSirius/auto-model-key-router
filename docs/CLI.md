@@ -103,6 +103,21 @@ amkr
 
 `--host` 和 `--port` 不会写回配置文件。后台启动和系统服务会在子进程中重新读取配置文件，因此要永久修改监听地址，应通过 Terminal UI 或直接修改配置文件。
 
+## 启动开关
+
+| 参数 | 说明 |
+| --- | --- |
+| `--webui` / `--no-webui` | 启用或关闭内置 WebUI，写入配置字段 `webui_enabled` |
+| `--no-ops` | 关闭运维接口，写入配置字段 `ops_enabled` |
+
+这两个开关都是**持久化设置**：后台启动与系统服务的子进程只带 `--config`，所以开关必须落盘才能对这三种启动方式都生效。不带开关时不动配置。
+
+`--no-ops` 关闭的是 `/api/logs`、`/api/tool`、`/api/service/*`、`/api/integrations/*`。这些接口作用于「服务所在的这台机器」——读日志文件、启停后台进程、注册系统服务、改写本机 Claude Code / Codex 配置——容器或反向代理后面语义不成立，逐个路径拉黑又容易漏。关闭后这些路径返回 `404`，`/health` 的 `ops_enabled` 字段为 `false`；代理、`/health`、`/metrics`、WebSocket 与 `/api/settings` 等配置管理接口不受影响。
+
+```bash
+amkr --config router-config.json --no-ops
+```
+
 ## 配置与日志
 
 | 参数 | 说明 |
@@ -133,6 +148,7 @@ amkr --config router-config.json --show-logs 100
 | --- | --- | --- |
 | `--switch-model MODEL` | 模型 ID 或别名 | 把 `unified_model` 指向已有模型；写回时规范化为真实模型 ID |
 | `--switch-key KEY` | Key 名称或 `auto` | 固定使用已有且启用的 Key；`auto` 恢复自动路由 |
+| `--unified-target TARGET` | `default.primary` / `default.fallback` / `image.primary` / `image.fallback` / `embeddings.primary` / `embeddings.fallback` | 选择 `--switch-model` / `--switch-key` 要修改的目标，默认 `default.primary` |
 | `--show-unified-model` | 无 | 查看当前指向 |
 
 示例：
@@ -142,15 +158,19 @@ amkr --config router-config.json --switch-model gpt-5.5
 amkr --config router-config.json --switch-model gpt-5.5 --switch-key main
 amkr --config router-config.json --switch-key backup
 amkr --config router-config.json --switch-key auto
+amkr --config router-config.json --switch-model text-embedding-3-small --unified-target embeddings.primary
 amkr --config router-config.json --show-unified-model
 ```
 
 行为说明：
 
 - `--switch-key` 单独使用时，配置中必须已经存在 `unified_model`。
+- 非 `default` 目标（`image`、`embeddings`）必须先配置 `primary` 才能配置 `fallback`；未配置该目标的 `primary` 时，对应请求继承 `default.primary`，且不继承 `default.fallback`。
 - 切换到另一模型且没有同时提供 `--switch-key` 时，会清除原固定 Key，恢复自动路由。
 - MODEL 不存在、Key 不存在或 Key 已禁用时，命令返回失败且不写入无效配置。
 - 修改会原子写回配置文件；运行中的服务会在后续请求时热重载。
+
+> 任务路由（把 `TASK_XXXXXX` 当模型名传，见 [`USAGE.md`](USAGE.md#9-任务路由)）**没有对应的命令行参数**，请在 WebUI 的 **配置 → 任务路由** 页或管理 API 的 `/api/tasks` 中维护。它有多个字段（首选/备选模型、一组固定参数），做成命令行开关并不合适。
 
 ## 后台进程
 

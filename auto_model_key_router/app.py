@@ -13,6 +13,12 @@ from fastapi import FastAPI, Query, Request, WebSocket
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
 from . import __version__
+from .auth import (
+    Authenticator,
+    authorize,
+    default_authenticator,
+    request_from_websocket_token,
+)
 from .config import RouterConfig
 from .event_bus import EventBus
 from .key_pool import KeyPool
@@ -20,9 +26,6 @@ from .management_api import register_management_api
 from .metrics import MetricsStore
 from .ops_api import register_ops_api
 from .proxy_handler import handle_proxy_request
-from .proxy_support import (
-    _authorization_mode,
-)
 from .runtime import (
     RuntimeLease,
     RuntimeManager,
@@ -50,9 +53,14 @@ def create_app(
     config_path: str | Path | None = None,
     *,
     webui: bool | None = None,
+    enable_ops: bool | None = None,
+    authenticator: Authenticator | None = None,
 ) -> FastAPI:
     @asynccontextmanager
     async def lifespan(lifespan_app: FastAPI) -> AsyncIterator[None]:
+        # lifespan_app 始终是 AMKR 自己的应用实例：独立运行时由 uvicorn 传入，
+        # 挂载运行时由 mount_app 显式绑定（Starlette 不会为 Mount 的子应用跑
+        # lifespan，所以挂载方必须自己把这里接上，否则下面的资源永不释放）。
         lifespan_app.state._metrics_broadcast_task = asyncio.create_task(
             _broadcast_metrics_loop()
         )
@@ -72,6 +80,8 @@ def create_app(
     app = FastAPI(title="Auto Model Key Router", version=__version__, lifespan=lifespan)
     # webui=None 表示跟随配置文件；True/False 是 CLI 的显式覆盖。
     app.state.webui_enabled = config.webui_enabled if webui is None else webui
+    # 宿主可整体替换鉴权；默认实现保持「本地 API key + 固定 visitor key」。
+    app.state.authenticator = authenticator or default_authenticator
     app.state.config_path = (
         str(Path(config_path).resolve()) if config_path is not None else ""
     )
@@ -126,7 +136,14 @@ def create_app(
     app.state._metrics_broadcast_task: asyncio.Task | None = None
 
     register_management_api(app, _reload_config_if_changed)
-    register_ops_api(app, _reload_config_if_changed)
+    # 运维接口作用于「服务所在的这台机器」（启停后台进程、注册系统服务、改写
+    # Claude Code/Codex 本地配置），嵌入到别人的进程里语义不成立，因此可关闭。
+    # enable_ops=None 表示跟随配置文件，True/False 是显式覆盖。
+    if enable_ops is None:
+        enable_ops = config.ops_enabled
+    if enable_ops:
+        register_ops_api(app, _reload_config_if_changed)
+    app.state.ops_enabled = enable_ops
     app.state.webui_mounted = register_webui(app, enabled=app.state.webui_enabled)
 
     @app.head("/", include_in_schema=False)
@@ -157,6 +174,7 @@ def create_app(
                 "visitor_key_count": visitor_key_count if visitor_installed else 0,
                 "unified_model": runtime.key_pool.unified_route,
                 "native_endpoint_states": runtime.key_pool.endpoint_capability_states(),
+                "ops_enabled": bool(getattr(app.state, "ops_enabled", True)),
                 **webui_status(app),
             }
         finally:
@@ -168,10 +186,8 @@ def create_app(
         lease = await _acquire_runtime(app.state)
         try:
             runtime = lease.resources
-            authorization_mode = _authorization_mode(
-                request, runtime.config.local_api_key
-            )
-            if authorization_mode is None:
+            auth = await authorize(request, runtime.config)
+            if auth is None:
                 return JSONResponse(
                     {"error": {"message": "本地 API key 验证失败"}}, status_code=401
                 )
@@ -185,7 +201,7 @@ def create_app(
                             "owned_by": "auto-model-key-router",
                         }
                         for model_id in runtime.key_pool.available_model_ids(
-                            visitor_only=authorization_mode == "visitor"
+                            visitor_only=auth.visitor_only
                         )
                     ],
                 }
@@ -202,10 +218,8 @@ def create_app(
         await _reload_config_if_changed(app.state)
         lease = await _acquire_runtime(app.state)
         try:
-            if (
-                _authorization_mode(request, lease.resources.config.local_api_key)
-                != "full"
-            ):
+            auth = await authorize(request, lease.resources.config)
+            if auth is None or not auth.is_full:
                 return JSONResponse(
                     {"error": {"message": "本地 API key 验证失败"}}, status_code=401
                 )
@@ -239,10 +253,8 @@ def create_app(
         await _reload_config_if_changed(app.state)
         lease = await _acquire_runtime(app.state)
         try:
-            if (
-                _authorization_mode(request, lease.resources.config.local_api_key)
-                != "full"
-            ):
+            auth = await authorize(request, lease.resources.config)
+            if auth is None or not auth.is_full:
                 return JSONResponse(
                     {"error": {"message": "本地 API key 验证失败"}}, status_code=401
                 )
@@ -283,10 +295,8 @@ def create_app(
         await _reload_config_if_changed(app.state)
         lease = await _acquire_runtime(app.state)
         try:
-            if (
-                _authorization_mode(request, lease.resources.config.local_api_key)
-                != "full"
-            ):
+            auth = await authorize(request, lease.resources.config)
+            if auth is None or not auth.is_full:
                 return JSONResponse(
                     {"error": {"message": "本地 API key 验证失败"}}, status_code=401
                 )
@@ -315,10 +325,18 @@ def create_app(
     @app.websocket("/ws/events")
     async def ws_events(websocket: WebSocket) -> None:
         await websocket.accept()
-        token = websocket.query_params.get("token", "")
         event_bus: EventBus = app.state.event_bus
         config = app.state.runtime_manager.current.config
-        if not await event_bus.authenticate(websocket, token, config.local_api_key):
+
+        async def verify(candidate: str) -> bool:
+            # 复用统一鉴权钩子：握手没法带自定义头，token 只能来自首帧；折算出
+            # Request 后宿主的 cookie 鉴权同样能用。事件流只对完整权限开放。
+            auth = await authorize(
+                request_from_websocket_token(websocket, candidate), config
+            )
+            return auth is not None and auth.is_full
+
+        if not await event_bus.authenticate(websocket, verify):
             return
         try:
             await websocket.send_json({"type": "connected", "data": {}})
@@ -354,6 +372,62 @@ def create_app(
         "/v1/{path:path}", proxy, methods=["GET", "POST", "PUT", "PATCH", "DELETE"]
     )
     register_websocket_proxy(app, proxy)
+    return app
+
+
+def mount_app(
+    parent: FastAPI,
+    path: str,
+    config: RouterConfig | None = None,
+    config_path: str | Path | None = None,
+    *,
+    app: FastAPI | None = None,
+    webui: bool | None = None,
+    enable_ops: bool = False,
+    authenticator: Authenticator | None = None,
+) -> FastAPI:
+    """把 AMKR 挂到 parent 的 path 前缀下，并把它的 lifespan 接进父应用。
+
+    Starlette 只会运行顶层应用的 lifespan，``Mount`` 的子应用生命周期会被静默
+    跳过。直接 ``parent.mount()`` 的话，AMKR 的指标广播任务不会启动、runtime 的
+    httpx client 与 sqlite 连接也不会关闭，所以这里必须把子应用 lifespan 链进
+    父应用；调用方不需要自己 ``async with app.router.lifespan_context(app)``。
+
+    挂载后所有接口位于 ``path`` 之下（``path="/amkr"`` → ``/amkr/health``、
+    ``/amkr/v1/chat/completions``），WebUI 位于 ``path + /ui/``，其前端会自动把
+    API 基址推导到同一前缀。必须在父应用开始处理请求前调用。
+
+    ``enable_ops`` 默认关闭：运维接口会启停本机后台服务、注册系统服务、改写
+    Claude Code / Codex 配置，嵌入到别人的进程里语义不成立。
+
+    ``authenticator`` 可整体替换鉴权（见 ``auth.py``）：宿主已有自己的身份体系时，
+    用它表达「已登录用户 = full」，不必再让调用方多持一套 AMKR 的 key。
+    """
+    if app is None:
+        if config is None:
+            raise ValueError("mount_app 需要 config 或现成的 app")
+        app = create_app(
+            config,
+            config_path,
+            webui=webui,
+            enable_ops=enable_ops,
+            authenticator=authenticator,
+        )
+    prefix = "/" + path.strip("/")
+    # 记下挂载前缀，供 /health 与 /api/tool 汇报真实的 WebUI 访问路径。
+    app.state.mount_path = "" if prefix == "/" else prefix
+
+    inner_lifespan = app.router.lifespan_context
+    outer_lifespan = parent.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(parent_app: FastAPI) -> AsyncIterator[None]:
+        async with inner_lifespan(app):
+            async with outer_lifespan(parent_app):
+                yield
+
+    parent.router.lifespan_context = lifespan
+    parent.mount(prefix, app, name="amkr")
     return app
 
 
