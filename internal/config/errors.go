@@ -11,10 +11,8 @@
 package config
 
 import (
+	"errors"
 	"fmt"
-	"math"
-	"strconv"
-	"strings"
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
@@ -52,58 +50,26 @@ func errInternal(format string, args ...any) error {
 // pyTypeName 返回 Python 侧的类型名，用于复刻 TypeError 文本。
 func pyTypeName(v *canonical.Value) string { return canonical.PyTypeName(v) }
 
-func isFloatLiteral(literal string) bool {
-	return strings.ContainsAny(literal, ".eE") || literal == "NaN" ||
-		strings.Contains(literal, "Infinity")
-}
-
 // configVersionOf 复刻 Python 的 “int(normalized.get("config_version") or 0)“。
 //
 // 三种结果都要区分，因为 Python 对它们的行为不同：
 //   - 成功：字符串/数字/布尔都能转（int("4")=4、int(4.7)=4、int(True)=1）；
-//   - ValueError：字符串不是合法整数（"four"）；
-//   - TypeError：列表、字典等不可转换。
+//   - ValueError：字符串不是合法整数（"four"）——契约错误，文本原样上报；
+//   - TypeError / OverflowError：列表、字典等不可转换——内部错误。
 //
-// 失败时回传 Python 的原始异常文本。调用方据此决定是当作契约错误上报
-// （ValueError），还是当作内部错误（TypeError，语料中记录了原始文本）。
+// 注意配置版本可能是 4.0、4.7、true、null 或缺失；只有 v3 迁移会把它写成整数 4。
 func configVersionOf(raw *canonical.Value) (int, error) {
 	value := raw.Lookup("config_version")
 	if value == nil || !value.Truthy() {
 		return 0, nil
 	}
-	switch value.Kind {
-	case canonical.KindNumber:
-		if isFloatLiteral(value.Num) {
-			f, ok := value.AsFloat()
-			if !ok || math.IsNaN(f) {
-				return 0, errInternal("cannot convert float NaN to integer")
-			}
-			if math.IsInf(f, 0) {
-				return 0, errInternal("cannot convert float infinity to integer")
-			}
-			return int(f), nil
+	parsed, err := canonical.ToInt(value)
+	if err != nil {
+		var valueErr *canonical.ValueError
+		if errors.As(err, &valueErr) {
+			return 0, &ConfigError{Message: valueErr.Message}
 		}
-		n, ok := value.AsInt()
-		if !ok {
-			// 超出 int64：Python 任意精度可表示，但配置版本不会是这种值。
-			return 0, errInternal("int() argument is out of range")
-		}
-		return int(n), nil
-	case canonical.KindBool:
-		if value.Bool {
-			return 1, nil
-		}
-		return 0, nil
-	case canonical.KindString:
-		text := strings.TrimSpace(value.Str)
-		n, err := strconv.Atoi(text)
-		if err != nil {
-			return 0, &ConfigError{Message: fmt.Sprintf(
-				"invalid literal for int() with base 10: '%s'", value.Str)}
-		}
-		return n, nil
+		return 0, errInternal("%s", err.Error())
 	}
-	return 0, errInternal(
-		"int() argument must be a string, a bytes-like object or a real number, not '%s'",
-		pyTypeName(value))
+	return int(parsed), nil
 }
