@@ -61,6 +61,54 @@ metrics、config_operations 已完成并提交
 | `servicestatus` | `service_status.py` | schtasks XML / systemd 解析 |
 
 **进行中**：`management_api.py` -> `internal/api`、`proxy_handler.py` -> `internal/proxy`。
+## 组装后的完整路由表（目标，共 63 条）
+
+用 Python AST 从 `management_api.py`(47) + `ops_api.py`(7) + `app.py`(9) 提取，作为
+「Go 版是否完整」的对照清单。AST 提取的好处是跨行装饰器也能取到。
+
+### 代理面（9 条，app.py）
+
+| 路由 | 状态 |
+| --- | --- |
+| `GET /health` | ✅ 已移植（`internal/health`） |
+| `ANY /v1/{path}` | 进行中（`internal/proxy`） |
+| `HEAD /` | 待 app 装配 |
+| `GET /v1/models` | 待 app 装配 |
+| `GET /metrics` | 待 app 装配（依赖 metrics） |
+| `GET /metrics/requests` | 待 app 装配（依赖 metrics） |
+| `GET /metrics/series` | 待 app 装配（依赖 metrics） |
+| `WS /ws/events` | 待定（**非「能用」必需**，前端是轮询） |
+| `WS /v1/{path}` | 待定（同上） |
+
+### 管理面（47 条，`internal/api`）
+
+已实现 47/47。核对方式是把我方路由表与 Python AST 提取结果做**双向差集**：既无缺失、
+也无多余（`Give /api` 全量比较，0 差异）。
+
+### 运维面（7 条，`ops_api.py`）
+
+| 路由 | 阻塞情况 |
+| --- | --- |
+| `GET /api/logs` | 可做（`internal/logfiles` 已就绪） |
+| `POST /api/tool/webui` | 可做（只需 ConfigService） |
+| `GET /api/integrations` | 等 `agent_config`（进行中） |
+| `POST /api/integrations/{agent}` | 等 `agent_config` |
+| `POST /api/integrations/{agent}/rollback` | 等 `agent_config` |
+| `POST /api/service/{action}` | **阻塞**：惰性 import `service.py`（720 行，未移植） |
+| `GET /api/tool` | **阻塞**：惰性 import `update.py` 的 `check_latest_version` |
+
+### 决策 8 的实际影响（比最初估计大）
+
+`update.py` 共 713 行，其中**约 140 行是版本检查**（`version_numbers` / `comparable_version`
+/ `is_newer_version` / `fetch_json` / `check_latest_pypi` / `check_latest_release` /
+`check_latest_version` / `render_version_check_result`），**约 573 行是自更新机制**
+（`install_latest_*`、`windows_update_helper_script` 单函数就 142 行、`uv_tool_*`、
+`detected_installation_method` 等）。
+
+决策 8 砍掉 `update.py` 会打断**两条路由 + WebUI 的「检查更新」**：
+`POST /api/update/check`（management 面）与 `GET /api/tool`（ops 面）。
+
+**建议**（待确认）：只砍自更新那 573 行；保留版本检查，因为它与分发方式无关，而前端在用。
 
 ## 自行验证
 
