@@ -91,7 +91,7 @@ jobs:
       # 要么 Go 测试拿旧语料比新实现（失败信息指向 Go，真凶却在 Python），
       # 要么两侧一起漂移而「自我循环」永远为绿。
       # --check 不写盘、只逐字节比对现有语料，任一脚本非 0 即整轮红。
-      # 拆成 4 个独立 step，失败时一眼能看出是哪一块语料过期。
+      # 一块语料一个独立 step，失败时一眼能看出是哪一块过期。
       - name: 语料新鲜度（canonical）
         run: python -X utf8 scripts/gen_canonical_corpus.py --check
 
@@ -104,12 +104,34 @@ jobs:
       - name: 语料新鲜度（keypool）
         run: python -X utf8 scripts/gen_keypool_corpus.py --check
 
+      - name: 语料新鲜度（configops）
+        run: python -X utf8 scripts/gen_configops_corpus.py --check
+
       - name: 语料新鲜度（proxysupport）
         # 这份语料钉的是 Python 的 bytes.decode("utf-8", errors="replace")：Go 标准库
         # 没有等价物（strings.ToValidUTF8 会把连续非法字节折叠成一个 U+FFFD，而 Python
         # 按 Unicode 最大子部分每段各给一个），故 Go 侧手写了 decodeUTF8Replacing。
         # 它没有可推导的解析式，只能靠语料穷举——因此这份新鲜度闸门尤其重要。
         run: python -X utf8 scripts/gen_proxysupport_corpus.py --check
+
+      - name: 语料新鲜度（formatting）
+        run: python -X utf8 scripts/gen_formatting_corpus.py --check
+
+      - name: 语料新鲜度（logfiles）
+        run: python -X utf8 scripts/gen_logfiles_corpus.py --check
+
+      - name: 语料新鲜度（clipboard）
+        run: python -X utf8 scripts/gen_clipboard_corpus.py --check
+
+      - name: 语料新鲜度（servicestatus）
+        run: python -X utf8 scripts/gen_servicestatus_corpus.py --check
+
+      - name: 语料新鲜度（upstream 交互语料）
+        # 这一条与其余几条不同：它必须**重跑 pytest**（用 AST 定位 tests/test_app.py 里
+        # 73 个内联 httpx.MockTransport 站点，再注入插件拦截真实交互），因此耗时约
+        # 2-3 分钟，而不是几百毫秒。放在最后，超时问题一眼能归因到这里。
+        # 上游交互（请求头、query、响应头）恰恰是出错不报错的地方，值得这个代价。
+        run: python -X utf8 scripts/gen_upstream_fixtures.py --check
 
   go:
     name: Go 静态检查与测试
