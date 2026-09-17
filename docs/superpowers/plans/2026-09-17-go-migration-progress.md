@@ -9,26 +9,32 @@
 | 指标 | 数值 |
 | --- | --- |
 | Python 核心 | 15,630 行 / 41 文件 |
-| Go 生产代码 | 8,983 行 / 32 文件（9 个包） |
-| 已移植 Python 源 | ≈ 5,015 行（约 1/3） |
-| 服务端待移植 | ≈ 7,837 行（决策 7/8 砍掉 dashboard/logs_tui/update 后） |
-| Go 相关提交 | 23 |
+| Go 生产代码 | 15,834 行 / 50 文件（17 个包已提交） |
+| Go 测试代码 | 13,971 行 / 41 文件 |
+| 已移植 Python 源 | ≈ 7,300 行（约 47%） |
+| 服务端待移植 | ≈ 8,345 行；其中 management_api 与 proxy_handler（共 3,047 行）已在进行中 |
+| Go 相关提交 | 29（触及 internal/ 或 go.mod） |
 
 按方案的分期，**Phase 0–2 基本完成**（基础设施、配置与 canonical 兼容、运行时与
 协议转换）。剩下的体量集中在一个线性依赖链上：
 
 ```
-metrics（进行中）
-   └─> proxy_handler           1,400 行   ← 关键路径枢纽
-config_operations（进行中）
-   └─> management_api          1,647 行
+metrics、config_operations 已完成并提交
+   └─> proxy_handler           1,400 行   ← 关键路径枢纽（进行中）
+   └─> management_api          1,647 行   （进行中）
+          └─> ops_api            276 行
    └─> config_editor           1,878 行
-          └─> app / service / CLI / WebUI
-                 └─> TUI（Bubble Tea，重写而非直译） 1,526 行
+          └─> app / service / CLI（24 flags）/ WebUI 后端
+                 └─> TUI（Bubble Tea，重写而非直译） 912 行
 ```
 
-也就是说：**并行度已经用尽**，剩下的模块之间存在硬依赖，无法再靠加人来压缩。
-乐观估计服务端可切换还需 **5–7 周**。
+**WebSocket 不在「能用」的关键路径上**：前端是**轮询**（`setInterval` 打 `/health`、
+`/metrics*`、每 2 秒 `/api/logs`），全仓库搜 `new WebSocket` / `/ws/events` 为空。
+`WS /ws/events` 与 `WS /v1/{path}` 可排到 WebUI 可用之后。
+
+也就是说：**主要并行度已经用尽**，剩下的模块之间存在硬依赖。当前同时推进
+`proxy_handler` 与 `management_api` 两条线；再往上（app 装配、CLI）必须等它们定型。
+服务端可切换的乐观估计仍是 **5–7 周**（原方案 12–16 周，靠并行与决策 7/8 砍量压缩）。
 
 ## 已落地的 Go 包
 
@@ -40,11 +46,21 @@ config_operations（进行中）
 | `config` | `config.py` | v1~v4 迁移、原子保存、CRLF 语义 |
 | `keypool` | `key_pool.py` 等 | key 选择、冷却、端点能力缓存 |
 | `runtime` | `runtime.py` `streaming.py` | 租约、流式超时、重试策略 |
-| `auth` | `auth.py` `visitor.py` | `amkr_no_visitor` 构建标签 |
+| `auth` | `auth.py` `visitor.py` | 访客功能常驻（开关语义已取消） |
 | `protocol` | `protocols/*.py` | anthropic / responses / request |
-| `proxysupport` | `proxy_support.py` | 请求构造、宽容解码 |
-| `metrics` | `metrics.py` | （进行中，见下） |
+| `proxysupport` | `proxy_support.py` | 请求构造、宽容解码、头部语义 |
 | `upstream` | （httpx 行为） | 重定向、压缩、连接池、错误分类 |
+| `metrics` | `metrics.py` | SQLite 19 列 schema，无 `user_version` |
+| `configops` | `config_operations.py` | 全部 64 个函数，管理 API 的前置 |
+| `configservice` | `config_service.py` | 读-改-写 + 按路径共享锁 |
+| `unifiedmodel` | `unified_model.py` | unified 目标切换入口 |
+| `health` | `app.py` 的 `/health` | 冻结契约（已按决策 4 删一个字段） |
+| `formatting` | `formatting.py` | 含手写的 urlsplit/urlparse 最小实现 |
+| `logfiles` | `log_files.py` | 日志发现与归档 |
+| `clipboard` | `clipboard.py` | 平台分发 + OSC52 回退 |
+| `servicestatus` | `service_status.py` | schtasks XML / systemd 解析 |
+
+**进行中**：`management_api.py` -> `internal/api`、`proxy_handler.py` -> `internal/proxy`。
 
 ## 自行验证
 
