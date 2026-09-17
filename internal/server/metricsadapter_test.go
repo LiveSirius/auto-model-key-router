@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
+	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/metrics"
 	"github.com/Sparrived/auto-model-key-router/internal/proxy"
 	"github.com/Sparrived/auto-model-key-router/internal/runtime"
@@ -223,6 +224,46 @@ func TestMetricsAdapterRecordStreamMapping(t *testing.T) {
 	}
 	if params.UpstreamModelID == nil || *params.UpstreamModelID != "upstream-a" {
 		t.Errorf("UpstreamModelID = %v", params.UpstreamModelID)
+	}
+}
+
+// TestCloseReleasesMetricsStore 断言关停真的释放了指标库（sqlite 句柄）。
+//
+// 对应 lifespan 的 finally（app.py:69-78）：`await runtime_manager.close()` 会逐代
+// 关闭「没有被其它代共享」的连接池与指标库（runtime/manager.go 的 closeUnused）。
+// 装配层的责任是让每一代持有**自己的**适配器——若所有代共用一个 sink，closeUnused
+// 的共享检测会永远认为「还有人用」，指标库就永远不会关闭。
+//
+// 判据选「关停后再写一行必须失败」：metrics.Store.Close 幂等，光看返回值区分不出
+// 「关过」与「没关过」。
+func TestCloseReleasesMetricsStore(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFixture(t, dir, true, false)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("载入配置失败: %v", err)
+	}
+	app, err := New(Options{ConfigPath: path, Config: loaded, Version: testVersion})
+	if err != nil {
+		t.Fatalf("装配失败: %v", err)
+	}
+	adapter := app.currentMetricsAdapter()
+	if adapter == nil {
+		t.Fatal("当前代没有指标适配器")
+	}
+	if err := adapter.Record(context.Background(), proxy.MetricRecord{ModelID: "m", KeyName: "k"}); err != nil {
+		t.Fatalf("关停前的写入应成功: %v", err)
+	}
+
+	if err := app.Close(); err != nil {
+		t.Fatalf("关停失败: %v", err)
+	}
+	if err := adapter.Record(context.Background(), proxy.MetricRecord{ModelID: "m", KeyName: "k"}); err == nil {
+		t.Error("关停后指标库应已关闭，写入必须失败")
+	}
+	// Close 幂等：再次调用不应 panic 或返回错误。
+	if err := app.Close(); err != nil {
+		t.Errorf("重复关停应无错误，实际 %v", err)
 	}
 }
 
