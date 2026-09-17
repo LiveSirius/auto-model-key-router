@@ -40,9 +40,8 @@ func TestBuildFieldOrderMatchesPython(t *testing.T) {
 		Version:     "4.1.0",
 		ConfigPath:  "/tmp/c.json",
 		LocalAPIKey: "amkr_abc",
-		// 已安装但各模型都没有 visitor key。
-		VisitorFeatureInstalled: true,
-		OpsEnabled:              false,
+		// 各模型都没有 visitor key。
+		OpsEnabled: false,
 		KeyPool: &fakeKeyPool{
 			publicModelIDs:   []string{"gpt-4"},
 			modelIDs:         []string{"gpt-4"},
@@ -51,47 +50,54 @@ func TestBuildFieldOrderMatchesPython(t *testing.T) {
 		},
 		WebUI: WebUI{Available: false, Enabled: false, Mounted: false},
 	}))
-	want := `{"status":"ok","version":"4.1.0","models":["gpt-4"],"config_path":"/tmp/c.json","local_auth_enabled":true,"local_api_key_fingerprint":"63c833584280","visitor_feature_installed":true,"visitor_access_enabled":false,"visitor_key_count":0,"unified_model":null,"native_endpoint_states":{},"ops_enabled":false,"webui_available":false,"webui_enabled":false,"webui_mounted":false,"webui_path":null}`
+	want := `{"status":"ok","version":"4.1.0","models":["gpt-4"],"config_path":"/tmp/c.json","local_auth_enabled":true,"local_api_key_fingerprint":"63c833584280","visitor_access_enabled":false,"visitor_key_count":0,"unified_model":null,"native_endpoint_states":{},"ops_enabled":false,"webui_available":false,"webui_enabled":false,"webui_mounted":false,"webui_path":null}`
 	if got != want {
 		t.Errorf("/health 响应不符\n实际 %s\n期望 %s", got, want)
 	}
 }
 
-// TestBuildVisitorLogicMatchesPython 锁定 visitor 的两个计数字段。
+// TestBuildVisitorCountersMatchDecidedSemantics 锁定 visitor 的两个计数字段。
 //
-// 这是最容易被"顺手简化"成错误的地方：未安装功能时数量必须是 0（app.py:174 的
-// 条件表达式），而不是各模型求和；access_enabled 是「已安装且数量>0」的合取。
-func TestBuildVisitorLogicMatchesPython(t *testing.T) {
+// 与参照实现相比，这里锁的是**已决策的新语义**：访客功能取消开关、常驻，因此
+//   - visitor_key_count 不再在「功能未安装」时归零，恒为各模型之和；
+//   - visitor_access_enabled 退化为单纯的「数量 > 0」。
+//
+// 参照实现原本是 sum(...) if installed else 0 与 installed and count > 0（app.py:174）。
+func TestBuildVisitorCountersMatchDecidedSemantics(t *testing.T) {
 	cases := []struct {
-		installed  bool
+		name       string
 		counts     map[string]int
 		modelIDs   []string
 		wantAccess bool
 		wantCount  int
 	}{
-		{true, map[string]int{"a": 2, "b": 3}, []string{"a", "b"}, true, 5},
-		{true, map[string]int{"a": 0, "b": 0}, []string{"a", "b"}, false, 0},
-		// 功能未安装：即使求和为正，对外也必须报 0。
-		{false, map[string]int{"a": 2, "b": 3}, []string{"a", "b"}, false, 0},
-		{false, map[string]int{"a": 0}, []string{"a"}, false, 0},
-		// 没有任何模型：求和为 0，访问不启用。
-		{true, map[string]int{}, []string{}, false, 0},
+		{"多个模型求和", map[string]int{"a": 2, "b": 3}, []string{"a", "b"}, true, 5},
+		{"全为零则访问不启用", map[string]int{"a": 0, "b": 0}, []string{"a", "b"}, false, 0},
+		{"没有任何模型", map[string]int{}, []string{}, false, 0},
+		{"单个模型有 key", map[string]int{"a": 1}, []string{"a"}, true, 1},
+		// 模型 ID 未出现在计数表里时按 0 计，不应 panic。
+		{"缺计数按零计", map[string]int{}, []string{"a", "b"}, false, 0},
 	}
 	for _, item := range cases {
-		got := Build(Inputs{
-			VisitorFeatureInstalled: item.installed,
-			KeyPool: &fakeKeyPool{
-				publicModelIDs:   item.modelIDs,
-				modelIDs:         item.modelIDs,
-				visitorKeyCounts: item.counts,
-			},
+		t.Run(item.name, func(t *testing.T) {
+			got := Build(Inputs{
+				KeyPool: &fakeKeyPool{
+					publicModelIDs:   item.modelIDs,
+					modelIDs:         item.modelIDs,
+					visitorKeyCounts: item.counts,
+				},
+			})
+			access, _ := got.Lookup("visitor_access_enabled").AsBool()
+			count, _ := got.Lookup("visitor_key_count").AsInt()
+			if access != item.wantAccess || count != int64(item.wantCount) {
+				t.Errorf("counts=%v\n实际 access=%v count=%d\n期望 access=%v count=%d",
+					item.counts, access, count, item.wantAccess, item.wantCount)
+			}
 		})
-		access, _ := got.Lookup("visitor_access_enabled").AsBool()
-		count, _ := got.Lookup("visitor_key_count").AsInt()
-		if access != item.wantAccess || count != int64(item.wantCount) {
-			t.Errorf("installed=%v counts=%v\n实际 access=%v count=%d\n期望 access=%v count=%d",
-				item.installed, item.counts, access, count, item.wantAccess, item.wantCount)
-		}
+	}
+	// 字段本身必须**不再出现**在响应里。
+	if _, exists := Build(Inputs{KeyPool: &fakeKeyPool{}}).LookupOK("visitor_feature_installed"); exists {
+		t.Error("visitor_feature_installed 应已从 /health 删除")
 	}
 }
 

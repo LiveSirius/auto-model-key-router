@@ -6,11 +6,12 @@
 // 处理器里剥出来，才能不启动服务就逐字段对拍。
 //
 // 字段顺序即响应字节顺序，不可重排：canonical 编码器按插入顺序输出，而参照实现是
-// 一个 dict 字面量 + `**webui_status(app)` 展开，顺序固定为
+// 一个 dict 字面量 + `**webui_status(app)` 展开。顺序固定为
 // status, version, models, config_path, local_auth_enabled, local_api_key_fingerprint,
-// visitor_feature_installed, visitor_access_enabled, visitor_key_count, unified_model,
-// native_endpoint_states, ops_enabled, webui_available, webui_enabled, webui_mounted,
-// webui_path。已由 TestBuildFieldOrderMatchesPython 逐字节锁定。
+// visitor_access_enabled, visitor_key_count, unified_model, native_endpoint_states,
+// ops_enabled, webui_available, webui_enabled, webui_mounted, webui_path。
+// 与参照实现相比**少了 visitor_feature_installed**（产品决策删除，见 Build 的说明），
+// 其余顺序原样保留。已由 TestBuildFieldOrderMatchesPython 逐字节锁定。
 package health
 
 import (
@@ -73,8 +74,6 @@ type Inputs struct {
 	ConfigPath string
 	// LocalAPIKey 为本地 API key；为空表示鉴权整体关闭。
 	LocalAPIKey string
-	// VisitorFeatureInstalled 表示 visitor 可选功能是否编译进本二进制。
-	VisitorFeatureInstalled bool
 	// OpsEnabled 表示 ops 接口是否启用。
 	OpsEnabled bool
 	// KeyPool 提供模型与端点读数。
@@ -85,24 +84,26 @@ type Inputs struct {
 
 // Build 构造 /health 的响应体。
 //
-// 三处容易写错、且都是静默不一致的地方：
+// 与参照实现有一处**有意的偏离**（产品决策）：不再输出 `visitor_feature_installed`。
+// 该字段原本表示「本次安装里访客功能是否存在」，而它的判定依据在 Python 是「能否
+// import itsdangerous」（打包系统局限所迫，不是一个语义标记），在 Go 是构建标签。
+// 决策取消开关语义、让访客功能常驻后，该字段不再承载任何信息，故整体删除。连带影响：
 //
-//  1. visitor_key_count 在 visitor 功能**未安装**时恒为 0，即使各模型的 visitor key
-//     数之和大于 0（app.py:174 的条件表达式）。照抄求和会把「功能不可用」报成
-//     「有 N 个 key 可用」。
-//  2. visitor_access_enabled 是「已安装 **且** 数量 > 0」，不是单独的任一项。
-//  3. ops_enabled 走 bool() 强制转换（app.py:177），因此空串为 false、非空串为 true。
+//   - `visitor_key_count` 不再在「功能未安装」时归零（app.py:174 的条件表达式），
+//     恒为各模型之和；
+//   - `visitor_access_enabled` 退化为单纯的「数量 > 0」。
+//
+// 这是**破坏性变更**：按字段名取值的老调用方（CLI、运维脚本、agent 配置工具）需要
+// 同步去掉对该字段的处理。
+//
+// 另注意 ops_enabled 走 bool() 强制转换（app.py:177），空串为 false、非空串为 true；
+// Go 侧 Inputs.OpsEnabled 已是 bool，转换在装配处完成。
 func Build(in Inputs) *canonical.Value {
 	visitorKeyCount := 0
 	if in.KeyPool != nil {
 		for _, modelID := range in.KeyPool.ModelIDs() {
 			visitorKeyCount += in.KeyPool.VisitorKeyCount(modelID)
 		}
-	}
-	installed := in.VisitorFeatureInstalled
-	if !installed {
-		// 功能没编译进来时数量对外必须是 0：暴露真实数量会让调用方以为可用。
-		visitorKeyCount = 0
 	}
 
 	var models *canonical.Value
@@ -139,8 +140,7 @@ func Build(in Inputs) *canonical.Value {
 		canonical.ObjectPair{Key: "config_path", Value: canonical.NewString(in.ConfigPath)},
 		canonical.ObjectPair{Key: "local_auth_enabled", Value: canonical.NewBool(in.LocalAPIKey != "")},
 		canonical.ObjectPair{Key: "local_api_key_fingerprint", Value: canonical.NewString(formatting.KeyFingerprint(in.LocalAPIKey))},
-		canonical.ObjectPair{Key: "visitor_feature_installed", Value: canonical.NewBool(installed)},
-		canonical.ObjectPair{Key: "visitor_access_enabled", Value: canonical.NewBool(installed && visitorKeyCount > 0)},
+		canonical.ObjectPair{Key: "visitor_access_enabled", Value: canonical.NewBool(visitorKeyCount > 0)},
 		canonical.ObjectPair{Key: "visitor_key_count", Value: canonical.NewIntValue(int64(visitorKeyCount))},
 		canonical.ObjectPair{Key: "unified_model", Value: unifiedModel},
 		canonical.ObjectPair{Key: "native_endpoint_states", Value: nativeStates},
