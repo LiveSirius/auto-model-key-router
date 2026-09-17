@@ -493,7 +493,6 @@ async def _execute_attempt(
             upstream_model_id=key.upstream_model or context.model_id,
         )
         await runtime.key_pool.mark_failure(context.model_id, key.name)
-        await _broadcast_metrics(runtime)
         return AttemptOutcome(
             retry_error=JSONResponse(
                 {"error": {"message": f"上游请求失败: {exc.__class__.__name__}"}},
@@ -583,7 +582,6 @@ async def _execute_attempt(
                 upstream_model_id=key.upstream_model or context.model_id,
             )
             await runtime.key_pool.mark_failure(context.model_id, key.name)
-            await _broadcast_metrics(runtime)
             return AttemptOutcome(
                 retry_error=JSONResponse(
                     {"error": {"message": f"上游请求失败: {exc.__class__.__name__}"}},
@@ -734,7 +732,6 @@ async def _execute_attempt(
                     upstream_model_id=key.upstream_model or context.model_id,
                 )
                 await runtime.key_pool.mark_failure(context.model_id, key.name)
-                await _broadcast_metrics(runtime)
                 return AttemptOutcome(
                     response=_json_error_response_from_content(
                         response, content, anthropic=context.path == "messages"
@@ -1002,15 +999,6 @@ async def _record_upstream_response(
         await state.key_pool.mark_failure(
             model_id, key_name, response.status_code, retry_after_seconds(response)
         )
-    await _broadcast_metrics(state)
-
-
-async def _broadcast_metrics(state: RuntimeResources) -> None:
-    """向 WebSocket 客户端推送最新 metrics 快照（仅当有客户端连接时）。"""
-    event_bus = getattr(state, "event_bus", None)
-    if event_bus is not None and event_bus.client_count > 0:
-        snapshot = await state.metrics.snapshot()
-        await event_bus.broadcast("metrics_snapshot", snapshot)
 
 
 def _elapsed_ms(started: float) -> int:

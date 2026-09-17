@@ -20,6 +20,8 @@
 
 ### Fixed
 
+- 删除 `proxy_handler._broadcast_metrics()`：它从 `RuntimeResources` 上 `getattr(state, "event_bus", None)`，而 `event_bus` 只挂在 `app.state` 上，该函数因此恒为空操作；真正的节流广播在 `app.py`。留着它是个隐患 —— 一旦有人把 `event_bus` 挂到 `RuntimeResources`，每次上游失败都会在请求路径上同步跑一次无界 `snapshot()`，也就是一次 3–5 秒的全表扫描。
+
 - 修复 `EventBus.broadcast("client_count", ...)` 漏掉 `await`：`/ws/events` 的客户端数量事件从未真正发出（只在日志里留下 `RuntimeWarning: coroutine ... was never awaited`）。
 - 修复服务退出时的 sqlite **原生崩溃**（`Windows fatal exception: access violation`，进程直接挂掉）。`MetricsStore` 用 `asyncio.Lock` 串行化连接访问，再用 `asyncio.to_thread` 执行查询；但 `to_thread` 无法取消 —— 任务被 cancel 时 await 立刻抛出、锁随之释放，**工作线程仍在用同一个连接执行 SQL**，随后 `close()` 拿到刚释放的锁并关闭连接，正在查询的线程就踩到已失效的 sqlite 句柄。现在互斥下沉到工作线程（`threading.Lock`）：取消只能中断 await、中断不了线程，而 `close()` 同样要抢这把锁，于是自然排在所有在途查询之后；取消路径也会先等线程收尾再抛出。这个缺陷此前被上面那个漏掉的 `await` 掩盖着（时序恰好错开），修好 `await` 后立即暴露。
 - 修复 WebUI 图表读数气泡里多出一行 `null`：原生 `replaceChildren` 会把 `null` 子项字符串化成文本节点 `"null"`，与 `dom.js` 里会过滤空值的 `append()` 行为不同，于是每个**已完结**的点都在读数下多显示一行 `null`（只有「累加中」的尾桶才看不到）。折线图与 Token 堆叠柱两处气泡、以及统一模型编辑表单（路由方式非「固定 Key」时）都改用会过滤空值的 `mount()`。同时补上 `tests/webui_tip_probe.mjs`：用忠实还原 `replaceChildren` 语义的 DOM 垫片驱动真实的 `charts.js`，此前的垫片一律复用会过滤空值的 `append()`，恰好把这个 bug 藏了过去。
