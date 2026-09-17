@@ -38,6 +38,25 @@ func DumpsIndent(v *Value, indent int) string {
 	return b.String()
 }
 
+// DumpsOrdered 按 canonical 紧凑形式序列化，但**保留键插入顺序**。
+//
+// 等价于 Python 的
+//
+//	json.dumps(obj, ensure_ascii=False, separators=(",", ":"))
+//
+// 与 Dumps 的唯一区别是不排序。这是协议转换层的 SSE 编码形式
+// （protocols/anthropic.py:227、protocols/responses.py 的 _anthropic_sse /
+// _responses_sse）：那里用紧凑分隔符但**不**排序，键顺序即 Python dict 的插入
+// 顺序，客户端可依赖它。
+//
+// 注意不能拿 Dumps 代替：排序会改变事件字段顺序，虽然 JSON 语义等价，但逐字节
+// 对比的测试与依赖顺序的下游都会失败。
+func DumpsOrdered(v *Value) string {
+	var b strings.Builder
+	encodeValue(&b, v, encodeOptions{}, 0)
+	return b.String()
+}
+
 // RevisionHash 返回 canonical 形式的 sha256 十六进制摘要。
 //
 // 对应 management_api.py:1187 的 _config_revision 与 proxy_handler.py:368 的
