@@ -235,22 +235,19 @@ Python 侧基线：`python -X utf8 -m pytest -q` → **485 passed**（约 250 �
 **然后是阶段 3**：按下面的顺序表依次删除 Python。
 ## 历史批次（已完成）
 
+原计划的分步顺序，全部已完成（保留仅供参考）：
 
-1. 收尾并提交 `internal/metrics`（SQLite 19 列 schema、7 索引、无 `user_version`、
-   `created_at` 为 Asia/Shanghai 的 isoformat 字符串）。
-2. 收尾并提交 `internal/upstream` 与协议测试。
-3. `internal/configops`（`config_operations.py`，1,282 行）→ 解锁管理 API。
-4. `proxy_handler`（1,400 行，需要 metrics 定型后开工）。此步必须一并落地：
-   - 决策 1 的**上游调用上限与日志**；
-   - 决策 2 剩余的 **multipart/form-data 支持**；
-   - 决策 5 的**接口边界 400 校验**（也可放在第 6 步的装配层）。
-5. `management_api` + `config_editor`。
-6. `app` 装配、`service`、CLI、WebUI 后端。
-7. TUI 重写（`tui.py` 912 行）。注意 `dashboard.py` 与 `logs_tui.py` 已按决策 7
-   砍掉，不要顺手一并移植。
-8. Python 退役。`update.py` 已按决策 8 砍掉（改由 `go install` / 包管理器分发），
-   不再移植。
-
+1. ✅ `internal/metrics`（SQLite 19 列 schema、7 索引、无 `user_version`、`created_at` 为
+   Asia/Shanghai 的 isoformat 字符串）。
+2. ✅ `internal/upstream` 与协议测试。
+3. ✅ `internal/configops`（`config_operations.py`）→ 解锁管理 API。
+4. ✅ `proxy_handler`（含决策 1 的上游调用上限与日志、决策 2 的 multipart、决策 5 的边界校验）。
+5. ✅ `management_api`（47 条路由）。`config_editor` **当时未做**，见下面的当前批次。
+6. ✅ `app` 装配（`internal/server`）、`internal/service` 的**状态解析**（`servicestatus`）、
+   最小 CLI、WebUI 后端；`service` 的管理动作与完整 CLI 见当前批次。
+7. ✅ TUI 重写（`tui.py` → `internal/tui`）。`dashboard.py` 与 `logs_tui.py` 按决策 7 砍掉。
+8. ⏳ Python 退役——即下面的阶段 3，尚未开始。
+   （`update.py` 按决策 8 只保留版本检查，自更新不移植。）
 ## 阶段 3：Python 退役顺序（已实测计算，非估计）
 
 用 AST 解析全部 Python 模块的真实 import 边，算出「反向依赖数」与「还被哪些语料生成器
