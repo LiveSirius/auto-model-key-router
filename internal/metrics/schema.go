@@ -89,7 +89,7 @@ const usageAggregates = `
     COUNT(*) AS requests,
     COALESCE(SUM(success), 0) AS successes,
     COALESCE(SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END), 0) AS failures,
-    COALESCE(SUM(success), 0) AS retries,
+    COALESCE(SUM(retried), 0) AS retries,
     COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
     COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
     COALESCE(SUM(total_tokens), 0) AS total_tokens,
