@@ -415,6 +415,35 @@ CI 侧：`ci.yml` 的 `python` 作业在这些退役完毕后整体删除，只�
 **迁移期间的行为约束**：不要杀 `pythonw.exe` 进程、不要动 `%LOCALAPPDATA%\AutoModelKeyRouter`
 下的配置与指标库、不要结束那个计划任务。本次会话已遵守（所有演示与测试的落盘路径均钉在
 `%TEMP%`）。
+## 已用**真实生产库**验证读取兼容性（切换风险最大的一项）
+
+切换最怕的是：Go 版读不了现有生产数据，或读出来的数与 Python 不一致。这项已实测通过。
+
+**方法**（原件只读、绝不打开）：
+
+1. 把生产库连同 `-wal`/`-shm` 复制到 `%TEMP%`（70,012,928 + 4,181,832 + 32,768 字节）；
+2. Go 侧用 `internal/metrics.Open` 打开副本，跑 `Snapshot(nil, nil)`（全历史）与
+   `TimeSeries{Hours: 24*30, BucketSeconds: 86400}`，用 `canonical.Dumps` 导出 JSON；
+3. Python 侧用 `MetricsStore` 打开**同一副本**，跑 `snapshot()` 与
+   `time_series(hours=24*30, bucket_seconds=86400)`，导出 JSON；
+4. 两侧把 ISO 时间戳归一化为 `<TS>`（因为两侧的 now 必然不同）后**解析成结构逐项比对**。
+
+**结果**：
+
+```
+  snapshot  一致  points=0
+  series    一致  points=31
+```
+
+即 Go 版读取该 70 MB 生产库得到的**结构与数值与 Python 完全一致**（31 个日桶全对）。
+
+过程中踩到的一个坑值得记下：`canonical.Value` 有两个渲染入口——`PyStr()` 产出的是
+**Python repr**（单引号、`None`），不是合法 JSON；要比对必须用 `canonical.Dumps()`。
+我第一次用 `PyStr()` 导出，Python 侧 `json.loads` 直接报
+`Expecting property name enclosed in double quotes`。
+
+**未验证**：只验证了**读**。Go 版**写**入该库后 Python 能否继续读、以及双向交替读写，
+尚未验证——切换时若需要回退到 Python，这一点需要先测。
 ## 提交约定
 
 按模块独立提交，Conventional Commits：`<type>(<scope>): <中文摘要>`，正文说明
