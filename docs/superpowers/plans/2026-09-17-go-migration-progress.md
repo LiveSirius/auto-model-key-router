@@ -386,6 +386,35 @@ github := CheckLatestRelease(...)
 
 CI 侧：`ci.yml` 的 `python` 作业在这些退役完毕后整体删除，只留 `go` 作业与 `node`
 前端模块检查（`webui_module_check.mjs`，它不依赖后端语言）。
+## 切换是一次真实的运维操作（实测：开发机上 Python 版仍在服务中）
+
+**发现**：迁移期间开发机上的 Python AMKR 是**活的、且正在被使用**。实测证据：
+
+- Windows 计划任务 `\AutoModelKeyRouter` 状态 Running，**Last Run 2026/9/17 20:09:59**
+  （早于本次 Go 迁移），运行的是已安装的 Python：
+  `uv\tools\auto-model-key-router\Scripts\pythonw.exe -m auto_model_key_router.main
+  --config %LOCALAPPDATA%\AutoModelKeyRouter\router-config.json --serve-foreground`
+- 其 `server.log` 在观察期间持续出现 `POST /v1/chat/completions 200`，**每隔数秒一次**
+- 其生产指标库 `metrics.sqlite3` 已达 **70 MB**
+
+（我一度怀疑是自己的语料门禁写脏了那个库，核对后排除：生成器把 `metrics_db_path` 钉在
+`%TEMP%`，且该库的 01:52 写入恰好对应活服务的一次真实请求。）
+
+**对阶段 3 的影响**：Python 的退役不是"删文件"就完事，而是**替换一个正在服务的进程**。
+切换清单需要包含：
+
+1. 停掉计划任务 / 后台服务（`--stop` 或 `schtasks /end`），确认进程退出、PID 文件清理；
+2. 迁移配置与**生产指标库**（70 MB SQLite：Go 侧 schema 已逐字节对齐、无 `user_version`、
+   19 列 7 索引，故应可直接沿用；但切换前必须先备份）；
+3. 装 Go 二进制并以其服务管理重建计划任务/systemd unit（这正是阶段 1 的 `internal/service`
+   要提供的能力）；
+4. 保留回退路径：Python 版与配置备份在观察期内不要删，以便随时切回；
+5. `/health` 的 **版本号会变**（Python `4.1.0` → Go 版本），自建的监控/探针若按版本断言需同步；
+6. `updatecheck` 的语义变更（见上一章）应在切换同时处理，否则用户永远收不到更新提示。
+
+**迁移期间的行为约束**：不要杀 `pythonw.exe` 进程、不要动 `%LOCALAPPDATA%\AutoModelKeyRouter`
+下的配置与指标库、不要结束那个计划任务。本次会话已遵守（所有演示与测试的落盘路径均钉在
+`%TEMP%`）。
 ## 提交约定
 
 按模块独立提交，Conventional Commits：`<type>(<scope>): <中文摘要>`，正文说明
