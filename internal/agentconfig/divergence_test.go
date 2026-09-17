@@ -1,0 +1,359 @@
+package agentconfig
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 刻意差异的具名测试
+//
+// doc.go 里列的每一条差异（D1-D7）在这里都有一条同名测试。这样「差异」不是
+// 注释里的说法，而是可执行、可失败的契约；将来若有人改动行为，会先撞到这些
+// 测试，被迫回来更新 doc.go。
+// ─────────────────────────────────────────────────────────────────────────────
+
+// TestDivergenceHomeIsInjected 固定 D1：目标路径完全由 Options.BaseDir 推导，
+// 绝不读开发者真实的 home。
+//
+// 这是本包最重要的一条安全属性：任何一次漏注入都会把用户的 ~/.claude 等目录
+// 交给测试改写。
+func TestDivergenceHomeIsInjected(t *testing.T) {
+	root := t.TempDir()
+	pinBaseEnv(t, root)
+
+	cases := []struct {
+		agent string
+		want  string
+	}{
+		{ClaudeCode, filepath.Join(root, ".claude", "settings.json")},
+		{Codex, filepath.Join(root, ".codex", "config.toml")},
+		{PiAgent, filepath.Join(root, ".pi", "agent", "models.json")},
+	}
+	for _, c := range cases {
+		got, err := TargetPath(root, c.agent)
+		if err != nil {
+			t.Fatalf("TargetPath(%s) 失败: %v", c.agent, err)
+		}
+		if got != c.want {
+			t.Errorf("%s 的目标路径期望 %q，实际 %q", c.agent, c.want, got)
+		}
+		if !strings.HasPrefix(got, root) {
+			t.Errorf("%s 的目标路径 %q 逃出了注入的 BaseDir %q", c.agent, got, root)
+		}
+	}
+
+	backup, err := BackupPath(Options{BaseDir: root}, Codex)
+	if err != nil {
+		t.Fatalf("BackupPath 失败: %v", err)
+	}
+	if !strings.HasPrefix(backup, root) {
+		t.Errorf("默认备份路径 %q 逃出了注入的 BaseDir（LOCALAPPDATA 没被钉住？）", backup)
+	}
+}
+
+// TestDivergenceStatusModeEmptyMeansNone 固定 D2：Status.Mode 用空串表示 None。
+func TestDivergenceStatusModeEmptyMeansNone(t *testing.T) {
+	root := t.TempDir()
+	pinBaseEnv(t, root)
+	data := loadCorpus(t)
+	target := filepath.Join(root, "config.toml")
+	writeFile(t, target, "# 只有注释\n")
+	opts := Options{BaseDir: root, TargetPath: target, BackupPath: filepath.Join(root, "backup.json")}
+
+	// 还没有备份：Python 的 mode 是 None，Go 侧必须是空串而不是 "native" 之类。
+	status, err := GetStatus(Codex, opts)
+	if err != nil {
+		t.Fatalf("GetStatus 失败: %v", err)
+	}
+	if status.Mode != "" {
+		t.Errorf("没有备份时 Mode 应为空串（对应 Python 的 None），实际 %q", status.Mode)
+	}
+	if _, err := Configure(Codex, data.routerConfig(t, "alpha"), ModeUnifiedModel, opts); err != nil {
+		t.Fatalf("Configure 失败: %v", err)
+	}
+	status, err = GetStatus(Codex, opts)
+	if err != nil {
+		t.Fatalf("GetStatus 失败: %v", err)
+	}
+	if status.Mode != ModeUnifiedModel {
+		t.Errorf("已应用时 Mode 期望 %q，实际 %q", ModeUnifiedModel, status.Mode)
+	}
+	// 空串不会与任何合法模式撞车：合法值只有 native / unified-model。
+	for _, mode := range []string{ModeNative, ModeUnifiedModel} {
+		if mode == "" {
+			t.Fatal("空串被当成了合法模式")
+		}
+	}
+}
+
+// TestDivergenceErrorTexts 固定 D3：模块自身的错误文本逐字一致；底层解析器的
+// 错误只保证前缀一致（不同解析器的措辞必然不同）。
+func TestDivergenceErrorTexts(t *testing.T) {
+	exact := []struct {
+		name string
+		run  func(root string) error
+		want string
+	}{
+		{
+			name: "unsupported_agent",
+			run: func(root string) error {
+				_, err := TargetPath(root, "nope")
+				return err
+			},
+			want: "不支持的 Agent: nope",
+		},
+		{
+			name: "unsupported_mode",
+			run: func(root string) error {
+				data := loadCorpus(t)
+				_, err := Configure(Codex, data.routerConfig(t, "alpha"), "bogus", Options{
+					BaseDir: root, TargetPath: filepath.Join(root, "c.toml"),
+					BackupPath: filepath.Join(root, "b.json"),
+				})
+				return err
+			},
+			want: "不支持的 Agent 路由模式: bogus",
+		},
+		{
+			name: "pi_requires_unified",
+			run: func(root string) error {
+				data := loadCorpus(t)
+				_, err := Configure(PiAgent, data.routerConfig(t, "alpha"), ModeNative, Options{
+					BaseDir: root, TargetPath: filepath.Join(root, "m.json"),
+					BackupPath: filepath.Join(root, "b.json"),
+				})
+				return err
+			},
+			want: "Pi Agent 仅支持 unified-model 模式",
+		},
+		{
+			name: "missing_unified_model",
+			run: func(root string) error {
+				data := loadCorpus(t)
+				_, err := Configure(Codex, data.routerConfig(t, "no_unified"), ModeUnifiedModel, Options{
+					BaseDir: root, TargetPath: filepath.Join(root, "c.toml"),
+					BackupPath: filepath.Join(root, "b.json"),
+				})
+				return err
+			},
+			want: "请先配置 unified-model，再应用 Codex 路由配置",
+		},
+		{
+			name: "empty_local_key",
+			run: func(root string) error {
+				data := loadCorpus(t)
+				_, err := Configure(ClaudeCode, data.routerConfig(t, "empty_key"), ModeUnifiedModel, Options{
+					BaseDir: root, TargetPath: filepath.Join(root, "s.json"),
+					BackupPath: filepath.Join(root, "b.json"),
+				})
+				return err
+			},
+			want: "本地鉴权 key 为空，无法配置 Agent",
+		},
+	}
+	for _, c := range exact {
+		t.Run("exact/"+c.name, func(t *testing.T) {
+			root := t.TempDir()
+			pinBaseEnv(t, root)
+			err := c.run(root)
+			var configErr *ConfigError
+			if !errors.As(err, &configErr) {
+				t.Fatalf("期望 *ConfigError %q，实际 %v", c.want, err)
+			}
+			if configErr.Message != c.want {
+				t.Errorf("错误文本期望 %q，实际 %q", c.want, configErr.Message)
+			}
+		})
+	}
+
+	// 底层解析器错误：前缀逐字一致，剩余部分是各自解析器的措辞。
+	prefixCases := []struct {
+		name   string
+		agent  string
+		path   string
+		init   string
+		prefix string
+	}{
+		{"claude_invalid_json", ClaudeCode, "settings.json", "{ 不是 json\n",
+			"Claude Code 配置不是有效的 UTF-8 JSON: "},
+		{"pi_invalid_json", PiAgent, "models.json", "{ 不是 json\n",
+			"Pi Agent 配置不是有效的 UTF-8 JSON: "},
+		{"codex_invalid_toml", Codex, "config.toml", "model = \"未闭合\n",
+			"Codex 配置不是有效的 UTF-8 TOML: "},
+		{"claude_invalid_utf8", ClaudeCode, "settings.json", string([]byte{0xff, 0xfe}) + "\n",
+			"Claude Code 配置不是有效的 UTF-8 JSON: "},
+	}
+	for _, c := range prefixCases {
+		t.Run("prefix/"+c.name, func(t *testing.T) {
+			root := t.TempDir()
+			pinBaseEnv(t, root)
+			data := loadCorpus(t)
+			target := filepath.Join(root, c.path)
+			writeFile(t, target, c.init)
+			_, err := Configure(c.agent, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+				BaseDir: root, TargetPath: target, BackupPath: filepath.Join(root, "b.json"),
+			})
+			var configErr *ConfigError
+			if !errors.As(err, &configErr) {
+				t.Fatalf("期望 *ConfigError，实际 %v", err)
+			}
+			if !strings.HasPrefix(configErr.Message, c.prefix) {
+				t.Errorf("错误前缀期望 %q，实际 %q", c.prefix, configErr.Message)
+			}
+		})
+	}
+}
+
+// TestDivergenceBackupJSONUsesEnsureASCII 固定 D4：备份文件是
+// json.dumps(indent=2, ensure_ascii=True) + "\n"，与写 Agent 配置时的
+// ensure_ascii=False 相反。
+func TestDivergenceBackupJSONUsesEnsureASCII(t *testing.T) {
+	root := t.TempDir()
+	pinBaseEnv(t, root)
+	data := loadCorpus(t)
+	// 目标路径里带非 ASCII，逼出 ensure_ascii=True 的差别。
+	target := filepath.Join(root, "中文目录", "config.toml")
+	backup := filepath.Join(root, "备份", "codex.json")
+	writeFile(t, target, "model = \"gpt-5\"\n")
+	if _, err := Configure(Codex, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+		BaseDir: root, TargetPath: target, BackupPath: backup,
+	}); err != nil {
+		t.Fatalf("Configure 失败: %v", err)
+	}
+	raw := readFile(t, backup)
+	if !strings.Contains(raw, `\u4e2d\u6587\u76ee\u5f55`) {
+		t.Errorf("备份里的中文路径应被 \\uXXXX 转义（ensure_ascii=True），实际:\n%s", raw)
+	}
+	if !strings.HasSuffix(raw, "}\n") {
+		t.Error("备份缺少末尾换行")
+	}
+	if !strings.Contains(raw, "\n  \"version\": 2,\n") {
+		t.Error("备份不是 indent=2 且键序为插入顺序")
+	}
+
+	// 对照：写 Agent 配置时是 ensure_ascii=False，中文必须原样出现。
+	piTarget := filepath.Join(root, "models.json")
+	if _, err := Configure(PiAgent, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+		BaseDir: root, TargetPath: piTarget, BackupPath: filepath.Join(root, "b2.json"),
+	}); err != nil {
+		t.Fatalf("Configure(Pi) 失败: %v", err)
+	}
+	if strings.Contains(readFile(t, piTarget), `\u`) {
+		t.Error("Agent 配置里出现了 \\u 转义，说明没有用 ensure_ascii=False")
+	}
+}
+
+// TestDivergenceBackupFieldsAreZeroValued 固定 D5：备份字段缺失时 Go 一律当
+// 空值 / 假值处理，不抛 KeyError。
+func TestDivergenceBackupFieldsAreZeroValued(t *testing.T) {
+	root := t.TempDir()
+	pinBaseEnv(t, root)
+	target := filepath.Join(root, "config.toml")
+	backup := filepath.Join(root, "backup.json")
+	writeFile(t, target, "model = \"gpt-5\"\n")
+	// 一份「结构合法但字段残缺」的备份：缺 original_exists / original_content。
+	writeFile(t, backup, `{
+  "version": 2,
+  "agent": "codex",
+  "mode": "unified-model",
+  "target_path": "`+jsonEscapePath(target)+`",
+  "applied_sha256": "0"
+}`+"\n")
+
+	status, err := GetStatus(Codex, Options{BaseDir: root, TargetPath: target, BackupPath: backup})
+	if err != nil {
+		t.Fatalf("GetStatus 失败: %v", err)
+	}
+	// backup_available 只看 (agent, target_path)，与 applied_sha256 无关
+	// （agent_config.py:103）；applied_sha256 只影响 current_is_applied。
+	if !status.BackupAvailable {
+		t.Error("备份属于该 Agent 且目标路径一致，backup_available 应为 true")
+	}
+	if status.CurrentIsApplied {
+		t.Error("applied_sha256 与磁盘不符，current_is_applied 应为 false")
+	}
+	// 磁盘内容与 applied_sha256 不符，等价于「用户又改过」，因此回退必须成功，
+	// 且 original_exists 缺失按 false 处理 —— 结果是把目标文件删掉。
+	result, err := Rollback(Codex, Options{BaseDir: root, TargetPath: target, BackupPath: backup})
+	if err != nil {
+		t.Fatalf("Rollback 失败: %v", err)
+	}
+	if !result.Restored {
+		t.Error("Rollback 应报告 restored=true")
+	}
+	if _, statErr := os.Stat(target); statErr == nil {
+		t.Error("original_exists 缺失应按 false 处理：目标文件应被删除")
+	}
+}
+
+// TestDivergenceUnsupportedTomlShapesError 固定 D6：Go 侧不支持的 TOML 形状
+// 一律显式报错、绝不写出任何文件。
+//
+// 这一类是「宁可报错也不丢数据」的取舍：Python tomlkit 在这些形状上要么抛未
+// 包装的 TypeError，要么产出「部分行内、部分多行」的古怪结果，Go 都不复刻。
+func TestDivergenceUnsupportedTomlShapesError(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+	}{
+		{"dotted_key", "model_providers.OpenAI.name = \"dotted\"\n"},
+		{"inline_table", "model_providers = { OpenAI = { name = \"inline\" } }\n"},
+		{"array_of_tables", "[[model_providers.OpenAI]]\nname = \"aot\"\n"},
+		{"array_value", "model_providers = [1, 2]\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			root := t.TempDir()
+			pinBaseEnv(t, root)
+			data := loadCorpus(t)
+			target := filepath.Join(root, "config.toml")
+			backup := filepath.Join(root, "backup.json")
+			writeFile(t, target, c.input)
+
+			_, err := Configure(Codex, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+				BaseDir: root, TargetPath: target, BackupPath: backup,
+			})
+			var configErr *ConfigError
+			if !errors.As(err, &configErr) {
+				t.Fatalf("期望显式 *ConfigError，实际 %v", err)
+			}
+			// 硬约束：报错时绝不能留下半成品。
+			if got := readFile(t, target); got != c.input {
+				t.Errorf("报错后目标文件被改动\n期望 %q\n实际 %q", c.input, got)
+			}
+			if _, statErr := os.Stat(backup); statErr == nil {
+				t.Error("报错时不应写出备份文件")
+			}
+		})
+	}
+}
+
+// TestDivergenceResolvePathIsLexical 固定 D7：路径规范化只做词法处理
+// （filepath.Abs + Clean），并断言它与 Python 的
+// Path.resolve(strict=False) 在语料里给出同样的字符串。
+func TestDivergenceResolvePathIsLexical(t *testing.T) {
+	root := t.TempDir()
+	pinBaseEnv(t, root)
+	data := loadCorpus(t)
+	checked := 0
+	for _, c := range data.Paths {
+		if len(c.Inputs) == 0 {
+			continue
+		}
+		got, err := resolvePath(root, corpusPath(root, c.Inputs[0]))
+		if err != nil {
+			t.Fatalf("resolvePath(%q) 失败: %v", c.Inputs[0], err)
+		}
+		if portablePath(root, got) != *c.Want {
+			t.Errorf("resolvePath(%q) 期望 %q，实际 %q", c.Inputs[0], *c.Want, portablePath(root, got))
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatal("语料里没有 _resolved_path 用例，本测试失去意义")
+	}
+}
