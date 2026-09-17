@@ -135,6 +135,10 @@ jobs:
       - name: 语料新鲜度（updatecheck）
         run: python -X utf8 scripts/gen_updatecheck_corpus.py --check
 
+      - name: 语料新鲜度（management API）
+        # 与 proxy/upstream 同属"必须驱动真实 Python 应用"的一类，且是其中**最慢**的
+        # 一条：本机实测约 240s。放在 proxy 之前，超时问题可一眼归因。
+        run: python -X utf8 scripts/gen_management_api_corpus.py --check
       - name: 语料新鲜度（proxy handler）
         # 与 upstream 那条同属"必须驱动真实 Python 应用"的一类：它用 ASGITransport +
         # 脚本化 MockTransport 跑真实 FastAPI 应用，本机实测约 113s。
