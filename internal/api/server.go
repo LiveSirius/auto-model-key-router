@@ -15,6 +15,8 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/configops"
 	"github.com/Sparrived/auto-model-key-router/internal/configservice"
+	"github.com/Sparrived/auto-model-key-router/internal/health"
+	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
 
 // httpError 复刻 FastAPI 的 HTTPException：响应体固定是 {"detail": "..."}。
@@ -65,6 +67,10 @@ type Server struct {
 	ConfigPath string
 	// Reload 对应 create_app 注入的 reload_config 回调（_reload_config_if_changed）。
 	// 为 nil 表示不做热重载，仅测试与嵌入场景使用。
+	//
+	// 实现方必须复刻 app.py:443 的 mtime 门：**文件不存在（mtime 为 0）时直接返回**。
+	// 不能图省事在这里无条件调 config.Load——它在文件缺失时会创建一份空配置并返回
+	// 成功，会让后续鉴权拿着空 local_api_key 失败（运维面语料已锁定该行为）。
 	Reload func()
 	// CurrentConfig 返回「当前生效」的配置，对应
 	// `lease.resources.config`。为 nil 时回落到从 ConfigPath 现场加载。
@@ -99,6 +105,42 @@ type Server struct {
 	// config 包的实现；语料回放时注入固定值。
 	GenerateLocalAPIKey func() (string, error)
 
+	// —— 运维面（ops_api.py）需要的开关与接缝，全部只在 OpsEnabled 为真时生效 ——
+
+	// OpsEnabled 控制是否注册 7 条运维路由，对应 app.py:142-146 的 enable_ops
+	// （None 时跟随 config.ops_enabled，而配置里该项默认 true）。
+	//
+	// 为 false 时这些 URL **完全不注册**，落进兜底 404（{"detail":"Not Found"}），
+	// 与 Python 的行为一致（迁移方案：运维接口在 ops_enabled=false 时整体 404）。
+	// 零值是 false，因此既不改变既有管理路由的行为，也要求装配层显式打开。
+	OpsEnabled bool
+	// Version 是 `GET /api/tool` 汇报的进程版本，对应 ops_api.py:163 的 __version__。
+	// 装配层用 ldflags 注入的版本号填充（迁移方案「版本单一来源」）；为空时响应里
+	// version 是空串——不会静默冒充某个版本。
+	//
+	// 它是**独立**来源：真实路径下 CheckUpdate 接缝的 CurrentVersion 恰好等于它
+	// （check_latest_version 的默认 current_version 就是 __version__ 且不返回），但
+	// 两者语义不同，因此不互相回退——装配层漏填时 version 会是空串，一眼可见。
+	Version string
+	// LogTail 读取日志尾部，对应 ops_api.py:93 的 _tail。nil 表示用内置实现。
+	//
+	// 留接缝是为了确定性地覆盖「读取失败仍返回 200 + error 文本」这条分支：真实文件
+	// 系统上「is_file() 为真、随后 stat/open 失败」只能靠竞态或权限构造，无法进语料。
+	LogTail func(path string, limit int) (string, bool, error)
+	// WebUIStatus 返回 webui_status(app) 的输入，对应 webui.py:48。nil 表示
+	// 「未挂载、不可用、未启用」的零值。复用 health.WebUI 以与 /health 同一套语义。
+	WebUIStatus func() health.WebUI
+	// UpdateFetcher 是版本检查的 HTTP 取回器；仅当 CheckUpdate 为 nil 时用于
+	// internal/updatecheck。nil 表示真实网络。
+	UpdateFetcher updatecheck.Fetcher
+	// RunServiceAction 对应 ops_api.py:103 的 _run_service_action：返回已经渲染成
+	// 纯文本的动作输出。service.py 尚未移植，nil 表示未接线（handler 返回 500 而
+	// 不是假装成功）。实现方按 OpsServiceTargets 分派。
+	RunServiceAction func(action string, configPath string, cfg *config.RouterConfig) (string, error)
+	// Integrations 是 agent_config.py 的接缝（见 OpsIntegrations）。nil 表示未接线，
+	// 三条集成路由会响亮失败而不是返回空列表。
+	Integrations *OpsIntegrations
+
 	// writeMu 对应 app.state.config_write_lock：串行化「读-改-写」。
 	writeMu sync.Mutex
 	// probesMu 保护 probes 表；Python 靠单线程事件循环天然串行。
@@ -126,10 +168,17 @@ type UpdateCheckResult struct {
 	Error           string
 }
 
-// Handler 返回注册了全部 47 条路由的 http.Handler。
+// Handler 返回注册了全部 47 条路由的 http.Handler；OpsEnabled 为真时额外注册 7 条
+// 运维路由（ops_api.py 的 register_ops_api），因此 URL 空间与 Python 完全一致。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.register(mux)
+	if s.OpsEnabled {
+		// 与 Python 相同：运维面注册在同一个应用上，复用同一套鉴权与错误形状。
+		// OpsEnabled 为 false 时一条都不注册——参照实现里 /api/logs 等会落进
+		// Starlette 的 404 {"detail":"Not Found"}，这里由下面的兜底处理器复刻。
+		s.RegisterOps(mux)
+	}
 	// 未注册路径在 FastAPI 下是 {"detail":"Not Found"}（404 JSON），而 ServeMux
 	// 默认输出纯文本 "404 page not found"。注册一个兜底模式以对齐常见路径。
 	//
