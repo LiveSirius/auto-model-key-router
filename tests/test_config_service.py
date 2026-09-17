@@ -42,8 +42,8 @@ def test_stream_timeouts_have_defaults_and_accept_custom_values() -> None:
 
     custom = RouterConfig.from_dict(custom_data)
 
-    assert defaults.stream_first_byte_timeout == 90
-    assert defaults.stream_idle_timeout == 180
+    assert defaults.stream_first_byte_timeout == 60
+    assert defaults.stream_idle_timeout == 60
     assert custom.stream_first_byte_timeout == 12.5
     assert custom.stream_idle_timeout == 34.5
 

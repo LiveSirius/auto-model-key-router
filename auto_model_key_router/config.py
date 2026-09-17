@@ -187,8 +187,8 @@ def empty_config_dict() -> dict[str, Any]:
         "default_base_url": "https://api.openai.com",
         "upstream_routes": {},
         "request_timeout": 60,
-        "stream_first_byte_timeout": 90,
-        "stream_idle_timeout": 180,
+        "stream_first_byte_timeout": 60,
+        "stream_idle_timeout": 60,
         "max_retries": 2,
         "key_failure_threshold": 2,
         "key_cooldown_seconds": 60,
@@ -719,8 +719,8 @@ class RouterConfig:
     log_file_path: str
     local_api_key: str
     models: tuple[ModelConfig, ...]
-    stream_first_byte_timeout: float = 90
-    stream_idle_timeout: float = 180
+    stream_first_byte_timeout: float = 60
+    stream_idle_timeout: float = 60
     providers: tuple[ProviderConfig, ...] = ()
     upstream_routes: dict[str, dict[str, str]] = field(default_factory=dict)
     unified_model: UnifiedModelConfig | None = None
@@ -930,9 +930,9 @@ class RouterConfig:
             port=int(raw.get("port", 8000)),
             request_timeout=float(raw.get("request_timeout", 60)),
             stream_first_byte_timeout=float(
-                raw.get("stream_first_byte_timeout", 90)
+                raw.get("stream_first_byte_timeout", 60)
             ),
-            stream_idle_timeout=float(raw.get("stream_idle_timeout", 180)),
+            stream_idle_timeout=float(raw.get("stream_idle_timeout", 60)),
             max_retries=int(raw.get("max_retries", 2)),
             key_failure_threshold=max(1, int(raw.get("key_failure_threshold", 2))),
             key_cooldown_seconds=max(0.0, float(raw.get("key_cooldown_seconds", 60))),

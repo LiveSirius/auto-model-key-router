@@ -90,8 +90,8 @@ def make_config(
     reasoning_effort: str | None = None,
     routing_mode: str = "round_robin",
     max_retries: int = 1,
-    stream_first_byte_timeout: float = 90,
-    stream_idle_timeout: float = 180,
+    stream_first_byte_timeout: float = 60,
+    stream_idle_timeout: float = 60,
     unified_model: UnifiedModelConfig | None = None,
     upstream_routes: dict[str, dict[str, str]] | None = None,
 ) -> RouterConfig:

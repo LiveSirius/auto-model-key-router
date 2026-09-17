@@ -114,8 +114,8 @@ cp router-config.example.json router-config.json
   "host": "127.0.0.1",
   "port": 8000,
   "request_timeout": 60,
-  "stream_first_byte_timeout": 90,
-  "stream_idle_timeout": 180,
+  "stream_first_byte_timeout": 60,
+  "stream_idle_timeout": 60,
   "max_retries": 2,
   "key_failure_threshold": 2,
   "key_cooldown_seconds": 60,
@@ -153,8 +153,8 @@ cp router-config.example.json router-config.json
 ### 3.4 请求与流式超时
 
 - `request_timeout` 控制连接建立、请求写入和非流式请求。
-- `stream_first_byte_timeout` 默认 90 秒，从发起流式上游请求开始，覆盖等待响应头和第一块响应体的总时间。
-- `stream_idle_timeout` 默认 180 秒，控制收到第一块后相邻响应块的最大等待时间。
+- `stream_first_byte_timeout` 默认 60 秒，从发起流式上游请求开始，覆盖等待响应头和第一块响应体的总时间。
+- `stream_idle_timeout` 默认 60 秒，控制收到第一块后相邻响应块的最大等待时间。
 
 三个值都应大于 0。流式响应头返回前超时时，下游响应尚未建立，AMKR 会按现有重试策略切换 Key；下游流建立后发生首块或空闲超时时，只结束当前流，不会自动重放请求，以免产生重复事件、重复计费或非幂等工具调用。可在 TUI 的 **CLI 设置 → 超时配置** 中统一修改这三个值。
 
