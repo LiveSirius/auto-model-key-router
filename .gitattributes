@@ -12,6 +12,7 @@ internal/canonical/testdata/** -text
 internal/clipboard/testdata/** -text
 internal/config/testdata/** -text
 internal/configops/testdata/** -text
+internal/eventbus/testdata/** -text
 internal/formatting/testdata/** -text
 internal/api/testdata/** -text
 internal/keypool/testdata/** -text
@@ -21,7 +22,9 @@ internal/proxysupport/testdata/** -text
 internal/proxy/testdata/** -text
 internal/server/testdata/** -text
 internal/servicestatus/testdata/** -text
+internal/tui/testdata/** -text
 internal/updatecheck/testdata/** -text
+internal/wsproxy/testdata/** -text
 
 # Go 源码强制 LF 检出。
 #
