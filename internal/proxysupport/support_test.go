@@ -254,7 +254,17 @@ func TestJoinURLMatchesPython(t *testing.T) {
 	}
 }
 
-// TestUpstreamHeadersMatchesPython 锁定头部过滤与补充。
+// TestUpstreamHeadersMatchesPython 锁定请求头过滤与补充。
+//
+// 与响应侧方向**相反**（见 TestResponseHeadersMatchesPython）：这里保留原始大小写，
+// 且同大小写下重复出现时**后者胜**。依据是对参照实现的实测——Starlette 的
+// Headers.items() 逐个产出原始对（不合并），参照实现用 dict 推导式收集，于是
+// 同大小写覆盖、不同大小写各自成为独立的键：
+//
+//	raw=[(X-Multi,first),(x-multi,second)]
+//	  -> {'X-Multi':'first','x-multi':'second'}   （两个键都存活）
+//
+// 把请求侧与响应侧当成同一种行为，正是本包最初的错误来源，故两处各有一个测试。
 func TestUpstreamHeadersMatchesPython(t *testing.T) {
 	client := map[string][]string{
 		"Authorization":     {"Bearer client"},
@@ -291,39 +301,24 @@ func TestUpstreamHeadersMatchesPython(t *testing.T) {
 			t.Errorf("头部 %q 应被剔除", blocked)
 		}
 	}
+	// 键保留原始大小写。
+	if _, exists := got["Content-Type"]; !exists {
+		t.Error("请求头应保留原始大小写（Content-Type 不应被小写化）")
+	}
+	// 同大小写的重复头后者胜（不是第一个）。
+	dup := UpstreamHeaders(map[string][]string{"X-Multi": {"first", "second", "third"}}, "k")
+	if dup["X-Multi"] != "third" {
+		t.Fatalf("同大小写的重复请求头应后者胜，实际 %q", dup["X-Multi"])
+	}
+	// 不同大小写是**两个独立的键**，各自存活（对齐参照实现的 dict 推导式）。
+	mixed := UpstreamHeaders(map[string][]string{"X-Multi": {"first"}, "x-multi": {"second"}}, "k")
+	if mixed["X-Multi"] != "first" || mixed["x-multi"] != "second" {
+		t.Fatalf("不同大小写的同名头应各自存活，实际 %v", mixed)
+	}
 	// 空客户端头也要补齐两个必需头。
 	empty := UpstreamHeaders(nil, "k")
 	if len(empty) != 2 || empty["Authorization"] != "Bearer k" || empty["Accept-Encoding"] != "identity" {
 		t.Fatalf("空客户端头应只补两个必需头，实际 %v", empty)
-	}
-}
-
-// TestResponseHeadersMatchesPython 锁定响应头过滤与同名后者覆盖。
-func TestResponseHeadersMatchesPython(t *testing.T) {
-	got := ResponseHeaders(map[string][]string{
-		"Content-Encoding":  {"gzip"},
-		"Content-Length":    {"5"},
-		"Transfer-Encoding": {"chunked"},
-		"Connection":        {"keep-alive"},
-		"Content-Type":      {"application/json"},
-		"X-Req-Id":          {"r1"},
-	})
-	want := map[string]string{"Content-Type": "application/json", "X-Req-Id": "r1"}
-	if len(got) != len(want) {
-		t.Fatalf("响应头数量不符: 期望 %d，实际 %d (%v)", len(want), len(got), got)
-	}
-	for key, value := range want {
-		if got[key] != value {
-			t.Errorf("响应头 %q = %q，期望 %q", key, got[key], value)
-		}
-	}
-	// 同名头后者覆盖前者（Python 收进 dict 的结果）。
-	dup := ResponseHeaders(map[string][]string{"X-Multi": {"first", "second", "third"}})
-	if dup["X-Multi"] != "third" {
-		t.Fatalf("同名响应头应后者覆盖，实际 %q", dup["X-Multi"])
-	}
-	if len(ResponseHeaders(nil)) != 0 {
-		t.Fatal("空输入应返回空")
 	}
 }
 

@@ -162,7 +162,11 @@ func UpstreamHeaders(clientHeaders map[string][]string, apiKey string) map[strin
 		if blocked[strings.ToLower(key)] || len(values) == 0 {
 			continue
 		}
-		headers[key] = values[0]
+		// 键按**原始大小写**保留（Starlette 的 Headers.items() 逐个产出原始对，参照实现
+		// 用 dict 推导式收集，因此 "X-Multi" 与 "x-multi" 是两个不同的键、各自存活）。
+		// 同一大小写下重复出现时**后者胜**：dict 赋值覆盖先前的值。
+		// 实测：raw=[(X-Multi,first),(x-multi,second)] -> {'X-Multi':'first','x-multi':'second'}。
+		headers[key] = values[len(values)-1]
 	}
 	headers["Authorization"] = "Bearer " + apiKey
 	headers["Accept-Encoding"] = "identity"
@@ -183,11 +187,14 @@ func ResponseHeaders(upstreamHeaders map[string][]string) map[string]string {
 	}
 	headers := make(map[string]string, len(upstreamHeaders))
 	for key, values := range upstreamHeaders {
-		if blocked[strings.ToLower(key)] || len(values) == 0 {
+		lower := strings.ToLower(key)
+		if blocked[lower] || len(values) == 0 {
 			continue
 		}
-		// 同名头**后者覆盖前者**（last-wins），对齐 Python 把它们收进 dict 的结果。
-		headers[key] = values[len(values)-1]
+		// httpx 的 Headers 把同名头用 ", " **按序拼接**，并把键统一成小写——不是后者覆盖。
+		// 实测：响应头 X-Multi: first/second/third 经 _response_headers 得到
+		// {'x-multi': 'first, second, third'}。若按 last-wins 实现，下游会静默丢掉前两个值。
+		headers[lower] = strings.Join(values, ", ")
 	}
 	return headers
 }
