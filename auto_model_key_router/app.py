@@ -196,7 +196,8 @@ def create_app(
     @app.get("/metrics")
     async def metrics(
         request: Request,
-        hours: float | None = Query(default=None, gt=0, le=8760),
+        hours: float = Query(default=24, gt=0, le=8760),
+        all_history: bool = False,
     ):
         await _reload_config_if_changed(app.state)
         lease = await _acquire_runtime(app.state)
@@ -208,7 +209,12 @@ def create_app(
                 return JSONResponse(
                     {"error": {"message": "本地 API key 验证失败"}}, status_code=401
                 )
-            return await lease.resources.metrics.snapshot(hours=hours)
+            # hours=None 会全表扫描（16 万行实测 3–5 秒），而 snapshot 与 record
+            # 共用同一把锁，于是这个只读接口会把代理写路径一起卡住。全量改由
+            # 显式的 all_history=true 触发。
+            return await lease.resources.metrics.snapshot(
+                hours=None if all_history else hours
+            )
         finally:
             await lease.release()
 

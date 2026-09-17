@@ -20,6 +20,7 @@
 
 ### Fixed
 
+- 修复 `GET /metrics` 省略 `hours` 时的**无界全表聚合**：默认会聚合全部历史，在本机 16 万行 / 65 MiB 的统计库上实测 3.1–5.2 秒，而 `snapshot()` 与 `record()` 共用 `MetricsStore._lock`，于是这个只读接口会把代理请求路径（每次落库）一起卡住 —— 实测无界查询进行中，一次 `record()` 要等 4.1 秒才拿到锁。现在默认窗口改为最近 `24` 小时（与 `/metrics/requests` 一致），全量改由显式的 `all_history=true` 触发。
 - 删除 `proxy_handler._broadcast_metrics()`：它从 `RuntimeResources` 上 `getattr(state, "event_bus", None)`，而 `event_bus` 只挂在 `app.state` 上，该函数因此恒为空操作；真正的节流广播在 `app.py`。留着它是个隐患 —— 一旦有人把 `event_bus` 挂到 `RuntimeResources`，每次上游失败都会在请求路径上同步跑一次无界 `snapshot()`，也就是一次 3–5 秒的全表扫描。
 
 - 修复 `EventBus.broadcast("client_count", ...)` 漏掉 `await`：`/ws/events` 的客户端数量事件从未真正发出（只在日志里留下 `RuntimeWarning: coroutine ... was never awaited`）。

@@ -639,6 +639,35 @@ def test_metrics_requires_local_auth() -> None:
         assert authorized.json()["total"]["requests"] == 0
 
 
+def test_metrics_default_window_is_bounded() -> None:
+    """/metrics 省略 hours 时默认只聚合最近 24 小时。
+
+    无界聚合会全表扫描（16 万行实测 3–5 秒），而 snapshot() 与 record()
+    共用同一把锁，于是这个只读接口会把代理写路径一起卡住。全量改由显式的
+    all_history=true 触发。
+    """
+    with tempfile.TemporaryDirectory() as directory:
+        config = make_config(
+            Path(directory), (KeyConfig("key-1", "sk-1", "https://upstream.test"),)
+        )
+        app = create_app(config)
+
+        async def requests(
+            client: httpx.AsyncClient,
+        ) -> tuple[dict[str, object], dict[str, object]]:
+            headers = {"Authorization": "Bearer local-key"}
+            bounded = await client.get("/metrics", headers=headers)
+            everything = await client.get(
+                "/metrics?all_history=true", headers=headers
+            )
+            return bounded.json(), everything.json()
+
+        bounded, everything = run_client(app, requests)
+
+        assert bounded["window"]["hours"] == 24
+        assert everything["window"]["hours"] is None
+
+
 def test_metrics_exposes_request_history_and_time_series() -> None:
     with tempfile.TemporaryDirectory() as directory:
         config = make_config(
