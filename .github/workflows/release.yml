@@ -89,7 +89,12 @@ jobs:
         run: |
           # GHCR 只接受小写仓库名，而 GITHUB_REPOSITORY 带原始大小写（本仓库是 Sparrived）。
           image="ghcr.io/${GITHUB_REPOSITORY,,}"
-          docker build --tag "$image:$VERSION" --tag "$image:latest" .
+          # 用标签把包关联到仓库（而不是在 Dockerfile 里写死地址，换仓库/改名时不必改）：
+          # 这样 GHCR 页面会带上本仓库信息，也避免「命名空间下已有同名包但未关联仓库」时
+          # GITHUB_TOKEN 无权推送。注意可见性不随仓库继承，新包默认私有，见 README。
+          docker build \
+            --label "org.opencontainers.image.source=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" \
+            --tag "$image:$VERSION" --tag "$image:latest" .
 
       - name: Verify container image
         if: steps.existing_release.outputs.exists == 'false'

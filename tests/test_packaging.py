@@ -148,3 +148,22 @@ def test_release_workflow_pushes_image_before_creating_the_release() -> None:
     assert text.index("- name: Push container image to GHCR") < text.index(
         "- name: Create GitHub Release"
     )
+
+
+def test_release_workflow_links_the_package_to_the_repository() -> None:
+    # 没有这个标签，命名空间下若已存在同名包且未关联仓库，GITHUB_TOKEN 会推不上去；
+    # 值必须由 GITHUB_REPOSITORY 推出，写死仓库地址在改名/换仓库时会失效。
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "org.opencontainers.image.source" in text
+    assert "GITHUB_SERVER_URL/$GITHUB_REPOSITORY" in text
+    assert "Sparrived/auto-model-key-router" not in text
+
+
+def test_readme_documents_that_ghcr_visibility_is_not_inherited() -> None:
+    # 仓库公开不等于镜像可匿名拉取：GHCR 包默认私有且可见性不继承仓库，也没有 API 可改。
+    # 少写这段，用户只会看到一个 403 而不知道该去包页面点一次。
+    text = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "不随仓库继承" in text
+    assert "Change visibility" in text

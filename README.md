@@ -78,7 +78,13 @@ amkr --config router-config.json --no-webui
 
 ### Docker
 
-发布时会把镜像推到 GHCR（`ghcr.io/sparrived/auto-model-key-router`，标签为版本号，正式版额外带 `latest`），也可以自己从仓库构建：
+发布时会把镜像推到 GHCR（`ghcr.io/sparrived/auto-model-key-router`，标签为版本号，正式版额外带 `latest`）。注意 GHCR 的容器包默认是**私有**，且可见性**不随仓库继承**（包只继承仓库的访问权限，不含可见性 —— 本仓库公开不代表镜像能匿名拉取），目前也没有 API 能改，只能在包页面手动改一次：
+
+> 包页面 → 右下角 **Danger Zone** → **Change visibility** → **Public**（按提示输入包名确认；改公开后不能改回私有）
+
+改之前 `docker pull` 会要求登录（`403 Forbidden`）。发布工作流来自仓库自身、包会自动关联到仓库，通常无需手动操作即可匿名拉取，但以包页面显示的实际可见性为准。
+
+也可以自己从仓库构建：
 
 ```bash
 docker build -t amkr .
@@ -102,7 +108,6 @@ docker exec amkr amkr --config /data/auto-model-key-router/router-config.json --
 ```
 
 配置、指标库、日志和 PID 文件都在 `/data/auto-model-key-router` 下，删容器不丢数据。容器内固定监听 `0.0.0.0`（否则端口映射进不去），**因此务必保留 `local_api_key`，不要把端口暴露到公网**；需要改端口时改配置里的 `port`，再同步调整 `-p`。
-
 ## 快速开始
 
 ### 1. 启动 Terminal UI

@@ -9,6 +9,7 @@
   - 镜像步骤排在 `gh release create` **之前**：tag 是那一步才创建的，推送失败时 tag 与 release 都不存在，重跑不会被 `existing_release` 的跳过条件挡住。
   - 配置、指标库、日志与 PID 文件都经 `XDG_CACHE_HOME` 落在 `/data`（已声明为卷），删容器不丢配置；构建上下文由 `.dockerignore` 排除 `router-config.json`、`.env`、`*.sqlite3`、`*.log`，避免把真实上游 Key 打进镜像推到 registry。
   - 容器内以非 root 用户运行，并固定用 `--host 0.0.0.0` 覆盖默认的 `127.0.0.1` —— 不覆盖的话 `-p 8000:8000` 映射不进容器。
+  - 构建时用 `--label org.opencontainers.image.source` 把包关联到仓库（值由 `GITHUB_REPOSITORY` 推出，不在 Dockerfile 里写死，换仓库或改名时无需改动）：GHCR 页面会带上仓库信息，也避免「命名空间下已有同名包但未关联仓库」时 `GITHUB_TOKEN` 无权推送。**可见性不随仓库继承** —— GHCR 容器包默认私有，本仓库虽是公开仓库也不代表镜像能匿名拉取，而且没有 API 能改，只能在包页面手动改一次（README 已写明步骤）。
 
 ### Changed
 
