@@ -369,6 +369,23 @@ github := CheckLatestRelease(...)
 
 （保留 PyPI 检查的唯一理由：若仍希望**老的 Python 用户**收到"该迁到 Go 版了"的提示，那就得
 在 PyPI 上发布一个终结版本。这属于产品决策，未定。）
+### Python 测试套件的退役面（实测：23 文件 / 12,298 行）
+
+删除 Python 模块时，`tests/` 不能简单按模块一刀切——**多数测试文件是混装的**。实测每个
+文件 import 的本包模块数：
+
+| 类型 | 文件 | 处置 |
+| --- | --- | --- |
+| **7 模块混装** | `test_tui.py`(3,270 行，覆盖 clipboard / config_editor / dashboard / log_files / logs_tui / service / tui)、`test_app.py`(app + proxy_handler + metrics + key_pool + config) | **必须按用例切分**，不能整文件删；`test_tui.py` 里 dashboard 相关 76 处、logs_tui 28 处 |
+| **2–3 模块混装** | `test_agent_config.py`、`test_management_api.py`、`test_webui_tui.py`、`test_webui.py`、`test_ops_api.py`、`test_config_operations.py`、`test_config_service.py`、`test_embedding.py`、`test_key_pool.py`、`test_metrics.py` | 随其覆盖的最后一个模块退役 |
+| **单一模块（好删）** | `test_config_editor.py`、`test_routing.py`、`test_runtime.py`、`test_service.py`、`test_streaming.py`、`test_update.py`、`test_version.py` | 与对应模块同批删 |
+| **不 import 本包** | `test_main.py`（CLI）、`test_packaging.py`、`test_release_script.py`、**`test_webui_charts.py`** | 前三个随发布面退役；**`test_webui_charts.py` 必须保留**——它测的是前端图表资产，而前端仍随包发布 |
+
+顺序约束：`test_embedding.py` 随 `__init__.py` 瘦身（退役 `mount_app` 嵌入 API）一起走；
+`test_packaging.py` / `test_release_script.py` 随 `pyproject.toml` / `release.py` 走。
+
+CI 侧：`ci.yml` 的 `python` 作业在这些退役完毕后整体删除，只留 `go` 作业与 `node`
+前端模块检查（`webui_module_check.mjs`，它不依赖后端语言）。
 ## 提交约定
 
 按模块独立提交，Conventional Commits：`<type>(<scope>): <中文摘要>`，正文说明
