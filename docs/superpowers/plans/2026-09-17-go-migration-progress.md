@@ -11,8 +11,8 @@
 | Python 核心 | 15,630 行 / 41 文件 |
 | Go 生产代码 | 8,983 行 / 32 文件（9 个包） |
 | 已移植 Python 源 | ≈ 5,015 行（约 1/3） |
-| 服务端待移植 | 10,113 行 |
-| Go 相关提交 | 15 |
+| 服务端待移植 | ≈ 7,837 行（决策 7/8 砍掉 dashboard/logs_tui/update 后） |
+| Go 相关提交 | 23 |
 
 按方案的分期，**Phase 0–2 基本完成**（基础设施、配置与 canonical 兼容、运行时与
 协议转换）。剩下的体量集中在一个线性依赖链上：
@@ -78,29 +78,38 @@ Python 侧基线：`python -X utf8 -m pytest -q` → **485 passed**（约 250 �
 - `go test` 与 `gofmt -w` 之后立刻编辑同一文件会报「file changed since it was
   read」，需重新读取。
 
-## 待决策项（需要人来定，不阻塞开发）
+## 已决策项（2026-09-17 产品决策，全部已落地或有明确归属）
 
-以下都是**已确认的真实行为差异**，Go 侧按「与参照实现逐字对齐」处理，因此
-Python 与 Go 在这些点上行为一致——但要明确它们是否是**期望**行为。
+代理层三项来自迁移方案 §4.5，另有四项在迁移过程中实测确认。**8 项已全部定案**：
 
-1. **上游调用放大**：单次下游请求最多可触发约 24 次上游调用。
-2. **`images/edits` 忽略配置路由**：非 native 时走 `v1/images/edits` 兜底，不查
-   `upstream_routes`；且 multipart 实质上不支持（仅 JSON）。
-   已由 `TestUpstreamPathImagesEditsIgnoresConfiguredRoute` 锁定。
-3. **流式分块 UTF-8 截断**：参照实现逐块 `decode("utf-8", errors="replace")`，
-   多字节字符跨块时会产生 U+FFFD 乱码。**已实测确认，Go 侧已修复**（`SSESplitter`
-   按字节切分），因此这是 Go 比 Python 正确的一处——需要确认接受这一偏离。
-4. **`visitor_feature_installed` 语义变更**：从「能否 import itsdangerous」改为
-   构建标签 `amkr_no_visitor` + 编译期常量。
-5. **`protocol` 包对畸形输入不复刻异常**：Python 对非对象请求体会抛
-   `ValueError`/`TypeError`/`AttributeError`，Go 侧选择保守兜底（原样返回、返回
-   下限 1、退化成无 type）。理由是这些输入不构成合法协议体，而复刻异常会让
-   `count_tokens` 整个接口 500。已由 `TestRequestKnownDeviations` 记录。
-6. **`upstream.UpstreamURL` 的斜杠处理**：Go 侧曾用 `TrimSuffix`/`TrimPrefix`
-   （只去一个斜杠），与 Python `rstrip`/`lstrip`（去全部）不一致。当前**不可达**
-   （provider `base_url` 已被 `NormalizeUpstreamBaseURL` 规整），但仍应修正为
-   `TrimRight`/`TrimLeft` 以消除两个实现并存的分歧。
+| # | 事项 | 决策 | 落地状态 |
+| --- | --- | --- | --- |
+| 1 | 上游调用放大（3 Key 时最坏 ≈24 次上游调用/次下游请求） | **保留语义，另加显式上限与日志**，作独立 issue 跟踪 | 待 proxy_handler 阶段实施 |
+| 2 | `images/edits` 不读配置路由 + multipart 不支持 | **路由与 multipart 都补齐** | 路由已修（`fc7dc99`）；**multipart 仍待做**，需 proxy_handler 的请求体处理 |
+| 3 | 流式分块多字节 UTF-8 变 U+FFFD | **接受 Go 的修复**（`SSESplitter` 按字节切分） | 已实施，Go 比 Python 正确 |
+| 4 | `visitor_feature_installed` 判定依据 | **取消开关语义**，访客功能常驻；该字段从 `/health` **删除** | 已实施（`ea8e2c8`、`4b36ca2`，破坏性变更） |
+| 5 | `protocol` 对畸形输入不复刻异常 | **保留兜底，但在接口边界显式 400 拒绝畸形体** | 兜底已实施；**边界 400 待 API 阶段实施** |
+| 6 | `upstream.UpstreamURL` 斜杠处理与 Python 不一致 | 修正为 `TrimRight`/`TrimLeft`（非决策，属缺陷修复） | 已交由 upstream 模块处理 |
+| 7 | `dashboard.py`（949 行）+ `logs_tui.py`（614 行）终端仪表盘 | **砍掉，由 WebUI 覆盖** | 无需移植，直接减少约 1,563 行工作量 |
+| 8 | `update.py`（713 行）自更新 | **砍掉，改由 `go install` / 包管理器分发** | 无需移植，减少 713 行工作量 |
 
+决策 4 的连带语义（已实施）：`visitor_key_count` 不再在「功能未安装」时归零，恒为各
+模型之和；`visitor_access_enabled` 退化为单纯的「数量 > 0」。
+
+决策 7、8 使剩余服务端工作量从约 10,113 行降至约 **7,837 行**。
+
+### 决策 2 的未完成部分（勿遗漏）
+
+路由一半已修（`fc7dc99`），但 **multipart/form-data 仍不支持**：请求体当前按 JSON
+解析并整体缓冲，真正的图片编辑请求无法工作。补齐它要动 proxy_handler 的请求体处理
+路径，而该模块尚未移植，因此拆成两步。实施时需一并考虑：上传体积上限、流式转发而非
+整体缓冲、以及错误路径的响应格式。
+
+### 决策 5 的未完成部分（勿遗漏）
+
+`protocol` 侧的保守兜底保留不动，但需要在 **HTTP 接口边界**加显式校验：非法请求体
+（非对象、字段类型错误）应返回 400，而不是被内部函数静默兜底成「看似合理」的结果。
+这一层属于 `app` / `management_api` 装配阶段的工作。
 ## 刻意保留的参照实现缺陷
 
 为「同一份配置在两种实现下行为一致」，以下缺陷**不在 Go 侧修复**，各由具名测试锁定：
@@ -118,11 +127,16 @@ Python 与 Go 在这些点上行为一致——但要明确它们是否是**期�
    `created_at` 为 Asia/Shanghai 的 isoformat 字符串）。
 2. 收尾并提交 `internal/upstream` 与协议测试。
 3. `internal/configops`（`config_operations.py`，1,282 行）→ 解锁管理 API。
-4. `proxy_handler`（1,400 行，需要 metrics 定型后开工）。
+4. `proxy_handler`（1,400 行，需要 metrics 定型后开工）。此步必须一并落地：
+   - 决策 1 的**上游调用上限与日志**；
+   - 决策 2 剩余的 **multipart/form-data 支持**；
+   - 决策 5 的**接口边界 400 校验**（也可放在第 6 步的装配层）。
 5. `management_api` + `config_editor`。
 6. `app` 装配、`service`、CLI、WebUI 后端。
-7. TUI 重写。
-8. `update.py` 与 Python 退役。
+7. TUI 重写（`tui.py` 912 行）。注意 `dashboard.py` 与 `logs_tui.py` 已按决策 7
+   砍掉，不要顺手一并移植。
+8. Python 退役。`update.py` 已按决策 8 砍掉（改由 `go install` / 包管理器分发），
+   不再移植。
 
 ## 提交约定
 
