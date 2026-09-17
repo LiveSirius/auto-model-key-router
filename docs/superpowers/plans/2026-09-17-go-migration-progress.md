@@ -9,23 +9,25 @@
 | 指标 | 数值 |
 | --- | --- |
 | Python 核心 | 15,630 行 / 41 文件 |
-| Go 生产代码 | 15,834 行 / 50 文件（17 个包已提交） |
-| Go 测试代码 | 13,971 行 / 41 文件 |
-| 已移植 Python 源 | ≈ 7,300 行（约 47%） |
-| 服务端待移植 | ≈ 8,345 行；其中 management_api 与 proxy_handler（共 3,047 行）已在进行中 |
-| Go 相关提交 | 29（触及 internal/ 或 go.mod） |
+| Go 生产代码 | 23,088 行 / 72 文件（**21 个包已提交**） |
+| Go 测试代码 | 17,445 行 / 49 文件 |
+| 已移植 Python 源 | ≈ 10,300 行（约 66%） |
+| 服务端待移植 | ≈ 5,298 行；其中 app.py 与 ops_api.py 正在做 |
+| Go 相关提交 | 34（触及 internal/、go.mod 或 cmd） |
+
+**代理面与管理面已全部落地**：`internal/proxy`（proxy_handler.py，81 条语料含逐条上游调用
+序列）与 `internal/api`（management_api.py，47 条路由，188 条语料）已提交并通过门禁。
 
 按方案的分期，**Phase 0–2 基本完成**（基础设施、配置与 canonical 兼容、运行时与
 协议转换）。剩下的体量集中在一个线性依赖链上：
 
 ```
-metrics、config_operations 已完成并提交
-   └─> proxy_handler           1,400 行   ← 关键路径枢纽（进行中）
-   └─> management_api          1,647 行   （进行中）
-          └─> ops_api            276 行
-   └─> config_editor           1,878 行
-          └─> app / service / CLI（24 flags）/ WebUI 后端
-                 └─> TUI（Bubble Tea，重写而非直译） 912 行
+proxy_handler、management_api 已完成并提交
+   └─> app 装配（internal/server）+ 最小可运行 CLI（进行中）  ← 「能用」的最后一段
+   └─> ops_api                276 行（进行中；4 条前端端点里 3 条依赖已就绪）
+   └─> config_editor          1,878 行
+   └─> service / 完整 24 flags CLI
+          └─> TUI（Bubble Tea，重写而非直译） 912 行
 ```
 
 **WebSocket 不在「能用」的关键路径上**：前端是**轮询**（`setInterval` 打 `/health`、
@@ -59,8 +61,13 @@ metrics、config_operations 已完成并提交
 | `logfiles` | `log_files.py` | 日志发现与归档 |
 | `clipboard` | `clipboard.py` | 平台分发 + OSC52 回退 |
 | `servicestatus` | `service_status.py` | schtasks XML / systemd 解析 |
+| `proxy` | `proxy_handler.py` | 代理编排枢纽；语料含逐条上游调用序列 |
+| `api` | `management_api.py` | 47 条管理路由；`ConfigPath`/`Reload`/`CheckUpdate` 等接缝 |
+| `webui` | `webui.py` | 静态资源服务（`fs.FS` 注入，不做目录列表） |
+| `updatecheck` | `update.py` 的版本检查 | 决策 8 只保留版本检查，砍自更新 |
 
-**进行中**：`management_api.py` -> `internal/api`、`proxy_handler.py` -> `internal/proxy`。
+**进行中**：`app.py` -> `internal/server`（+ 最小 CLI）、`ops_api.py` -> `internal/api` 的
+ops 路由、`agent_config.py` -> `internal/agentconfig`。
 ## 组装后的完整路由表（目标，共 63 条）
 
 用 Python AST 从 `management_api.py`(47) + `ops_api.py`(7) + `app.py`(9) 提取，作为
@@ -71,7 +78,7 @@ metrics、config_operations 已完成并提交
 | 路由 | 状态 |
 | --- | --- |
 | `GET /health` | ✅ 已移植（`internal/health`） |
-| `ANY /v1/{path}` | 进行中（`internal/proxy`） |
+| `ANY /v1/{path}` | ✅ 已提交（`internal/proxy`） |
 | `HEAD /` | 待 app 装配 |
 | `GET /v1/models` | 待 app 装配 |
 | `GET /metrics` | 待 app 装配（依赖 metrics） |
@@ -82,8 +89,14 @@ metrics、config_operations 已完成并提交
 
 ### 管理面（47 条，`internal/api`）
 
-已实现 47/47。核对方式是把我方路由表与 Python AST 提取结果做**双向差集**：既无缺失、
-也无多余（`Give /api` 全量比较，0 差异）。
+**已实现并提交** 47/47。核对方式是把我方路由表与 Python AST 提取结果做**双向差集**：
+既无缺失、也无多余（全量比较，0 差异）。18 个测试覆盖，其中易错点各有具名测试
+（config_revision 先比对再落盘、裸 ValueError 的 500/422 层级、DELETE body 的不对称、
+KeyResponse 与 RawKeyResponse 的差别、明文 key 只在设置接口返回、任务参数白名单两处校验）。
+
+**前端覆盖度交叉核对**：WebUI 调用的 15 个 `/api` 端点中 **11 个已覆盖**；缺的 4 个正是
+运维面（`/api/integrations`、`/api/logs`、`/api/tool`、`/api/tool/webui`），其中 3 条依赖
+已就绪（logfiles / configservice / updatecheck），第 4 条等 `agent_config`。
 
 ### 运维面（7 条，`ops_api.py`）
 
