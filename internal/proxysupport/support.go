@@ -86,15 +86,28 @@ func UpstreamMode(path string) string {
 //   - messages/responses 且**带 model 字段**：说明要走转换而非原生，因此上游是
 //     OpenAI 兼容端点，用 openai 的配置路径。
 //
-// 最后一个 else 分支 `v1/{path}` 保留了参照实现的一个真实缺陷：**images/edits 在
-// 非 native 时不会查配置路由**，而是拼出 "v1/images/edits"。也就是说用户在
-// upstream_routes 里给 images 配的路径对 `/v1/images/edits` 无效。这是与参照实现
-// 逐字对齐的结果——修掉它会让同一份配置在两边行为不同。是否修属于产品决策，见
-// 迁移方案 §4.5。已由 TestUpstreamPathImagesEditsIgnoresConfiguredRoute 锁定。
+// images/edits 的处理是**与参照实现有意分叉**的一处（产品决策：修掉真实缺陷）。
+//
+// 参照实现在非 native 时**不查配置路由**，直接拼 "v1/images/edits"，导致用户在
+// upstream_routes 里配的 images 路径对 /v1/images/edits 静默无效。这里改为：
+// **显式配置了 images 路由就用它；没配置则保持 "v1/images/edits"**。
+//
+// 为什么不能简单地套用 images 的默认路由：`upstreamRouteDefaultPaths["images"]` 是
+// "v1/images/generations"，若照搬，未配置路由的用户会把自己的**图片编辑**请求发到
+// **图片生成**端点——那是更严重的行为变更。因此只在用户显式配置时才改道。
+//
+// native 形态不受影响：它走上面的 `native && mode != ""` 分支，本来就是查配置的
+// （这也是参照实现里 edits 唯一会查配置的情形）。
 func UpstreamPath(path string, payload *canonical.Value, native bool, upstreamRoutes map[string]string) (string, error) {
 	mode := UpstreamMode(path)
 	if path == "images/generations" {
 		return config.UpstreamRoutePath(upstreamRoutes, "images")
+	}
+	if path == "images/edits" && !native {
+		if route, ok := upstreamRoutes["images"]; ok && route != "" {
+			return route, nil
+		}
+		return "v1/images/edits", nil
 	}
 	// embeddings 没有转换语义：请求体本来就是 OpenAI 形状，直接按配置路径转发。
 	if path == "embeddings" {

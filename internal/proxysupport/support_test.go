@@ -166,32 +166,74 @@ func TestUpstreamPathUsesConfiguredRoutes(t *testing.T) {
 	}
 }
 
-// TestUpstreamPathImagesEditsIgnoresConfiguredRoute 锁定一个**保留下来的参照实现缺陷**。
+// TestUpstreamPathImagesEditsHonorsConfiguredRoute 锁定修复后的 images/edits 路由行为。
 //
-// upstream_routes 里给 images 配的路径，对 `/v1/images/edits` 的**非原生**请求无效：
-// 参照实现只在 native 或 `path == "images/generations"` 时查配置，images/edits 落到
-// 最后的 `f"v1/{path}"` 兜底。因此用户为 images 配的自定义路由在 edits 上被静默忽略。
+// 这是**与参照实现有意分叉**的一处（产品决策：修掉真实缺陷）。参照实现在非 native
+// 时不查配置路由、直接拼 "v1/images/edits"，使 upstream_routes 里配的 images 路径
+// 对 /v1/images/edits 静默无效。
 //
-// 为什么照抄而不修：修掉会让同一份配置在 Python 与 Go 上行为不同，正是迁移期最忌讳的。
-// 是否修属于产品决策（见迁移方案 §4.5）。本测试把这个差异钉住，将来若决定修，必须
-// 两边一起改并同时更新此测试。
-func TestUpstreamPathImagesEditsIgnoresConfiguredRoute(t *testing.T) {
-	routes := map[string]string{"images": "v1/custom/img"}
-	// 非 native：忽略自定义路由。
-	got, err := UpstreamPath("images/edits", mustValue(t, `{"model":"m"}`), false, routes)
-	if err != nil {
-		t.Fatalf("报错: %v", err)
-	}
-	if got != "v1/images/edits" {
-		t.Fatalf("非 native 的 images/edits 应走兜底路径 v1/images/edits，实际 %q", got)
-	}
-	// native：使用自定义路由。
-	got, err = UpstreamPath("images/edits", mustValue(t, `{"model":"m"}`), true, routes)
+// 修复后的语义分两种情形：
+//  1. 显式配置了 images 路由 -> 用它（这就是用户期望的"配置生效"）；
+//  2. **没有**配置 -> 仍是 "v1/images/edits"，而不是套用 images 的默认路由
+//     "v1/images/generations"。第 2 条尤其重要：若照搬默认值，未配置路由的用户会把自己
+//     的图片**编辑**请求发到图片**生成**端点——那比原来的缺陷更危险。
+func TestUpstreamPathImagesEditsHonorsConfiguredRoute(t *testing.T) {
+	payload := mustValue(t, `{"model":"m"}`)
+
+	// 情形 1：配置了 images 路由 -> 生效。
+	configured := map[string]string{"images": "v1/custom/img"}
+	got, err := UpstreamPath("images/edits", payload, false, configured)
 	if err != nil {
 		t.Fatalf("报错: %v", err)
 	}
 	if got != "v1/custom/img" {
-		t.Fatalf("native 的 images/edits 应使用自定义路由，实际 %q", got)
+		t.Fatalf("非 native 的 images/edits 应使用已配置的 images 路由，实际 %q", got)
+	}
+
+	// 情形 2：未配置 -> 保持 edits 自己的默认路径，**不能**变成 generations。
+	got, err = UpstreamPath("images/edits", payload, false, map[string]string{})
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/images/edits" {
+		t.Fatalf("未配置路由时 images/edits 应保持 v1/images/edits，实际 %q", got)
+	}
+	if got == "v1/images/generations" {
+		t.Fatal("未配置路由时绝不能把 edits 改道到 generations 端点")
+	}
+
+	// 空串配置视为未配置（与 config.UpstreamRoutePath 对空值的处理一致）。
+	got, err = UpstreamPath("images/edits", payload, false, map[string]string{"images": ""})
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/images/edits" {
+		t.Fatalf("images 路由为空串时应退回 v1/images/edits，实际 %q", got)
+	}
+
+	// native 形态不受影响：它本来就走查配置的分支，未配置时落到 images 默认路由。
+	got, err = UpstreamPath("images/edits", payload, true, configured)
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/custom/img" {
+		t.Fatalf("native 的 images/edits 应使用已配置的 images 路由，实际 %q", got)
+	}
+	got, err = UpstreamPath("images/edits", payload, true, map[string]string{})
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/images/generations" {
+		t.Fatalf("native 的 images/edits 未配置时应落到 images 默认路由，实际 %q", got)
+	}
+
+	// generations 的行为不受本次修复影响。
+	got, err = UpstreamPath("images/generations", payload, false, configured)
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/custom/img" {
+		t.Fatalf("images/generations 应使用已配置的 images 路由，实际 %q", got)
 	}
 }
 
