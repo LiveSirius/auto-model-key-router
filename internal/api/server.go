@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/Sparrived/auto-model-key-router/internal/auth"
@@ -173,22 +174,123 @@ type UpdateCheckResult struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.register(mux)
+	// patterns 是兜底 405 判定的依据，因此必须与实际注册的模式集合一致：
+	// OpsEnabled 为 false 时运维面的 URL **一条都不算已知路径**，`PUT /api/logs`
+	// 在参照实现里同样是 404（不是 405）。
+	patterns := routePatterns()
 	if s.OpsEnabled {
 		// 与 Python 相同：运维面注册在同一个应用上，复用同一套鉴权与错误形状。
 		// OpsEnabled 为 false 时一条都不注册——参照实现里 /api/logs 等会落进
 		// Starlette 的 404 {"detail":"Not Found"}，这里由下面的兜底处理器复刻。
 		s.RegisterOps(mux)
+		patterns = append(patterns, opsRoutePatterns()...)
 	}
 	// 未注册路径在 FastAPI 下是 {"detail":"Not Found"}（404 JSON），而 ServeMux
 	// 默认输出纯文本 "404 page not found"。注册一个兜底模式以对齐常见路径。
 	//
-	// 已知分歧：ServeMux 对「方法不匹配」返回 405 纯文本，对带尾斜杠的路径做 301
-	// 重定向，而 FastAPI 分别返回 405 {"detail":"Method Not Allowed"} 与 307。这三条
-	// 不在 47 条路由的契约内，语料不覆盖，见 doc.go 的说明。
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusNotFound, objectOf(canonical.ObjectPair{Key: "detail", Value: canonical.NewString("Not Found")}))
+	// 兜底模式同时承担「路径存在但方法不对」的 405。不能依赖 ServeMux 自己的 405：
+	//
+	//   - 无方法的兜底模式匹配**任意**方法，ServeMux 根本走不到它的 405 分支
+	//     （这正是 `PUT /api/logs` 曾经回 404 的原因）；
+	//   - 就算走到，ServeMux 算出的 Allow 也与参照实现不同——它会把 GET 与合成的
+	//     HEAD 一起列出来（"GET, HEAD"），而参照实现是 "GET"（实测）；
+	//   - 它的 405 体是纯文本，参照实现是 JSON。
+	//
+	// 所以这里自己判定：路径能匹配已注册模式 -> 405 + Allow，否则 404。
+	//
+	// 遗留分歧：ServeMux 会清理/重定向路径，参照实现不会。两类都不在 47 条路由的
+	// 契约内，语料不覆盖，见 doc.go 的说明。
+	//
+	//   - 带尾斜杠：参照实现由 Starlette 的 redirect_slashes 先 307 到无尾斜杠的路径
+	//     （实测 `/api/logs/`：GET 跟随重定向后 200、PUT 405 + Allow: GET），而
+	//     ServeMux 不做「去掉尾斜杠」的重定向，`/api/logs/` 直接落进兜底 404。
+	//   - 不干净路径（`//api/logs`、`/api/./logs`）：ServeMux 先 cleanPath 再 307
+	//     重定向（server.go:2689-2696），客户端跟随之后 `PUT //api/logs` 实际是
+	//     `PUT /api/logs`（实测 405 + Allow: GET），而参照实现对不干净路径直接 404
+	//     （实测）。重定向本身是 ServeMux 既有行为，本次只是让重定向**之后**的错
+	//     方法从 404 变成 405。
+	//
+	// 上面的判定按精确路径匹配，因此 `/api/logs/` 仍旧是 404（与「正确方法也 404」
+	// 保持一致），不会变成 405。
+	notFoundOrMethodNotAllowed := func(w http.ResponseWriter, r *http.Request) {
+		writeNotFoundOrMethodNotAllowed(w, r.URL.Path, patterns)
+	}
+	mux.HandleFunc("/", notFoundOrMethodNotAllowed)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// ServeMux 把 GET 模式也当作 HEAD 匹配（实测），而参照实现里**没有**任何
+		// 一条路由注册 HEAD：FastAPI 的 APIRoute 不给 GET 路由自动加 HEAD，实测
+		// `HEAD /api/logs` 是 405 + Allow: GET（不是 200）。因此 HEAD 必须在进 mux
+		// 之前分流，否则会被 GET 处理器吃掉、拿到 200——这是内部 mux 做不到的事
+		// （internal/server/routes.go 对自己的路由用了同样的办法）。
+		// 未知路径的 HEAD 在这里也是 404，与兜底一致。
+		if r.Method == http.MethodHead {
+			notFoundOrMethodNotAllowed(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
 	})
-	return mux
+}
+
+// writeNotFoundOrMethodNotAllowed 复刻 Starlette 的两条路由级兜底。
+//
+// 「路径能匹配某条已注册模式」时是 405：FastAPI/Starlette 把这种路由当作部分匹配
+// （Match.PARTIAL），由 Route.handle 抛 HTTPException(405)。路径完全不匹配才是 404。
+// 判定发生在鉴权之前，所以无凭据的错方法请求同样是 405（实测）。
+func writeNotFoundOrMethodNotAllowed(w http.ResponseWriter, path string, patterns []string) {
+	if allow := allowedMethod(path, patterns); allow != "" {
+		w.Header().Set("Allow", allow)
+		writeJSON(w, http.StatusMethodNotAllowed, objectOf(canonical.ObjectPair{Key: "detail", Value: canonical.NewString("Method Not Allowed")}))
+		return
+	}
+	writeJSON(w, http.StatusNotFound, objectOf(canonical.ObjectPair{Key: "detail", Value: canonical.NewString("Not Found")}))
+}
+
+// allowedMethod 返回路径对应的 Allow；没有任何模式匹配该路径时返回空串。
+//
+// Allow 只报**一个**方法，不是逗号分隔的列表——这是参照实现的可观察行为，不是简化：
+// FastAPI 给每条路由只注册一个方法（management_api.py / ops_api.py 里没有
+// api_route(methods=[...]) 形式的多方法路由），而 Starlette 的部分匹配只保留
+// **第一个**路径匹配的路由（starlette/routing.py: `elif match == Match.PARTIAL and
+// partial is None`），于是 Route.handle 的 `", ".join(self.methods)` 永远只有一个
+// 元素。实测：`PUT /api/models`（GET+POST）回 "GET"，`POST /api/models/{id}`
+// （GET+PUT+DELETE）也回 "GET"。因此遍历顺序必须与注册顺序（即 Python 的装饰器
+// 顺序）一致，同一路径有多个模式时取第一个。
+func allowedMethod(path string, patterns []string) string {
+	for _, pattern := range patterns {
+		method, patternPath, ok := strings.Cut(pattern, " ")
+		if ok && matchesPath(patternPath, path) {
+			return method
+		}
+	}
+	return ""
+}
+
+// matchesPath 报告请求路径是否匹配一条模式路径，{name} 段匹配任意单个非空段。
+//
+// 只处理本包实际注册的 {name} 形式（routePatterns/opsRoutePatterns 的清单被测试
+// 逐条锁定，也因此不会出现 Go 1.22 的 {name...}/{$}）：wildcard 段必须是非空段，
+// 与 Starlette 的 `[^/]+` 一致。
+//
+// ponytail: 不支持 {name...} 与 {$}。本包没有这种模式，真加进来会退化成
+// 「漏判 -> 404」而不是误报 405；到那时按 Go 的通配规则补齐即可。
+func matchesPath(patternPath, path string) bool {
+	patternSegments := strings.Split(patternPath, "/")
+	pathSegments := strings.Split(path, "/")
+	if len(patternSegments) != len(pathSegments) {
+		return false
+	}
+	for i, segment := range patternSegments {
+		if strings.HasPrefix(segment, "{") && strings.HasSuffix(segment, "}") {
+			if pathSegments[i] == "" {
+				return false
+			}
+			continue
+		}
+		if segment != pathSegments[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ServeHTTP 让 Server 直接当 http.Handler 用。

@@ -79,6 +79,11 @@ func (s *Server) register(mux *http.ServeMux) {
 //
 // 单独维护一份而不是从 mux 反射取出：ServeMux 不暴露已注册模式，而「47 条都注册
 // 了」是验收条件之一，需要一条明确的、可断言的清单。
+//
+// **顺序是行为的一部分**：Handler 的兜底 405 用它算 Allow，而参照实现只报「第一个
+// 路径匹配的路由」的方法（见 allowedMethod）。因此同一路径的多个模式必须按注册顺序
+// 排列（`GET /api/models` 在 `POST /api/models` 之前，与 management_api.py 的装饰器
+// 顺序一致，也决定了 `PUT /api/models` 的 Allow 是 "GET"）。
 func routePatterns() []string {
 	return []string{
 		"GET /api/unified-model", "PUT /api/unified-model", "DELETE /api/unified-model",
@@ -101,7 +106,7 @@ func routePatterns() []string {
 		"PUT /api/providers/{provider_id}/keys/{key_name}/models",
 		"GET /api/probes/{probe_id}", "POST /api/probes/{probe_id}/cancel",
 		"POST /api/config/export", "POST /api/config/import",
-		"POST /api/models", "GET /api/models", "GET /api/models/{model_id}",
+		"GET /api/models", "POST /api/models", "GET /api/models/{model_id}",
 		"PUT /api/models/{model_id}", "DELETE /api/models/{model_id}",
 		"GET /api/models/{model_id}/keys", "POST /api/models/{model_id}/keys",
 		"GET /api/models/{model_id}/keys/{key_name}",
