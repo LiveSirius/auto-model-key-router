@@ -104,6 +104,13 @@ jobs:
       - name: 语料新鲜度（keypool）
         run: python -X utf8 scripts/gen_keypool_corpus.py --check
 
+      - name: 语料新鲜度（proxysupport）
+        # 这份语料钉的是 Python 的 bytes.decode("utf-8", errors="replace")：Go 标准库
+        # 没有等价物（strings.ToValidUTF8 会把连续非法字节折叠成一个 U+FFFD，而 Python
+        # 按 Unicode 最大子部分每段各给一个），故 Go 侧手写了 decodeUTF8Replacing。
+        # 它没有可推导的解析式，只能靠语料穷举——因此这份新鲜度闸门尤其重要。
+        run: python -X utf8 scripts/gen_proxysupport_corpus.py --check
+
   go:
     name: Go 静态检查与测试
     runs-on: ubuntu-latest
