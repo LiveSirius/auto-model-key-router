@@ -16,7 +16,9 @@ internal/keypool/testdata/** -text
 internal/logfiles/testdata/** -text
 internal/metrics/testdata/** -text
 internal/proxysupport/testdata/** -text
+internal/proxy/testdata/** -text
 internal/servicestatus/testdata/** -text
+internal/updatecheck/testdata/** -text
 
 # Go 源码强制 LF 检出。
 #

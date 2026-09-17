@@ -126,6 +126,9 @@ jobs:
       - name: 语料新鲜度（servicestatus）
         run: python -X utf8 scripts/gen_servicestatus_corpus.py --check
 
+      - name: 语料新鲜度（updatecheck）
+        run: python -X utf8 scripts/gen_updatecheck_corpus.py --check
+
       - name: 语料新鲜度（upstream 交互语料）
         # 这一条与其余几条不同：它必须**重跑 pytest**（用 AST 定位 tests/test_app.py 里
         # 73 个内联 httpx.MockTransport 站点，再注入插件拦截真实交互），因此耗时约
