@@ -61,9 +61,9 @@ func TestModeFromAPIKeyMatchesPython(t *testing.T) {
 	}
 }
 
-// 访客 key 的**正向**断言在 visitor_test.go（带 !amkr_no_visitor 标签）：
-// 关闭访客功能的编译形态下，正确的访客 key 也必须被拒绝，两条结论互斥，
-// 不能放在同一个无标签文件里。
+// 访客 key 的正向断言在 visitor_test.go。那里已不再带构建标签：访客功能已取消开关
+// 语义（原 `amkr_no_visitor` 裁剪机制连同 visitor_disabled_test.go 一并删除），
+// 访客断言只剩一种形态。
 
 // TestVisitorConstants 锁定对外可见的常量（/health 与模型前缀都依赖它们）。
 func TestVisitorConstants(t *testing.T) {

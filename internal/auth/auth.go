@@ -93,11 +93,13 @@ func ModeFromAPIKey(apiKey, localAPIKey string) *Mode {
 
 // IsVisitorAPIKey 报告凭据是否为访客 key。
 //
-// 同样用恒定时间比较，且**先**判断功能是否可用：功能不可用时即使是正确的访客 key
-// 也一律拒绝（参照实现里 VISITOR_FEATURE_AVAILABLE 是 and 的第一个条件）。
+// 用恒定时间比较，避免按字节提前返回泄漏 key 内容。
+//
+// 这里**刻意没有**「功能是否可用」这一层判断（参照实现是
+// `VISITOR_FEATURE_AVAILABLE and hmac.compare_digest(...)`）：经产品决策取消开关
+// 语义后，访客功能常驻，不再存在「功能缺席」这种状态。详见 visitor_test.go 顶部说明。
 func IsVisitorAPIKey(apiKey string) bool {
-	return VisitorFeatureAvailable() &&
-		hmac.Equal([]byte(apiKey), []byte(VisitorAPIKey))
+	return hmac.Equal([]byte(apiKey), []byte(VisitorAPIKey))
 }
 
 // DefaultAuthorizer 是默认判定：本地 API key 为完整权限，固定 visitor key 为受限权限。

@@ -1,5 +1,3 @@
-//go:build !amkr_no_visitor
-
 package auth
 
 import (
@@ -7,19 +5,17 @@ import (
 	"testing"
 )
 
-// 本文件承载「访客功能可用」形态下的正向断言。
+// 访客功能已按产品决策**取消开关语义**：不再有「功能是否可用」的判定，也不再提供
+// VisitorFeatureAvailable()。原实现用构建标签 `amkr_no_visitor` 裁剪该功能，该机制
+// 与其配套文件（visitor.go / visitor_accessor.go / visitor_disabled.go /
+// visitor_disabled_test.go）已一并删除。
 //
-// 必须带构建标签：关闭访客功能的形态下这些结论全部相反（正确的访客 key 也会被
-// 拒绝），两类结论互斥，不能共存于同一文件。对应文件是 visitor_disabled_test.go。
-
-// TestVisitorFeatureAvailableDefault 锁定默认编译形态下访客功能可用。
+// 为什么取消：Python 侧拿「能否 import itsdangerous」当运行期标记，是打包系统的局限
+// 所迫而非语义标记（visitor.py:9-17）；Go 静态编译本就不存在「可选依赖恰好缺席」。
+// 而访客功能后续会持续丰富，留一个运行期/编译期开关只会让鉴权路径上多一处可被错误
+// 配置影响的判断。
 //
-// 这是 /health 的 visitor_installed 字段来源，属于对外契约。
-func TestVisitorFeatureAvailableDefault(t *testing.T) {
-	if !VisitorFeatureAvailable() {
-		t.Fatal("默认编译下访客功能应可用")
-	}
-}
+// 本文件因此不再带构建标签：访客的断言只有一种形态，不再需要两份互斥的测试文件。
 
 // TestIsVisitorAPIKeyMatchesPython 锁定访客 key 的精确匹配。
 //
