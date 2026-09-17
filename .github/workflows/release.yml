@@ -9,6 +9,8 @@ on:
 
 permissions:
   contents: write
+  # 构建出的镜像推到 GHCR，需要 packages 写权限。
+  packages: write
 
 jobs:
   release:
@@ -75,6 +77,61 @@ jobs:
           wheel=$(find dist -name '*.whl' -print -quit)
           .release-smoke/bin/python -m pip install "${wheel}[visitor]"
           .release-smoke/bin/python -c "from auto_model_key_router.visitor import visitor_feature_available; assert visitor_feature_available()"
+
+      # 镜像在「创建 GitHub Release」之前构建并推送：gh release create 才会建 tag，
+      # 推送若失败则 tag 与 release 都不存在，重跑时这些步骤不会被 existing_release
+      # 的跳过条件挡掉。反过来放在最后，一次网络抖动就会留下「release 已建、镜像没推」
+      # 且重跑永远跳过镜像步骤的半成品状态。
+      - name: Build container image
+        if: steps.existing_release.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          # GHCR 只接受小写仓库名，而 GITHUB_REPOSITORY 带原始大小写（本仓库是 Sparrived）。
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker build --tag "$image:$VERSION" --tag "$image:latest" .
+
+      - name: Verify container image
+        if: steps.existing_release.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          docker run --detach --name amkr-image-check --publish 18000:8000 "$image:$VERSION" >/dev/null
+          # /health 不需要鉴权，30 秒足够首次启动生成配置并拉起服务。
+          if ! curl --fail --silent --retry 30 --retry-delay 1 --retry-connrefused \
+               http://127.0.0.1:18000/health --output /tmp/health.json; then
+            docker logs amkr-image-check
+            echo "容器内的 AMKR 未在 30 秒内就绪。"
+            exit 1
+          fi
+          VERSION="$VERSION" python - <<'PY'
+          import json
+          import os
+
+          health = json.load(open("/tmp/health.json", encoding="utf-8"))
+          assert health["status"] == "ok", health
+          # 镜像装的是同一棵源码，版本号对不上说明构建上下文串了（例如 COPY 了旧 wheel）。
+          assert health["version"] == os.environ["VERSION"], health
+          print(f"镜像内版本 {health['version']}，模型数 {len(health['models'])}")
+          PY
+          docker rm --force amkr-image-check
+
+      - name: Push container image to GHCR
+        if: steps.existing_release.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.package.outputs.version }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          image="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          docker push "$image:$VERSION"
+          # latest 只跟正式版走：rc/a/b/dev 这类预发布不能顶掉它（post 是正式维护版，照推）。
+          if [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.post[0-9]+)?$ ]]; then
+            docker push "$image:latest"
+          else
+            echo "预发布版本 $VERSION，不更新 latest 标签。"
+          fi
 
       - name: Generate release notes
         if: steps.existing_release.outputs.exists == 'false'

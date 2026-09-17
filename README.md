@@ -76,6 +76,33 @@ amkr --config router-config.json --no-webui
 
 也可以不写配置文件，直接在 TUI 的「CLI 设置 → WebUI」里切换。启用后访问 `http://127.0.0.1:8000/ui/`（端口以实际配置为准）。管理接口照常要求本地鉴权 Key；`/ui/` 的挂载在服务启动时完成，通过接口改动开关需要重启服务才会生效。
 
+### Docker
+
+发布时会把镜像推到 GHCR（`ghcr.io/sparrived/auto-model-key-router`，标签为版本号，正式版额外带 `latest`），也可以自己从仓库构建：
+
+```bash
+docker build -t amkr .
+
+docker run -d --name amkr \
+  -p 8000:8000 \
+  -v amkr-data:/data \
+  amkr
+```
+
+首次启动会在卷里自动生成配置和本地授权 Key。之后照常进入 TUI 配置（`-it` 分配终端，必须带）：
+
+```bash
+docker exec -it amkr amkr --config /data/auto-model-key-router/router-config.json
+```
+
+只取本地授权 Key 时用非交互命令：
+
+```bash
+docker exec amkr amkr --config /data/auto-model-key-router/router-config.json --get-key
+```
+
+配置、指标库、日志和 PID 文件都在 `/data/auto-model-key-router` 下，删容器不丢数据。容器内固定监听 `0.0.0.0`（否则端口映射进不去），**因此务必保留 `local_api_key`，不要把端口暴露到公网**；需要改端口时改配置里的 `port`，再同步调整 `-p`。
+
 ## 快速开始
 
 ### 1. 启动 Terminal UI

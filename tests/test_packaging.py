@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path, PurePosixPath
 
@@ -54,3 +55,96 @@ def test_webui_assets_are_declared_as_package_data() -> None:
 
     assert "webui/index.html" in files
     assert any(name.startswith("webui/pages/") for name in files)
+
+
+# —— 容器镜像 ——
+# 镜像由 .github/workflows/release.yml 在发布时构建并推到 GHCR。这套断言不跑 docker，
+# 只钉住那些「错了会在发布当天才发现」的点：镜像缺文件、密钥被打进镜像、容器里监听
+# 127.0.0.1 导致端口映射无效、以及发布流程漏掉构建镜像这一步。
+
+DOCKERFILE = ROOT / "Dockerfile"
+DOCKERIGNORE = ROOT / ".dockerignore"
+RELEASE_WORKFLOW = ROOT / ".github" / "workflows" / "release.yml"
+
+
+def test_dockerfile_builds_from_a_readable_context() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+
+    # setuptools 读 readme/license，源码目录要有，否则镜像构建直接失败。
+    for required in ("pyproject.toml", "README.md", "LICENSE", "auto_model_key_router"):
+        assert required in text, f"Dockerfile 构建上下文缺少 {required}"
+    assert re.search(r"(?m)^FROM python:3\.\d+-slim$", text)
+
+
+def test_dockerfile_listens_beyond_localhost() -> None:
+    # 配置默认 host=127.0.0.1，容器里必须覆盖成 0.0.0.0，否则 -p 8000:8000 打不进来。
+    instructions = "\n".join(
+        line
+        for line in DOCKERFILE.read_text(encoding="utf-8").splitlines()
+        if not line.strip().startswith("#")
+    )
+    assert "0.0.0.0" in instructions
+    assert "127.0.0.1" not in instructions
+
+
+def test_dockerfile_persists_state_outside_the_image() -> None:
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    # 配置/指标库/日志都落在 XDG_CACHE_HOME 下，卷挂在它上面才算持久化。
+    assert "XDG_CACHE_HOME" in text
+    assert "VOLUME /data" in text
+
+
+def dockerignore_patterns() -> list[str]:
+    return [
+        line.strip()
+        for line in DOCKERIGNORE.read_text(encoding="utf-8").splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+
+
+def test_dockerignore_keeps_secrets_out_of_the_image() -> None:
+    patterns = dockerignore_patterns()
+
+    # 这些文件里是真实上游 Key 和本地授权 Key，进镜像就是把凭据发到 registry。
+    for secret in ("router-config.json", ".env", ".env.local", "metrics.sqlite3", "server.log"):
+        assert any(PurePosixPath(secret).match(pattern) for pattern in patterns), secret
+
+
+def test_dockerignore_excludes_heavy_build_artifacts() -> None:
+    # 目录条目可以写成 "dist/" 或 "dist"，两种都算命中。
+    patterns = {pattern.rstrip("/") for pattern in dockerignore_patterns()}
+
+    for artifact in (".git", ".venv", "dist", "__pycache__"):
+        assert artifact in patterns, artifact
+
+
+def test_release_workflow_builds_and_pushes_container_image() -> None:
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "docker build" in text
+    assert "ghcr.io" in text
+    assert "packages: write" in text, "推 GHCR 需要 packages 写权限"
+    # 预发布版本不能顶掉 latest，所以 latest 标签得有条件地推。
+    assert ":latest" in text
+    assert "预发布版本" in text
+
+
+def test_release_workflow_smoke_tests_the_image_before_pushing() -> None:
+    # docker build 成功不代表容器能起来（缺文件、host 写错都是运行时才炸）。
+    # 推送前必须在容器里真的起一次服务，顺序错了就等于把坏镜像发出去。
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert "/health" in text
+    assert text.index("- name: Verify container image") < text.index(
+        "- name: Push container image to GHCR"
+    )
+
+
+def test_release_workflow_pushes_image_before_creating_the_release() -> None:
+    # gh release create 才会建 tag。镜像步骤必须在它之前：推送失败时 tag 和 release
+    # 都不存在，重跑不会被 existing_release 的跳过条件挡住。
+    text = RELEASE_WORKFLOW.read_text(encoding="utf-8")
+
+    assert text.index("- name: Push container image to GHCR") < text.index(
+        "- name: Create GitHub Release"
+    )

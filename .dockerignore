@@ -1,0 +1,31 @@
+# 本机配置与运行时数据：含真实上游 API Key 与本地授权 Key，绝不能进镜像。
+router-config.json
+router-config.example.json
+.env
+.env.*
+.last_config_path
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+*.log
+
+# 构建产物与缓存
+.git
+.venv
+venv/
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.release-smoke/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.dbg/
+
+# 与运行时无关
+docs/
+tests/
+scripts/
