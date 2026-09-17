@@ -1,0 +1,563 @@
+package proxysupport
+
+import (
+	"testing"
+
+	"github.com/Sparrived/auto-model-key-router/internal/canonical"
+	"github.com/Sparrived/auto-model-key-router/internal/config"
+)
+
+// pythonConfigJSON 与 _gp3.py 里喂给参照实现的配置一致。
+const pythonConfigJSON = `{
+  "config_version": 4, "local_api_key": "x",
+  "providers": {"p": {"base_url": "https://up.example", "api_key": "k",
+                      "keys": [{"name": "k1", "api_key": "s"}]}},
+  "models": {"m1": {"provider": "p", "upstream_model": "u", "reasoning_effort": "medium"}}
+}`
+
+// mustValue 解析 JSON 字面量，失败即终止。
+func mustValue(t *testing.T, raw string) *canonical.Value {
+	t.Helper()
+	value, err := canonical.ParseString(raw)
+	if err != nil {
+		t.Fatalf("解析 %s 失败: %v", raw, err)
+	}
+	return value
+}
+
+// pythonConfig 构造与参照实现等价的配置。
+func pythonConfig(t *testing.T) *config.RouterConfig {
+	t.Helper()
+	routerConfig, err := config.FromDict(mustValue(t, pythonConfigJSON))
+	if err != nil {
+		t.Fatalf("构造配置失败: %v", err)
+	}
+	return routerConfig
+}
+
+// TestRequestRouteKindMatchesPython 锁定路径分类。
+func TestRequestRouteKindMatchesPython(t *testing.T) {
+	cases := map[string]string{
+		"chat/completions":   "default",
+		"messages":           "default",
+		"responses":          "default",
+		"images/generations": "image",
+		"images/edits":       "image",
+		"embeddings":         "embeddings",
+		"models":             "default",
+		"":                   "default",
+		"foo":                "default",
+		// 大小写敏感：路径来自 URL，不会自动规范化。
+		"IMAGES/GENERATIONS": "default",
+	}
+	for path, want := range cases {
+		if got := RequestRouteKind(path); got != want {
+			t.Errorf("RequestRouteKind(%q) = %q，期望 %q", path, got, want)
+		}
+	}
+}
+
+// TestUpstreamModeMatchesPython 锁定路径到上游方言的映射。
+func TestUpstreamModeMatchesPython(t *testing.T) {
+	cases := map[string]string{
+		"chat/completions":   "openai",
+		"messages":           "anthropic",
+		"responses":          "responses",
+		"images/generations": "images",
+		"images/edits":       "images",
+		"embeddings":         "embeddings",
+		"models":             "",
+		"":                   "",
+	}
+	for path, want := range cases {
+		if got := UpstreamMode(path); got != want {
+			t.Errorf("UpstreamMode(%q) = %q，期望 %q", path, got, want)
+		}
+	}
+}
+
+// TestUpstreamPathMatchesPython 逐条对齐路径选择（无自定义路由）。
+//
+// 期望值来自对 _upstream_path 的实测调用。分支顺序敏感：`messages` 是否带 model
+// 字段会决定上游是 Anthropic 原生端点还是 OpenAI 兼容端点。
+func TestUpstreamPathMatchesPython(t *testing.T) {
+	cases := []struct {
+		path     string
+		native   bool
+		hasModel bool
+		want     string
+	}{
+		{"chat/completions", false, false, "v1/chat/completions"},
+		{"chat/completions", false, true, "v1/chat/completions"},
+		{"chat/completions", true, false, "v1/chat/completions"},
+		{"chat/completions", true, true, "v1/chat/completions"},
+		{"messages", false, false, "v1/messages"},
+		// 带 model 说明要转换，上游是 OpenAI 兼容端点。
+		{"messages", false, true, "v1/chat/completions"},
+		{"messages", true, false, "v1/messages"},
+		{"messages", true, true, "v1/messages"},
+		{"responses", false, false, "v1/responses"},
+		{"responses", false, true, "v1/chat/completions"},
+		{"responses", true, false, "v1/responses"},
+		{"responses", true, true, "v1/responses"},
+		{"images/generations", false, true, "v1/images/generations"},
+		{"images/generations", true, true, "v1/images/generations"},
+		{"images/edits", false, true, "v1/images/edits"},
+		{"images/edits", true, true, "v1/images/generations"},
+		{"embeddings", false, true, "v1/embeddings"},
+		{"embeddings", true, true, "v1/embeddings"},
+		{"models", false, false, "v1/models"},
+		{"models", true, true, "v1/models"},
+	}
+	for _, item := range cases {
+		payload := mustValue(t, `{}`)
+		if item.hasModel {
+			payload = mustValue(t, `{"model":"m"}`)
+		}
+		got, err := UpstreamPath(item.path, payload, item.native, map[string]string{})
+		if err != nil {
+			t.Fatalf("UpstreamPath(%q) 报错: %v", item.path, err)
+		}
+		if got != item.want {
+			t.Errorf("UpstreamPath(%q, native=%v, model=%v) = %q，期望 %q",
+				item.path, item.native, item.hasModel, got, item.want)
+		}
+	}
+}
+
+// TestUpstreamPathUsesConfiguredRoutes 对齐配置了自定义路由时的结果。
+func TestUpstreamPathUsesConfiguredRoutes(t *testing.T) {
+	routes := map[string]string{
+		"openai":     "v1/custom/chat",
+		"anthropic":  "v1/custom/msg",
+		"responses":  "v1/custom/resp",
+		"images":     "v1/custom/img",
+		"embeddings": "v1/custom/emb",
+	}
+	cases := []struct {
+		path     string
+		native   bool
+		hasModel bool
+		want     string
+	}{
+		{"chat/completions", false, true, "v1/custom/chat"},
+		{"messages", false, false, "v1/messages"},
+		{"messages", false, true, "v1/custom/chat"},
+		{"messages", true, false, "v1/custom/msg"},
+		{"responses", false, false, "v1/responses"},
+		{"responses", false, true, "v1/custom/chat"},
+		{"responses", true, false, "v1/custom/resp"},
+		{"images/generations", false, true, "v1/custom/img"},
+		{"embeddings", false, true, "v1/custom/emb"},
+	}
+	for _, item := range cases {
+		payload := mustValue(t, `{}`)
+		if item.hasModel {
+			payload = mustValue(t, `{"model":"m"}`)
+		}
+		got, err := UpstreamPath(item.path, payload, item.native, routes)
+		if err != nil {
+			t.Fatalf("UpstreamPath(%q) 报错: %v", item.path, err)
+		}
+		if got != item.want {
+			t.Errorf("UpstreamPath(%q, native=%v, model=%v) = %q，期望 %q",
+				item.path, item.native, item.hasModel, got, item.want)
+		}
+	}
+}
+
+// TestUpstreamPathImagesEditsIgnoresConfiguredRoute 锁定一个**保留下来的参照实现缺陷**。
+//
+// upstream_routes 里给 images 配的路径，对 `/v1/images/edits` 的**非原生**请求无效：
+// 参照实现只在 native 或 `path == "images/generations"` 时查配置，images/edits 落到
+// 最后的 `f"v1/{path}"` 兜底。因此用户为 images 配的自定义路由在 edits 上被静默忽略。
+//
+// 为什么照抄而不修：修掉会让同一份配置在 Python 与 Go 上行为不同，正是迁移期最忌讳的。
+// 是否修属于产品决策（见迁移方案 §4.5）。本测试把这个差异钉住，将来若决定修，必须
+// 两边一起改并同时更新此测试。
+func TestUpstreamPathImagesEditsIgnoresConfiguredRoute(t *testing.T) {
+	routes := map[string]string{"images": "v1/custom/img"}
+	// 非 native：忽略自定义路由。
+	got, err := UpstreamPath("images/edits", mustValue(t, `{"model":"m"}`), false, routes)
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/images/edits" {
+		t.Fatalf("非 native 的 images/edits 应走兜底路径 v1/images/edits，实际 %q", got)
+	}
+	// native：使用自定义路由。
+	got, err = UpstreamPath("images/edits", mustValue(t, `{"model":"m"}`), true, routes)
+	if err != nil {
+		t.Fatalf("报错: %v", err)
+	}
+	if got != "v1/custom/img" {
+		t.Fatalf("native 的 images/edits 应使用自定义路由，实际 %q", got)
+	}
+}
+
+// TestJoinURLMatchesPython 锁定 URL 拼接（两侧斜杠数量都不敏感）。
+func TestJoinURLMatchesPython(t *testing.T) {
+	cases := []struct{ base, path, want string }{
+		{"https://api.openai.com", "v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		{"https://api.openai.com/", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		{"https://api.openai.com///", "///v1/x", "https://api.openai.com/v1/x"},
+		// 空 base 保留前导斜杠，不是朴素拼接。
+		{"", "v1/x", "/v1/x"},
+		{"https://x.com", "", "https://x.com/"},
+	}
+	for _, item := range cases {
+		if got := JoinURL(item.base, item.path); got != item.want {
+			t.Errorf("JoinURL(%q, %q) = %q，期望 %q", item.base, item.path, got, item.want)
+		}
+	}
+}
+
+// TestUpstreamHeadersMatchesPython 锁定头部过滤与补充。
+func TestUpstreamHeadersMatchesPython(t *testing.T) {
+	client := map[string][]string{
+		"Authorization":     {"Bearer client"},
+		"Host":              {"amkr.local"},
+		"Content-Length":    {"10"},
+		"Destination-Addr":  {"x"},
+		"Accept-Encoding":   {"gzip"},
+		"X-Api-Key":         {"ck"},
+		"Anthropic-Version": {"2023-06-01"},
+		"Anthropic-Beta":    {"b"},
+		"Content-Type":      {"application/json"},
+		"X-Custom":          {"keep"},
+		"User-Agent":        {"ua"},
+	}
+	got := UpstreamHeaders(client, "up-key")
+	want := map[string]string{
+		"Content-Type":    "application/json",
+		"X-Custom":        "keep",
+		"User-Agent":      "ua",
+		"Authorization":   "Bearer up-key",
+		"Accept-Encoding": "identity",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("头部数量不符: 期望 %d，实际 %d (%v)", len(want), len(got), got)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("头部 %q = %q，期望 %q", key, got[key], value)
+		}
+	}
+	// 剔除是大小写不敏感的。
+	for _, blocked := range []string{"Host", "Content-Length", "X-Api-Key", "Anthropic-Version", "Anthropic-Beta", "Destination-Addr"} {
+		if _, exists := got[blocked]; exists {
+			t.Errorf("头部 %q 应被剔除", blocked)
+		}
+	}
+	// 空客户端头也要补齐两个必需头。
+	empty := UpstreamHeaders(nil, "k")
+	if len(empty) != 2 || empty["Authorization"] != "Bearer k" || empty["Accept-Encoding"] != "identity" {
+		t.Fatalf("空客户端头应只补两个必需头，实际 %v", empty)
+	}
+}
+
+// TestResponseHeadersMatchesPython 锁定响应头过滤与同名后者覆盖。
+func TestResponseHeadersMatchesPython(t *testing.T) {
+	got := ResponseHeaders(map[string][]string{
+		"Content-Encoding":  {"gzip"},
+		"Content-Length":    {"5"},
+		"Transfer-Encoding": {"chunked"},
+		"Connection":        {"keep-alive"},
+		"Content-Type":      {"application/json"},
+		"X-Req-Id":          {"r1"},
+	})
+	want := map[string]string{"Content-Type": "application/json", "X-Req-Id": "r1"}
+	if len(got) != len(want) {
+		t.Fatalf("响应头数量不符: 期望 %d，实际 %d (%v)", len(want), len(got), got)
+	}
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("响应头 %q = %q，期望 %q", key, got[key], value)
+		}
+	}
+	// 同名头后者覆盖前者（Python 收进 dict 的结果）。
+	dup := ResponseHeaders(map[string][]string{"X-Multi": {"first", "second", "third"}})
+	if dup["X-Multi"] != "third" {
+		t.Fatalf("同名响应头应后者覆盖，实际 %q", dup["X-Multi"])
+	}
+	if len(ResponseHeaders(nil)) != 0 {
+		t.Fatal("空输入应返回空")
+	}
+}
+
+// TestJSONBodyMatchesPython 锁定请求体解析的宽容策略。
+func TestJSONBodyMatchesPython(t *testing.T) {
+	empty := JSONBody(nil)
+	if !empty.IsObject() || empty.Len() != 0 {
+		t.Fatal("空体应返回空对象")
+	}
+	// 非对象与坏 JSON 都退化为空对象，而不是报错。
+	for _, raw := range []string{`[1,2]`, `notjson`, `"str"`, `null`, `123`} {
+		value := JSONBody([]byte(raw))
+		if !value.IsObject() || value.Len() != 0 {
+			t.Errorf("输入 %q 应返回空对象，实际 %v", raw, value)
+		}
+	}
+	// 合法对象原样解析。
+	value := JSONBody([]byte(`{"a":1}`))
+	if value.Lookup("a") == nil {
+		t.Fatal("合法对象应保留字段")
+	}
+}
+
+// TestResolveModelIDMatchesPython 锁定模型 ID 提取，重点区分「空串」与「不存在」。
+func TestResolveModelIDMatchesPython(t *testing.T) {
+	cases := []struct {
+		path    string
+		payload string
+		want    string
+		wantOK  bool
+	}{
+		// models 路径表示"列出模型"，无需模型，返回存在的空串。
+		{"models", `{}`, "", true},
+		{"models", `{"model":"x"}`, "", true},
+		{"chat/completions", `{"model":"gpt-4"}`, "gpt-4", true},
+		// 以下都是"不存在"，走默认路由。
+		{"chat/completions", `{}`, "", false},
+		{"chat/completions", `{"model":""}`, "", false},
+		{"chat/completions", `{"model":null}`, "", false},
+		{"chat/completions", `{"model":0}`, "", false},
+		{"chat/completions", `{"model":[]}`, "", false},
+		// 非空非字符串会被 str() 化。
+		{"chat/completions", `{"model":123}`, "123", true},
+	}
+	for _, item := range cases {
+		got, ok := ResolveModelID(item.path, mustValue(t, item.payload))
+		if got != item.want || ok != item.wantOK {
+			t.Errorf("ResolveModelID(%q, %s) = (%q, %v)，期望 (%q, %v)",
+				item.path, item.payload, got, ok, item.want, item.wantOK)
+		}
+	}
+}
+
+// TestSplitRequestedModelKeyMatchesPython 锁定 `model[key]` 拆解。
+func TestSplitRequestedModelKeyMatchesPython(t *testing.T) {
+	cases := []struct {
+		input   string
+		want    string
+		wantKey string
+		wantOK  bool
+	}{
+		{"gpt-4", "gpt-4", "", false},
+		{"gpt-4[key1]", "gpt-4", "key1", true},
+		{"gpt-4[ key1 ]", "gpt-4", "key1", true},
+		// 贪婪匹配：取**最后**一个方括号组。
+		{"a[b][c]", "a[b]", "c", true},
+		// 空方括号不匹配（内层要求 1 个以上字符）。
+		{"a[]", "a[]", "", false},
+		{"[k]", "[k]", "", false},
+		{"gpt-4[ключ]", "gpt-4", "ключ", true},
+		// 首尾空白**不**被 strip：`.` 能匹配空格，整体匹配成功但模型名带空格。
+		{"  gpt-4[x]  ", "  gpt-4[x]  ", "", false},
+		// 嵌套方括号不匹配。
+		{"a[[b]]", "a[[b]]", "", false},
+		{"a[ b c ]", "a", "b c", true},
+		{"模型[名字]", "模型", "名字", true},
+	}
+	for _, item := range cases {
+		got, key, ok := SplitRequestedModelKey(item.input)
+		if got != item.want || key != item.wantKey || ok != item.wantOK {
+			t.Errorf("SplitRequestedModelKey(%q) = (%q, %q, %v)，期望 (%q, %q, %v)",
+				item.input, got, key, ok, item.want, item.wantKey, item.wantOK)
+		}
+	}
+}
+
+// TestIsStreamRequestMatchesPython 锁定流式判断的严格性。
+//
+// 用 `is True` 而非真值判断：1、"true" 都**不是**流式。静默当成流式会让下游拿到
+// SSE 却按 JSON 解析。
+func TestIsStreamRequestMatchesPython(t *testing.T) {
+	cases := map[string]bool{
+		`{}`:                false,
+		`{"stream":true}`:   true,
+		`{"stream":false}`:  false,
+		`{"stream":1}`:      false,
+		`{"stream":"true"}`: false,
+		`{"stream":null}`:   false,
+		`{"stream":[]}`:     false,
+	}
+	for payload, want := range cases {
+		if got := IsStreamRequest(mustValue(t, payload)); got != want {
+			t.Errorf("IsStreamRequest(%s) = %v，期望 %v", payload, got, want)
+		}
+	}
+}
+
+// TestApplyTaskParamsMatchesPython 锁定任务参数覆盖（任务总是赢）。
+func TestApplyTaskParamsMatchesPython(t *testing.T) {
+	got := ApplyTaskParams(mustValue(t, `{"a":1,"b":2}`), mustValue(t, `{"b":9,"c":3}`))
+	if text := canonical.DumpsOrdered(got); text != `{"a":1,"b":9,"c":3}` {
+		t.Fatalf("合并结果不符: %s", text)
+	}
+	// nil / 空任务参数返回原对象。
+	original := mustValue(t, `{"a":1}`)
+	if ApplyTaskParams(original, canonical.NewNull()) != original {
+		t.Fatal("无条件参数时应返回原对象")
+	}
+	if ApplyTaskParams(original, mustValue(t, `{}`)) != original {
+		t.Fatal("空任务参数时应返回原对象")
+	}
+	// 不修改入参。
+	payload := mustValue(t, `{"a":1}`)
+	ApplyTaskParams(payload, mustValue(t, `{"a":99}`))
+	if text := canonical.DumpsOrdered(payload); text != `{"a":1}` {
+		t.Fatalf("不应修改入参，实际 %s", text)
+	}
+}
+
+// TestTaskParamConflictsMatchesPython 锁定冲突检测的两条特殊规则。
+func TestTaskParamConflictsMatchesPython(t *testing.T) {
+	cases := []struct {
+		payload string
+		task    string
+		want    []string
+	}{
+		{`{"temperature":0.5}`, `{"temperature":1.0}`, []string{"temperature"}},
+		{`{"temperature":0.5}`, `{"top_p":0.9}`, nil},
+		{`{}`, `{"temperature":1.0}`, nil},
+		{`{"temperature":0.5}`, `null`, nil},
+		// Anthropic 方言：任务的 stop 对应载荷的 stop_sequences。
+		{`{"stop_sequences":["a"]}`, `{"stop":["b"]}`, []string{"stop_sequences"}},
+		{`{"stop":["a"]}`, `{"stop":["b"]}`, []string{"stop"}},
+		// reasoning_effort 刻意不算冲突。
+		{`{"reasoning_effort":"low"}`, `{"reasoning_effort":"high"}`, nil},
+		// 不在任务里的载荷字段不算冲突。
+		{`{"max_tokens":5}`, `{"temperature":1}`, nil},
+		{`{"temperature":0.5}`, `{"temperature":1,"stop":["b"]}`, []string{"temperature"}},
+		{`{"stop_sequences":["a"]}`, `{"stop":["b"],"top_p":0.5}`, []string{"stop_sequences"}},
+	}
+	for _, item := range cases {
+		got := TaskParamConflicts(mustValue(t, item.payload), mustValue(t, item.task))
+		if len(got) != len(item.want) {
+			t.Errorf("TaskParamConflicts(%s, %s) = %v，期望 %v", item.payload, item.task, got, item.want)
+			continue
+		}
+		for i := range got {
+			if got[i] != item.want[i] {
+				t.Errorf("TaskParamConflicts(%s, %s) = %v，期望 %v", item.payload, item.task, got, item.want)
+				break
+			}
+		}
+	}
+}
+
+// TestIsToolErrorMatchesPython 锁定工具相关错误检测。
+func TestIsToolErrorMatchesPython(t *testing.T) {
+	cases := []struct {
+		content string
+		want    bool
+	}{
+		{`{"error":{"message":"tool not supported"}}`, true},
+		{`{"error":{"message":"Function calling failed"}}`, true},
+		{`{"error":{"param":"tools"}}`, true},
+		{`{"error":{"param":"functions[0]"}}`, true},
+		{`{"error":{"message":"unrelated"}}`, false},
+		{`{"error":"notadict"}`, false},
+		{`notjson`, false},
+		{`[1,2]`, false},
+		{``, false},
+		// 大小写不敏感。
+		{`{"error":{"message":"TOOL ERROR"}}`, true},
+	}
+	for _, item := range cases {
+		if got := IsToolError([]byte(item.content)); got != item.want {
+			t.Errorf("IsToolError(%q) = %v，期望 %v", item.content, got, item.want)
+		}
+	}
+}
+
+// TestFilterFunctionToolsMatchesPython 锁定工具过滤。
+func TestFilterFunctionToolsMatchesPython(t *testing.T) {
+	cases := []struct{ input, want string }{
+		// 只有 function 类型且函数名非空的保留。
+		{`{"tools":[{"type":"function","function":{"name":"a"}}]}`,
+			`{"tools":[{"type":"function","function":{"name":"a"}}]}`},
+		{`{"tools":[{"type":"function","function":{"name":""}}]}`, `{"tools":[]}`},
+		{`{"tools":[{"type":"function","function":{}}]}`, `{"tools":[]}`},
+		{`{"tools":[{"type":"function"}]}`, `{"tools":[]}`},
+		{`{"tools":[{"type":"other","function":{"name":"a"}}]}`, `{"tools":[]}`},
+		{`{"tools":["notadict",{"type":"function","function":{"name":"b"}}]}`,
+			`{"tools":[{"type":"function","function":{"name":"b"}}]}`},
+		{`{"tools":[]}`, `{"tools":[]}`},
+		// 非列表原样保留：上游可能接受别的形态，擅自改写会改变语义。
+		{`{"tools":"notalist"}`, `{"tools":"notalist"}`},
+		{`{}`, `{}`},
+		// 其它字段不动。
+		{`{"tools":[{"type":"function","function":{"name":"a"}}],"model":"m"}`,
+			`{"tools":[{"type":"function","function":{"name":"a"}}],"model":"m"}`},
+	}
+	for _, item := range cases {
+		got := canonical.DumpsOrdered(FilterFunctionTools(mustValue(t, item.input)))
+		if got != item.want {
+			t.Errorf("FilterFunctionTools(%s)\n 实际 %s\n 期望 %s", item.input, got, item.want)
+		}
+	}
+	// 不修改入参。
+	original := mustValue(t, `{"tools":[{"type":"other","function":{"name":"a"}}]}`)
+	FilterFunctionTools(original)
+	if text := canonical.DumpsOrdered(original); text != `{"tools":[{"type":"other","function":{"name":"a"}}]}` {
+		t.Fatalf("不应修改入参，实际 %s", text)
+	}
+}
+
+// TestUnsupportedEndpointStatusCodes 锁定"端点不支持"的状态码集合。
+func TestUnsupportedEndpointStatusCodes(t *testing.T) {
+	got := map[int]bool{}
+	for _, code := range UnsupportedEndpointStatusCodes {
+		got[code] = true
+	}
+	for _, want := range []int{404, 405, 501} {
+		if !got[want] {
+			t.Errorf("状态码 %d 应被标记为不支持", want)
+		}
+	}
+	if len(UnsupportedEndpointStatusCodes) != 3 {
+		t.Fatalf("应恰好 3 个状态码，实际 %v", UnsupportedEndpointStatusCodes)
+	}
+}
+
+// TestNativeEndpointSupportedMatchesPython 锁定探测判定。
+//
+// 只有 404/405/501 说明端点不存在；认证错误、参数错误都说明端点**存在**。
+func TestNativeEndpointSupportedMatchesPython(t *testing.T) {
+	for _, code := range []int{404, 405, 501} {
+		supported, reason := NativeEndpointSupported(code)
+		if supported || reason != "unsupported" {
+			t.Errorf("状态码 %d 应判为不支持，实际 (%v, %q)", code, supported, reason)
+		}
+	}
+	for _, code := range []int{200, 400, 401, 403, 429, 500, 502} {
+		supported, reason := NativeEndpointSupported(code)
+		if !supported || reason != "ok" {
+			t.Errorf("状态码 %d 应判为支持（端点存在），实际 (%v, %q)", code, supported, reason)
+		}
+	}
+}
+
+// TestNativeEndpointProbeMatchesPython 锁定探测请求体与头部。
+func TestNativeEndpointProbeMatchesPython(t *testing.T) {
+	anthropic := canonical.DumpsOrdered(NativeEndpointProbeBody("anthropic", "m1"))
+	want := `{"model":"m1","max_tokens":1,"messages":[{"role":"user","content":"test"}]}`
+	if anthropic != want {
+		t.Errorf("Anthropic 探测体不符\n 实际 %s\n 期望 %s", anthropic, want)
+	}
+	responses := canonical.DumpsOrdered(NativeEndpointProbeBody("responses", "m1"))
+	wantResponses := `{"model":"m1","input":"test","max_output_tokens":1}`
+	if responses != wantResponses {
+		t.Errorf("Responses 探测体不符\n 实际 %s\n 期望 %s", responses, wantResponses)
+	}
+	// Anthropic 需要 anthropic-version；Responses 不需要。
+	headers := NativeEndpointProbeHeaders("anthropic", "k")
+	if headers["anthropic-version"] != "2023-06-01" || headers["Authorization"] != "Bearer k" {
+		t.Errorf("Anthropic 探测头不符: %v", headers)
+	}
+	if _, exists := NativeEndpointProbeHeaders("responses", "k")["anthropic-version"]; exists {
+		t.Error("Responses 探测头不应带 anthropic-version")
+	}
+}

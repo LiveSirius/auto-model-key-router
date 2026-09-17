@@ -10,3 +10,4 @@
 internal/canonical/testdata/** -text
 internal/config/testdata/** -text
 internal/keypool/testdata/** -text
+internal/proxysupport/testdata/** -text

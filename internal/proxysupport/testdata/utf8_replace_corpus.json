@@ -1,0 +1,5906 @@
+[
+ {
+  "bytes_hex": "00",
+  "replaced": "\u0000"
+ },
+ {
+  "bytes_hex": "01",
+  "replaced": "\u0001"
+ },
+ {
+  "bytes_hex": "02",
+  "replaced": "\u0002"
+ },
+ {
+  "bytes_hex": "03",
+  "replaced": "\u0003"
+ },
+ {
+  "bytes_hex": "04",
+  "replaced": "\u0004"
+ },
+ {
+  "bytes_hex": "05",
+  "replaced": "\u0005"
+ },
+ {
+  "bytes_hex": "06",
+  "replaced": "\u0006"
+ },
+ {
+  "bytes_hex": "07",
+  "replaced": "\u0007"
+ },
+ {
+  "bytes_hex": "08",
+  "replaced": "\b"
+ },
+ {
+  "bytes_hex": "09",
+  "replaced": "\t"
+ },
+ {
+  "bytes_hex": "0a",
+  "replaced": "\n"
+ },
+ {
+  "bytes_hex": "0b",
+  "replaced": "\u000b"
+ },
+ {
+  "bytes_hex": "0c",
+  "replaced": "\f"
+ },
+ {
+  "bytes_hex": "0d",
+  "replaced": "\r"
+ },
+ {
+  "bytes_hex": "0e",
+  "replaced": "\u000e"
+ },
+ {
+  "bytes_hex": "0f",
+  "replaced": "\u000f"
+ },
+ {
+  "bytes_hex": "10",
+  "replaced": "\u0010"
+ },
+ {
+  "bytes_hex": "11",
+  "replaced": "\u0011"
+ },
+ {
+  "bytes_hex": "12",
+  "replaced": "\u0012"
+ },
+ {
+  "bytes_hex": "13",
+  "replaced": "\u0013"
+ },
+ {
+  "bytes_hex": "14",
+  "replaced": "\u0014"
+ },
+ {
+  "bytes_hex": "15",
+  "replaced": "\u0015"
+ },
+ {
+  "bytes_hex": "16",
+  "replaced": "\u0016"
+ },
+ {
+  "bytes_hex": "17",
+  "replaced": "\u0017"
+ },
+ {
+  "bytes_hex": "18",
+  "replaced": "\u0018"
+ },
+ {
+  "bytes_hex": "19",
+  "replaced": "\u0019"
+ },
+ {
+  "bytes_hex": "1a",
+  "replaced": "\u001a"
+ },
+ {
+  "bytes_hex": "1b",
+  "replaced": "\u001b"
+ },
+ {
+  "bytes_hex": "1c",
+  "replaced": "\u001c"
+ },
+ {
+  "bytes_hex": "1d",
+  "replaced": "\u001d"
+ },
+ {
+  "bytes_hex": "1e",
+  "replaced": "\u001e"
+ },
+ {
+  "bytes_hex": "1f",
+  "replaced": "\u001f"
+ },
+ {
+  "bytes_hex": "20",
+  "replaced": " "
+ },
+ {
+  "bytes_hex": "21",
+  "replaced": "!"
+ },
+ {
+  "bytes_hex": "22",
+  "replaced": "\""
+ },
+ {
+  "bytes_hex": "23",
+  "replaced": "#"
+ },
+ {
+  "bytes_hex": "24",
+  "replaced": "$"
+ },
+ {
+  "bytes_hex": "25",
+  "replaced": "%"
+ },
+ {
+  "bytes_hex": "26",
+  "replaced": "&"
+ },
+ {
+  "bytes_hex": "27",
+  "replaced": "'"
+ },
+ {
+  "bytes_hex": "28",
+  "replaced": "("
+ },
+ {
+  "bytes_hex": "29",
+  "replaced": ")"
+ },
+ {
+  "bytes_hex": "2a",
+  "replaced": "*"
+ },
+ {
+  "bytes_hex": "2b",
+  "replaced": "+"
+ },
+ {
+  "bytes_hex": "2c",
+  "replaced": ","
+ },
+ {
+  "bytes_hex": "2d",
+  "replaced": "-"
+ },
+ {
+  "bytes_hex": "2e",
+  "replaced": "."
+ },
+ {
+  "bytes_hex": "2f",
+  "replaced": "/"
+ },
+ {
+  "bytes_hex": "30",
+  "replaced": "0"
+ },
+ {
+  "bytes_hex": "31",
+  "replaced": "1"
+ },
+ {
+  "bytes_hex": "32",
+  "replaced": "2"
+ },
+ {
+  "bytes_hex": "33",
+  "replaced": "3"
+ },
+ {
+  "bytes_hex": "34",
+  "replaced": "4"
+ },
+ {
+  "bytes_hex": "35",
+  "replaced": "5"
+ },
+ {
+  "bytes_hex": "36",
+  "replaced": "6"
+ },
+ {
+  "bytes_hex": "37",
+  "replaced": "7"
+ },
+ {
+  "bytes_hex": "38",
+  "replaced": "8"
+ },
+ {
+  "bytes_hex": "39",
+  "replaced": "9"
+ },
+ {
+  "bytes_hex": "3a",
+  "replaced": ":"
+ },
+ {
+  "bytes_hex": "3b",
+  "replaced": ";"
+ },
+ {
+  "bytes_hex": "3c",
+  "replaced": "<"
+ },
+ {
+  "bytes_hex": "3d",
+  "replaced": "="
+ },
+ {
+  "bytes_hex": "3e",
+  "replaced": ">"
+ },
+ {
+  "bytes_hex": "3f",
+  "replaced": "?"
+ },
+ {
+  "bytes_hex": "40",
+  "replaced": "@"
+ },
+ {
+  "bytes_hex": "41",
+  "replaced": "A"
+ },
+ {
+  "bytes_hex": "42",
+  "replaced": "B"
+ },
+ {
+  "bytes_hex": "43",
+  "replaced": "C"
+ },
+ {
+  "bytes_hex": "44",
+  "replaced": "D"
+ },
+ {
+  "bytes_hex": "45",
+  "replaced": "E"
+ },
+ {
+  "bytes_hex": "46",
+  "replaced": "F"
+ },
+ {
+  "bytes_hex": "47",
+  "replaced": "G"
+ },
+ {
+  "bytes_hex": "48",
+  "replaced": "H"
+ },
+ {
+  "bytes_hex": "49",
+  "replaced": "I"
+ },
+ {
+  "bytes_hex": "4a",
+  "replaced": "J"
+ },
+ {
+  "bytes_hex": "4b",
+  "replaced": "K"
+ },
+ {
+  "bytes_hex": "4c",
+  "replaced": "L"
+ },
+ {
+  "bytes_hex": "4d",
+  "replaced": "M"
+ },
+ {
+  "bytes_hex": "4e",
+  "replaced": "N"
+ },
+ {
+  "bytes_hex": "4f",
+  "replaced": "O"
+ },
+ {
+  "bytes_hex": "50",
+  "replaced": "P"
+ },
+ {
+  "bytes_hex": "51",
+  "replaced": "Q"
+ },
+ {
+  "bytes_hex": "52",
+  "replaced": "R"
+ },
+ {
+  "bytes_hex": "53",
+  "replaced": "S"
+ },
+ {
+  "bytes_hex": "54",
+  "replaced": "T"
+ },
+ {
+  "bytes_hex": "55",
+  "replaced": "U"
+ },
+ {
+  "bytes_hex": "56",
+  "replaced": "V"
+ },
+ {
+  "bytes_hex": "57",
+  "replaced": "W"
+ },
+ {
+  "bytes_hex": "58",
+  "replaced": "X"
+ },
+ {
+  "bytes_hex": "59",
+  "replaced": "Y"
+ },
+ {
+  "bytes_hex": "5a",
+  "replaced": "Z"
+ },
+ {
+  "bytes_hex": "5b",
+  "replaced": "["
+ },
+ {
+  "bytes_hex": "5c",
+  "replaced": "\\"
+ },
+ {
+  "bytes_hex": "5d",
+  "replaced": "]"
+ },
+ {
+  "bytes_hex": "5e",
+  "replaced": "^"
+ },
+ {
+  "bytes_hex": "5f",
+  "replaced": "_"
+ },
+ {
+  "bytes_hex": "60",
+  "replaced": "`"
+ },
+ {
+  "bytes_hex": "61",
+  "replaced": "a"
+ },
+ {
+  "bytes_hex": "62",
+  "replaced": "b"
+ },
+ {
+  "bytes_hex": "63",
+  "replaced": "c"
+ },
+ {
+  "bytes_hex": "64",
+  "replaced": "d"
+ },
+ {
+  "bytes_hex": "65",
+  "replaced": "e"
+ },
+ {
+  "bytes_hex": "66",
+  "replaced": "f"
+ },
+ {
+  "bytes_hex": "67",
+  "replaced": "g"
+ },
+ {
+  "bytes_hex": "68",
+  "replaced": "h"
+ },
+ {
+  "bytes_hex": "69",
+  "replaced": "i"
+ },
+ {
+  "bytes_hex": "6a",
+  "replaced": "j"
+ },
+ {
+  "bytes_hex": "6b",
+  "replaced": "k"
+ },
+ {
+  "bytes_hex": "6c",
+  "replaced": "l"
+ },
+ {
+  "bytes_hex": "6d",
+  "replaced": "m"
+ },
+ {
+  "bytes_hex": "6e",
+  "replaced": "n"
+ },
+ {
+  "bytes_hex": "6f",
+  "replaced": "o"
+ },
+ {
+  "bytes_hex": "70",
+  "replaced": "p"
+ },
+ {
+  "bytes_hex": "71",
+  "replaced": "q"
+ },
+ {
+  "bytes_hex": "72",
+  "replaced": "r"
+ },
+ {
+  "bytes_hex": "73",
+  "replaced": "s"
+ },
+ {
+  "bytes_hex": "74",
+  "replaced": "t"
+ },
+ {
+  "bytes_hex": "75",
+  "replaced": "u"
+ },
+ {
+  "bytes_hex": "76",
+  "replaced": "v"
+ },
+ {
+  "bytes_hex": "77",
+  "replaced": "w"
+ },
+ {
+  "bytes_hex": "78",
+  "replaced": "x"
+ },
+ {
+  "bytes_hex": "79",
+  "replaced": "y"
+ },
+ {
+  "bytes_hex": "7a",
+  "replaced": "z"
+ },
+ {
+  "bytes_hex": "7b",
+  "replaced": "{"
+ },
+ {
+  "bytes_hex": "7c",
+  "replaced": "|"
+ },
+ {
+  "bytes_hex": "7d",
+  "replaced": "}"
+ },
+ {
+  "bytes_hex": "7e",
+  "replaced": "~"
+ },
+ {
+  "bytes_hex": "7f",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "81",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "82",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "83",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "84",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "85",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "86",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "87",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "88",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "89",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "8a",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "8b",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "8c",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "8d",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "8e",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "91",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "92",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "93",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "94",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "95",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "96",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "97",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "98",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "99",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "9a",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "9b",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "9c",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "9d",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "9e",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a1",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a2",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a3",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a4",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a5",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a6",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a7",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "a9",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "aa",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ab",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ac",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ad",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ae",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "af",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b1",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b2",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b3",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b4",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b5",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b6",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b7",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "b9",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ba",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "bb",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "bc",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "bd",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "be",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c1",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c2",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c3",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c4",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c5",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c6",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c7",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c9",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ca",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cb",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cc",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cd",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ce",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d1",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d2",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d3",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d4",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d5",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d6",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d7",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d9",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "da",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "db",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "dc",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "dd",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "de",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "df",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e1",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e2",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e3",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e4",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e5",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e6",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e7",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e9",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ea",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eb",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ec",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ed",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ee",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ef",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f1",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f2",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f3",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f4",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f5",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f6",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f7",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f9",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fa",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fb",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fc",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fd",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fe",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ff",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c000",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c041",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c07f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c080",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c08f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c090",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c09f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c0a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c0bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c0ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c0f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c0ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c100",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c141",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c17f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c180",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c18f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c190",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c19f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c1a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c1bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c1c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c1ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c1f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c1ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c200",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c241",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c27f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c280",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "c28f",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "c290",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "c29f",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "c2a0",
+  "replaced": " "
+ },
+ {
+  "bytes_hex": "c2bf",
+  "replaced": "¿"
+ },
+ {
+  "bytes_hex": "c2c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c2ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c2f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c2ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c300",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c341",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c37f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c380",
+  "replaced": "À"
+ },
+ {
+  "bytes_hex": "c38f",
+  "replaced": "Ï"
+ },
+ {
+  "bytes_hex": "c390",
+  "replaced": "Ð"
+ },
+ {
+  "bytes_hex": "c39f",
+  "replaced": "ß"
+ },
+ {
+  "bytes_hex": "c3a0",
+  "replaced": "à"
+ },
+ {
+  "bytes_hex": "c3bf",
+  "replaced": "ÿ"
+ },
+ {
+  "bytes_hex": "c3c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c3ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c3f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c3ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c400",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c441",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c47f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c480",
+  "replaced": "Ā"
+ },
+ {
+  "bytes_hex": "c48f",
+  "replaced": "ď"
+ },
+ {
+  "bytes_hex": "c490",
+  "replaced": "Đ"
+ },
+ {
+  "bytes_hex": "c49f",
+  "replaced": "ğ"
+ },
+ {
+  "bytes_hex": "c4a0",
+  "replaced": "Ġ"
+ },
+ {
+  "bytes_hex": "c4bf",
+  "replaced": "Ŀ"
+ },
+ {
+  "bytes_hex": "c4c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c4ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c4f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c4ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c500",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c541",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c57f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c580",
+  "replaced": "ŀ"
+ },
+ {
+  "bytes_hex": "c58f",
+  "replaced": "ŏ"
+ },
+ {
+  "bytes_hex": "c590",
+  "replaced": "Ő"
+ },
+ {
+  "bytes_hex": "c59f",
+  "replaced": "ş"
+ },
+ {
+  "bytes_hex": "c5a0",
+  "replaced": "Š"
+ },
+ {
+  "bytes_hex": "c5bf",
+  "replaced": "ſ"
+ },
+ {
+  "bytes_hex": "c5c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c5ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c5f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c5ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c600",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c641",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c67f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c680",
+  "replaced": "ƀ"
+ },
+ {
+  "bytes_hex": "c68f",
+  "replaced": "Ə"
+ },
+ {
+  "bytes_hex": "c690",
+  "replaced": "Ɛ"
+ },
+ {
+  "bytes_hex": "c69f",
+  "replaced": "Ɵ"
+ },
+ {
+  "bytes_hex": "c6a0",
+  "replaced": "Ơ"
+ },
+ {
+  "bytes_hex": "c6bf",
+  "replaced": "ƿ"
+ },
+ {
+  "bytes_hex": "c6c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c6ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c6f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c6ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c700",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c741",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c77f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c780",
+  "replaced": "ǀ"
+ },
+ {
+  "bytes_hex": "c78f",
+  "replaced": "Ǐ"
+ },
+ {
+  "bytes_hex": "c790",
+  "replaced": "ǐ"
+ },
+ {
+  "bytes_hex": "c79f",
+  "replaced": "ǟ"
+ },
+ {
+  "bytes_hex": "c7a0",
+  "replaced": "Ǡ"
+ },
+ {
+  "bytes_hex": "c7bf",
+  "replaced": "ǿ"
+ },
+ {
+  "bytes_hex": "c7c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c7ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c7f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c7ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c800",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c841",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c87f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c880",
+  "replaced": "Ȁ"
+ },
+ {
+  "bytes_hex": "c88f",
+  "replaced": "ȏ"
+ },
+ {
+  "bytes_hex": "c890",
+  "replaced": "Ȑ"
+ },
+ {
+  "bytes_hex": "c89f",
+  "replaced": "ȟ"
+ },
+ {
+  "bytes_hex": "c8a0",
+  "replaced": "Ƞ"
+ },
+ {
+  "bytes_hex": "c8bf",
+  "replaced": "ȿ"
+ },
+ {
+  "bytes_hex": "c8c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c8ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c8f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c8ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c900",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "c941",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "c97f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "c980",
+  "replaced": "ɀ"
+ },
+ {
+  "bytes_hex": "c98f",
+  "replaced": "ɏ"
+ },
+ {
+  "bytes_hex": "c990",
+  "replaced": "ɐ"
+ },
+ {
+  "bytes_hex": "c99f",
+  "replaced": "ɟ"
+ },
+ {
+  "bytes_hex": "c9a0",
+  "replaced": "ɠ"
+ },
+ {
+  "bytes_hex": "c9bf",
+  "replaced": "ɿ"
+ },
+ {
+  "bytes_hex": "c9c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c9ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c9f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "c9ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ca00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ca41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ca7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ca80",
+  "replaced": "ʀ"
+ },
+ {
+  "bytes_hex": "ca8f",
+  "replaced": "ʏ"
+ },
+ {
+  "bytes_hex": "ca90",
+  "replaced": "ʐ"
+ },
+ {
+  "bytes_hex": "ca9f",
+  "replaced": "ʟ"
+ },
+ {
+  "bytes_hex": "caa0",
+  "replaced": "ʠ"
+ },
+ {
+  "bytes_hex": "cabf",
+  "replaced": "ʿ"
+ },
+ {
+  "bytes_hex": "cac0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "caef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "caf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "caff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cb00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "cb41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "cb7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cb80",
+  "replaced": "ˀ"
+ },
+ {
+  "bytes_hex": "cb8f",
+  "replaced": "ˏ"
+ },
+ {
+  "bytes_hex": "cb90",
+  "replaced": "ː"
+ },
+ {
+  "bytes_hex": "cb9f",
+  "replaced": "˟"
+ },
+ {
+  "bytes_hex": "cba0",
+  "replaced": "ˠ"
+ },
+ {
+  "bytes_hex": "cbbf",
+  "replaced": "˿"
+ },
+ {
+  "bytes_hex": "cbc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cbef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cbf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cbff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cc00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "cc41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "cc7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cc80",
+  "replaced": "̀"
+ },
+ {
+  "bytes_hex": "cc8f",
+  "replaced": "̏"
+ },
+ {
+  "bytes_hex": "cc90",
+  "replaced": "̐"
+ },
+ {
+  "bytes_hex": "cc9f",
+  "replaced": "̟"
+ },
+ {
+  "bytes_hex": "cca0",
+  "replaced": "̠"
+ },
+ {
+  "bytes_hex": "ccbf",
+  "replaced": "̿"
+ },
+ {
+  "bytes_hex": "ccc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ccef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ccf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ccff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cd00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "cd41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "cd7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cd80",
+  "replaced": "̀"
+ },
+ {
+  "bytes_hex": "cd8f",
+  "replaced": "͏"
+ },
+ {
+  "bytes_hex": "cd90",
+  "replaced": "͐"
+ },
+ {
+  "bytes_hex": "cd9f",
+  "replaced": "͟"
+ },
+ {
+  "bytes_hex": "cda0",
+  "replaced": "͠"
+ },
+ {
+  "bytes_hex": "cdbf",
+  "replaced": "Ϳ"
+ },
+ {
+  "bytes_hex": "cdc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cdef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cdf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cdff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ce00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ce41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ce7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ce80",
+  "replaced": "΀"
+ },
+ {
+  "bytes_hex": "ce8f",
+  "replaced": "Ώ"
+ },
+ {
+  "bytes_hex": "ce90",
+  "replaced": "ΐ"
+ },
+ {
+  "bytes_hex": "ce9f",
+  "replaced": "Ο"
+ },
+ {
+  "bytes_hex": "cea0",
+  "replaced": "Π"
+ },
+ {
+  "bytes_hex": "cebf",
+  "replaced": "ο"
+ },
+ {
+  "bytes_hex": "cec0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ceef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cef0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ceff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cf00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "cf41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "cf7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "cf80",
+  "replaced": "π"
+ },
+ {
+  "bytes_hex": "cf8f",
+  "replaced": "Ϗ"
+ },
+ {
+  "bytes_hex": "cf90",
+  "replaced": "ϐ"
+ },
+ {
+  "bytes_hex": "cf9f",
+  "replaced": "ϟ"
+ },
+ {
+  "bytes_hex": "cfa0",
+  "replaced": "Ϡ"
+ },
+ {
+  "bytes_hex": "cfbf",
+  "replaced": "Ͽ"
+ },
+ {
+  "bytes_hex": "cfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cfef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cff0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "cfff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d000",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d041",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d07f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d080",
+  "replaced": "Ѐ"
+ },
+ {
+  "bytes_hex": "d08f",
+  "replaced": "Џ"
+ },
+ {
+  "bytes_hex": "d090",
+  "replaced": "А"
+ },
+ {
+  "bytes_hex": "d09f",
+  "replaced": "П"
+ },
+ {
+  "bytes_hex": "d0a0",
+  "replaced": "Р"
+ },
+ {
+  "bytes_hex": "d0bf",
+  "replaced": "п"
+ },
+ {
+  "bytes_hex": "d0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d0ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d0f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d0ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d100",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d141",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d17f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d180",
+  "replaced": "р"
+ },
+ {
+  "bytes_hex": "d18f",
+  "replaced": "я"
+ },
+ {
+  "bytes_hex": "d190",
+  "replaced": "ѐ"
+ },
+ {
+  "bytes_hex": "d19f",
+  "replaced": "џ"
+ },
+ {
+  "bytes_hex": "d1a0",
+  "replaced": "Ѡ"
+ },
+ {
+  "bytes_hex": "d1bf",
+  "replaced": "ѿ"
+ },
+ {
+  "bytes_hex": "d1c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d1ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d1f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d1ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d200",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d241",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d27f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d280",
+  "replaced": "Ҁ"
+ },
+ {
+  "bytes_hex": "d28f",
+  "replaced": "ҏ"
+ },
+ {
+  "bytes_hex": "d290",
+  "replaced": "Ґ"
+ },
+ {
+  "bytes_hex": "d29f",
+  "replaced": "ҟ"
+ },
+ {
+  "bytes_hex": "d2a0",
+  "replaced": "Ҡ"
+ },
+ {
+  "bytes_hex": "d2bf",
+  "replaced": "ҿ"
+ },
+ {
+  "bytes_hex": "d2c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d2ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d2f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d2ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d300",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d341",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d37f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d380",
+  "replaced": "Ӏ"
+ },
+ {
+  "bytes_hex": "d38f",
+  "replaced": "ӏ"
+ },
+ {
+  "bytes_hex": "d390",
+  "replaced": "Ӑ"
+ },
+ {
+  "bytes_hex": "d39f",
+  "replaced": "ӟ"
+ },
+ {
+  "bytes_hex": "d3a0",
+  "replaced": "Ӡ"
+ },
+ {
+  "bytes_hex": "d3bf",
+  "replaced": "ӿ"
+ },
+ {
+  "bytes_hex": "d3c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d3ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d3f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d3ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d400",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d441",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d47f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d480",
+  "replaced": "Ԁ"
+ },
+ {
+  "bytes_hex": "d48f",
+  "replaced": "ԏ"
+ },
+ {
+  "bytes_hex": "d490",
+  "replaced": "Ԑ"
+ },
+ {
+  "bytes_hex": "d49f",
+  "replaced": "ԟ"
+ },
+ {
+  "bytes_hex": "d4a0",
+  "replaced": "Ԡ"
+ },
+ {
+  "bytes_hex": "d4bf",
+  "replaced": "Կ"
+ },
+ {
+  "bytes_hex": "d4c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d4ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d4f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d4ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d500",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d541",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d57f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d580",
+  "replaced": "Հ"
+ },
+ {
+  "bytes_hex": "d58f",
+  "replaced": "Տ"
+ },
+ {
+  "bytes_hex": "d590",
+  "replaced": "Ր"
+ },
+ {
+  "bytes_hex": "d59f",
+  "replaced": "՟"
+ },
+ {
+  "bytes_hex": "d5a0",
+  "replaced": "ՠ"
+ },
+ {
+  "bytes_hex": "d5bf",
+  "replaced": "տ"
+ },
+ {
+  "bytes_hex": "d5c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d5ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d5f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d5ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d600",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d641",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d67f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d680",
+  "replaced": "ր"
+ },
+ {
+  "bytes_hex": "d68f",
+  "replaced": "֏"
+ },
+ {
+  "bytes_hex": "d690",
+  "replaced": "֐"
+ },
+ {
+  "bytes_hex": "d69f",
+  "replaced": "֟"
+ },
+ {
+  "bytes_hex": "d6a0",
+  "replaced": "֠"
+ },
+ {
+  "bytes_hex": "d6bf",
+  "replaced": "ֿ"
+ },
+ {
+  "bytes_hex": "d6c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d6ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d6f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d6ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d700",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d741",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d77f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d780",
+  "replaced": "׀"
+ },
+ {
+  "bytes_hex": "d78f",
+  "replaced": "׏"
+ },
+ {
+  "bytes_hex": "d790",
+  "replaced": "א"
+ },
+ {
+  "bytes_hex": "d79f",
+  "replaced": "ן"
+ },
+ {
+  "bytes_hex": "d7a0",
+  "replaced": "נ"
+ },
+ {
+  "bytes_hex": "d7bf",
+  "replaced": "׿"
+ },
+ {
+  "bytes_hex": "d7c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d7ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d7f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d7ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d800",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d841",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d87f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d880",
+  "replaced": "؀"
+ },
+ {
+  "bytes_hex": "d88f",
+  "replaced": "؏"
+ },
+ {
+  "bytes_hex": "d890",
+  "replaced": "ؐ"
+ },
+ {
+  "bytes_hex": "d89f",
+  "replaced": "؟"
+ },
+ {
+  "bytes_hex": "d8a0",
+  "replaced": "ؠ"
+ },
+ {
+  "bytes_hex": "d8bf",
+  "replaced": "ؿ"
+ },
+ {
+  "bytes_hex": "d8c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d8ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d8f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d8ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d900",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "d941",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "d97f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "d980",
+  "replaced": "ـ"
+ },
+ {
+  "bytes_hex": "d98f",
+  "replaced": "ُ"
+ },
+ {
+  "bytes_hex": "d990",
+  "replaced": "ِ"
+ },
+ {
+  "bytes_hex": "d99f",
+  "replaced": "ٟ"
+ },
+ {
+  "bytes_hex": "d9a0",
+  "replaced": "٠"
+ },
+ {
+  "bytes_hex": "d9bf",
+  "replaced": "ٿ"
+ },
+ {
+  "bytes_hex": "d9c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d9ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d9f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "d9ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "da00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "da41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "da7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "da80",
+  "replaced": "ڀ"
+ },
+ {
+  "bytes_hex": "da8f",
+  "replaced": "ڏ"
+ },
+ {
+  "bytes_hex": "da90",
+  "replaced": "ڐ"
+ },
+ {
+  "bytes_hex": "da9f",
+  "replaced": "ڟ"
+ },
+ {
+  "bytes_hex": "daa0",
+  "replaced": "ڠ"
+ },
+ {
+  "bytes_hex": "dabf",
+  "replaced": "ڿ"
+ },
+ {
+  "bytes_hex": "dac0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "daef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "daf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "daff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "db00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "db41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "db7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "db80",
+  "replaced": "ۀ"
+ },
+ {
+  "bytes_hex": "db8f",
+  "replaced": "ۏ"
+ },
+ {
+  "bytes_hex": "db90",
+  "replaced": "ې"
+ },
+ {
+  "bytes_hex": "db9f",
+  "replaced": "۟"
+ },
+ {
+  "bytes_hex": "dba0",
+  "replaced": "۠"
+ },
+ {
+  "bytes_hex": "dbbf",
+  "replaced": "ۿ"
+ },
+ {
+  "bytes_hex": "dbc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dbef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dbf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dbff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dc00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "dc41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "dc7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "dc80",
+  "replaced": "܀"
+ },
+ {
+  "bytes_hex": "dc8f",
+  "replaced": "܏"
+ },
+ {
+  "bytes_hex": "dc90",
+  "replaced": "ܐ"
+ },
+ {
+  "bytes_hex": "dc9f",
+  "replaced": "ܟ"
+ },
+ {
+  "bytes_hex": "dca0",
+  "replaced": "ܠ"
+ },
+ {
+  "bytes_hex": "dcbf",
+  "replaced": "ܿ"
+ },
+ {
+  "bytes_hex": "dcc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dcef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dcf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dcff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dd00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "dd41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "dd7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "dd80",
+  "replaced": "݀"
+ },
+ {
+  "bytes_hex": "dd8f",
+  "replaced": "ݏ"
+ },
+ {
+  "bytes_hex": "dd90",
+  "replaced": "ݐ"
+ },
+ {
+  "bytes_hex": "dd9f",
+  "replaced": "ݟ"
+ },
+ {
+  "bytes_hex": "dda0",
+  "replaced": "ݠ"
+ },
+ {
+  "bytes_hex": "ddbf",
+  "replaced": "ݿ"
+ },
+ {
+  "bytes_hex": "ddc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ddef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ddf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ddff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "de00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "de41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "de7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "de80",
+  "replaced": "ހ"
+ },
+ {
+  "bytes_hex": "de8f",
+  "replaced": "ޏ"
+ },
+ {
+  "bytes_hex": "de90",
+  "replaced": "ސ"
+ },
+ {
+  "bytes_hex": "de9f",
+  "replaced": "ޟ"
+ },
+ {
+  "bytes_hex": "dea0",
+  "replaced": "ޠ"
+ },
+ {
+  "bytes_hex": "debf",
+  "replaced": "޿"
+ },
+ {
+  "bytes_hex": "dec0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "deef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "def0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "deff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "df00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "df41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "df7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "df80",
+  "replaced": "߀"
+ },
+ {
+  "bytes_hex": "df8f",
+  "replaced": "ߏ"
+ },
+ {
+  "bytes_hex": "df90",
+  "replaced": "ߐ"
+ },
+ {
+  "bytes_hex": "df9f",
+  "replaced": "ߟ"
+ },
+ {
+  "bytes_hex": "dfa0",
+  "replaced": "ߠ"
+ },
+ {
+  "bytes_hex": "dfbf",
+  "replaced": "߿"
+ },
+ {
+  "bytes_hex": "dfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dfef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dff0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "dfff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e000",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e041",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e07f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e080",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e08f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e090",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e09f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e0a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e0bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e0ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e0f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e0ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e100",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e141",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e17f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e180",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e18f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e190",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e19f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e1a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e1bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e1c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e1ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e1f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e1ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e200",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e241",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e27f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e280",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e28f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e290",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e29f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e2a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e2bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e2c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e2ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e2f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e2ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e300",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e341",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e37f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e380",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e38f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e390",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e39f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e3a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e3bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e3c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e3ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e3f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e3ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e400",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e441",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e47f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e480",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e48f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e490",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e49f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e4a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e4bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e4c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e4ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e4f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e4ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e500",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e541",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e57f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e580",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e58f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e590",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e59f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e5a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e5bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e5c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e5ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e5f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e5ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e600",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e641",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e67f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e680",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e68f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e690",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e69f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e6a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e6bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e6c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e6ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e6f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e6ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e700",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e741",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e77f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e780",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e78f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e790",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e79f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e7a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e7bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e7c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e7ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e7f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e7ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e800",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e841",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e87f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e880",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e88f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e890",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e89f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e8a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e8bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e8c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e8ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e8f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e8ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e900",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "e941",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "e97f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e980",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e98f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e990",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e99f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e9a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e9bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e9c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e9ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e9f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e9ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ea00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ea41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ea7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ea80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ea8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ea90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ea9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eaa0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eabf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eac0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eaef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eaf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eaff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eb00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "eb41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "eb7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eb80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eb8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eb90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eb9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eba0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ebbf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ebc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ebef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ebf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ebff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ec41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ec7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ec80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ec8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ec90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ec9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eca0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ecbf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ecc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ecef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ecf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ecff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ed41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ed7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ed80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ed8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ed90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ed9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eda0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "edbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "edc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "edef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "edf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "edff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ee41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ee7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ee80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ee8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ee90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ee9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eea0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eebf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "eec0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eeef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eef0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eeff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ef41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ef7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ef80",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ef8f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ef90",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ef9f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "efa0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "efbf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "efc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "efef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eff0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "efff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f000",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f041",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f07f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f080",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f08f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f090",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f09f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f0a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f0bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f0ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f0f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f0ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f100",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f141",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f17f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f180",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f18f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f190",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f19f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f1a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f1bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f1c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f1ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f1f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f1ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f200",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f241",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f27f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f280",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f28f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f290",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f29f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f2a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f2bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f2c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f2ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f2f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f2ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f300",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f341",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f37f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f380",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f38f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f390",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f39f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f3a0",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f3bf",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f3c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f3ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f3f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f3ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f400",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f441",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f47f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f480",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f48f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f490",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f49f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f4a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f4bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f4c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f4ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f4f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f4ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f500",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f541",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f57f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f580",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f58f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f590",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f59f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f5a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f5bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f5c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f5ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f5f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f5ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f600",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f641",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f67f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f680",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f68f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f690",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f69f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f6a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f6bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f6c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f6ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f6f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f6ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f700",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f741",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f77f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f780",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f78f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f790",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f79f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f7a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f7bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f7c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f7ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f7f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f7ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f800",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f841",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f87f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f880",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f88f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f890",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f89f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f8a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f8bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f8c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f8ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f8f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f8ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f900",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "f941",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "f97f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "f980",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f98f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f990",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f99f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f9a0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f9bf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f9c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f9ef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f9f0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "f9ff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fa00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "fa41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "fa7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fa80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fa8f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fa90",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fa9f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "faa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fabf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fac0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "faef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "faf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "faff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fb00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "fb41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "fb7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fb80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fb8f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fb90",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fb9f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fba0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fbbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fbc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fbef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fbf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fbff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fc00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "fc41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "fc7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fc80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fc8f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fc90",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fc9f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fca0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fcbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fcc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fcef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fcf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fcff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fd00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "fd41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "fd7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fd80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fd8f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fd90",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fd9f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fda0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fdbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fdc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fdef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fdf0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fdff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fe00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "fe41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "fe7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "fe80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fe8f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fe90",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fe9f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fea0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "febf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fec0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "feef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fef0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "feff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ff00",
+  "replaced": "�\u0000"
+ },
+ {
+  "bytes_hex": "ff41",
+  "replaced": "�A"
+ },
+ {
+  "bytes_hex": "ff7f",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "ff80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ff8f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ff90",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ff9f",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ffa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ffbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ffc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ffef",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "fff0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ffff",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e00080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e000a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e000bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e000c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e07f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e07fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e07fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e07fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e08080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e080a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e080bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e080c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e08f80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e08fa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e08fbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e08fc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e09080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e090a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e090bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e090c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e09f80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e09fa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e09fbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e09fc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0a080",
+  "replaced": "ࠀ"
+ },
+ {
+  "bytes_hex": "e0a0a0",
+  "replaced": "ࠠ"
+ },
+ {
+  "bytes_hex": "e0a0bf",
+  "replaced": "࠿"
+ },
+ {
+  "bytes_hex": "e0a0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e0bf80",
+  "replaced": "࿀"
+ },
+ {
+  "bytes_hex": "e0bfa0",
+  "replaced": "࿠"
+ },
+ {
+  "bytes_hex": "e0bfbf",
+  "replaced": "࿿"
+ },
+ {
+  "bytes_hex": "e0bfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e0c080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0c0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0c0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0c0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0ff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0ffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0ffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e0ffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e10080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e100a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e100bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e100c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e17f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e17fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e17fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e17fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e18080",
+  "replaced": "က"
+ },
+ {
+  "bytes_hex": "e180a0",
+  "replaced": "ဠ"
+ },
+ {
+  "bytes_hex": "e180bf",
+  "replaced": "ဿ"
+ },
+ {
+  "bytes_hex": "e180c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e18f80",
+  "replaced": "Ꮐ"
+ },
+ {
+  "bytes_hex": "e18fa0",
+  "replaced": "Ꮰ"
+ },
+ {
+  "bytes_hex": "e18fbf",
+  "replaced": "᏿"
+ },
+ {
+  "bytes_hex": "e18fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e19080",
+  "replaced": "᐀"
+ },
+ {
+  "bytes_hex": "e190a0",
+  "replaced": "ᐠ"
+ },
+ {
+  "bytes_hex": "e190bf",
+  "replaced": "ᐿ"
+ },
+ {
+  "bytes_hex": "e190c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e19f80",
+  "replaced": "ៀ"
+ },
+ {
+  "bytes_hex": "e19fa0",
+  "replaced": "០"
+ },
+ {
+  "bytes_hex": "e19fbf",
+  "replaced": "៿"
+ },
+ {
+  "bytes_hex": "e19fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e1a080",
+  "replaced": "᠀"
+ },
+ {
+  "bytes_hex": "e1a0a0",
+  "replaced": "ᠠ"
+ },
+ {
+  "bytes_hex": "e1a0bf",
+  "replaced": "ᠿ"
+ },
+ {
+  "bytes_hex": "e1a0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e1bf80",
+  "replaced": "῀"
+ },
+ {
+  "bytes_hex": "e1bfa0",
+  "replaced": "ῠ"
+ },
+ {
+  "bytes_hex": "e1bfbf",
+  "replaced": "῿"
+ },
+ {
+  "bytes_hex": "e1bfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e1c080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1c0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1c0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1c0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1ff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1ffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1ffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e1ffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e40080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e400a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e400bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e400c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "e47f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e47fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e47fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e47fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e48080",
+  "replaced": "䀀"
+ },
+ {
+  "bytes_hex": "e480a0",
+  "replaced": "䀠"
+ },
+ {
+  "bytes_hex": "e480bf",
+  "replaced": "䀿"
+ },
+ {
+  "bytes_hex": "e480c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e48f80",
+  "replaced": "䏀"
+ },
+ {
+  "bytes_hex": "e48fa0",
+  "replaced": "䏠"
+ },
+ {
+  "bytes_hex": "e48fbf",
+  "replaced": "䏿"
+ },
+ {
+  "bytes_hex": "e48fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e49080",
+  "replaced": "䐀"
+ },
+ {
+  "bytes_hex": "e490a0",
+  "replaced": "䐠"
+ },
+ {
+  "bytes_hex": "e490bf",
+  "replaced": "䐿"
+ },
+ {
+  "bytes_hex": "e490c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e49f80",
+  "replaced": "䟀"
+ },
+ {
+  "bytes_hex": "e49fa0",
+  "replaced": "䟠"
+ },
+ {
+  "bytes_hex": "e49fbf",
+  "replaced": "䟿"
+ },
+ {
+  "bytes_hex": "e49fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e4a080",
+  "replaced": "䠀"
+ },
+ {
+  "bytes_hex": "e4a0a0",
+  "replaced": "䠠"
+ },
+ {
+  "bytes_hex": "e4a0bf",
+  "replaced": "䠿"
+ },
+ {
+  "bytes_hex": "e4a0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e4bf80",
+  "replaced": "俀"
+ },
+ {
+  "bytes_hex": "e4bfa0",
+  "replaced": "俠"
+ },
+ {
+  "bytes_hex": "e4bfbf",
+  "replaced": "俿"
+ },
+ {
+  "bytes_hex": "e4bfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "e4c080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4c0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4c0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4c0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4ff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4ffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4ffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "e4ffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ec0080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ec00a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ec00bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ec00c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ec7f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec7fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec7fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec7fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec8080",
+  "replaced": "쀀"
+ },
+ {
+  "bytes_hex": "ec80a0",
+  "replaced": "쀠"
+ },
+ {
+  "bytes_hex": "ec80bf",
+  "replaced": "쀿"
+ },
+ {
+  "bytes_hex": "ec80c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec8f80",
+  "replaced": "쏀"
+ },
+ {
+  "bytes_hex": "ec8fa0",
+  "replaced": "쏠"
+ },
+ {
+  "bytes_hex": "ec8fbf",
+  "replaced": "쏿"
+ },
+ {
+  "bytes_hex": "ec8fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec9080",
+  "replaced": "쐀"
+ },
+ {
+  "bytes_hex": "ec90a0",
+  "replaced": "쐠"
+ },
+ {
+  "bytes_hex": "ec90bf",
+  "replaced": "쐿"
+ },
+ {
+  "bytes_hex": "ec90c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ec9f80",
+  "replaced": "쟀"
+ },
+ {
+  "bytes_hex": "ec9fa0",
+  "replaced": "쟠"
+ },
+ {
+  "bytes_hex": "ec9fbf",
+  "replaced": "쟿"
+ },
+ {
+  "bytes_hex": "ec9fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eca080",
+  "replaced": "저"
+ },
+ {
+  "bytes_hex": "eca0a0",
+  "replaced": "젠"
+ },
+ {
+  "bytes_hex": "eca0bf",
+  "replaced": "젿"
+ },
+ {
+  "bytes_hex": "eca0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ecbf80",
+  "replaced": "쿀"
+ },
+ {
+  "bytes_hex": "ecbfa0",
+  "replaced": "쿠"
+ },
+ {
+  "bytes_hex": "ecbfbf",
+  "replaced": "쿿"
+ },
+ {
+  "bytes_hex": "ecbfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ecc080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecc0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecc0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecc0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ecffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ed0080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ed00a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ed00bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ed00c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ed7f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed7fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed7fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed7fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed8080",
+  "replaced": "퀀"
+ },
+ {
+  "bytes_hex": "ed80a0",
+  "replaced": "퀠"
+ },
+ {
+  "bytes_hex": "ed80bf",
+  "replaced": "퀿"
+ },
+ {
+  "bytes_hex": "ed80c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed8f80",
+  "replaced": "폀"
+ },
+ {
+  "bytes_hex": "ed8fa0",
+  "replaced": "폠"
+ },
+ {
+  "bytes_hex": "ed8fbf",
+  "replaced": "폿"
+ },
+ {
+  "bytes_hex": "ed8fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed9080",
+  "replaced": "퐀"
+ },
+ {
+  "bytes_hex": "ed90a0",
+  "replaced": "퐠"
+ },
+ {
+  "bytes_hex": "ed90bf",
+  "replaced": "퐿"
+ },
+ {
+  "bytes_hex": "ed90c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ed9f80",
+  "replaced": "ퟀ"
+ },
+ {
+  "bytes_hex": "ed9fa0",
+  "replaced": "ퟠ"
+ },
+ {
+  "bytes_hex": "ed9fbf",
+  "replaced": "퟿"
+ },
+ {
+  "bytes_hex": "ed9fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eda080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eda0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eda0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eda0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edbf80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edbfa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edbfbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edbfc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edc080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edc0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edc0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edc0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "edffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ee0080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ee00a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ee00bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ee00c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ee7f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee7fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee7fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee7fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee8080",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee80a0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee80bf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee80c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee8f80",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee8fa0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee8fbf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee8fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee9080",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee90a0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee90bf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee90c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ee9f80",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee9fa0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee9fbf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ee9fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eea080",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "eea0a0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "eea0bf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "eea0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eebf80",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "eebfa0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "eebfbf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "eebfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "eec080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eec0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eec0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eec0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eeff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eeffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eeffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "eeffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "ef0080",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ef00a0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ef00bf",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ef00c0",
+  "replaced": "�\u0000�"
+ },
+ {
+  "bytes_hex": "ef7f80",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef7fa0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef7fbf",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef7fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef8080",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef80a0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef80bf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef80c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef8f80",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef8fa0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef8fbf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef8fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef9080",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef90a0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef90bf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef90c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "ef9f80",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef9fa0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef9fbf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "ef9fc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "efa080",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "efa0a0",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "efa0bf",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "efa0c0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "efbf80",
+  "replaced": "￀"
+ },
+ {
+  "bytes_hex": "efbfa0",
+  "replaced": "￠"
+ },
+ {
+  "bytes_hex": "efbfbf",
+  "replaced": "￿"
+ },
+ {
+  "bytes_hex": "efbfc0",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "efc080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efc0a0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efc0bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efc0c0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efff80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efffa0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efffbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "efffc0",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f07f8080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f07f80bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f07fbf80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f07fbfbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f0808080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f08080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f080bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f080bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f08f8080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f08f80bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f08fbf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f08fbfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f0908080",
+  "replaced": "𐀀"
+ },
+ {
+  "bytes_hex": "f09080bf",
+  "replaced": "𐀿"
+ },
+ {
+  "bytes_hex": "f090bf80",
+  "replaced": "𐿀"
+ },
+ {
+  "bytes_hex": "f090bfbf",
+  "replaced": "𐿿"
+ },
+ {
+  "bytes_hex": "f0bf8080",
+  "replaced": "𿀀"
+ },
+ {
+  "bytes_hex": "f0bf80bf",
+  "replaced": "𿀿"
+ },
+ {
+  "bytes_hex": "f0bfbf80",
+  "replaced": "𿿀"
+ },
+ {
+  "bytes_hex": "f0bfbfbf",
+  "replaced": "𿿿"
+ },
+ {
+  "bytes_hex": "f0c08080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f0c080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f0c0bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f0c0bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f17f8080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f17f80bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f17fbf80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f17fbfbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f1808080",
+  "replaced": "񀀀"
+ },
+ {
+  "bytes_hex": "f18080bf",
+  "replaced": "񀀿"
+ },
+ {
+  "bytes_hex": "f180bf80",
+  "replaced": "񀿀"
+ },
+ {
+  "bytes_hex": "f180bfbf",
+  "replaced": "񀿿"
+ },
+ {
+  "bytes_hex": "f18f8080",
+  "replaced": "񏀀"
+ },
+ {
+  "bytes_hex": "f18f80bf",
+  "replaced": "񏀿"
+ },
+ {
+  "bytes_hex": "f18fbf80",
+  "replaced": "񏿀"
+ },
+ {
+  "bytes_hex": "f18fbfbf",
+  "replaced": "񏿿"
+ },
+ {
+  "bytes_hex": "f1908080",
+  "replaced": "񐀀"
+ },
+ {
+  "bytes_hex": "f19080bf",
+  "replaced": "񐀿"
+ },
+ {
+  "bytes_hex": "f190bf80",
+  "replaced": "񐿀"
+ },
+ {
+  "bytes_hex": "f190bfbf",
+  "replaced": "񐿿"
+ },
+ {
+  "bytes_hex": "f1bf8080",
+  "replaced": "񿀀"
+ },
+ {
+  "bytes_hex": "f1bf80bf",
+  "replaced": "񿀿"
+ },
+ {
+  "bytes_hex": "f1bfbf80",
+  "replaced": "񿿀"
+ },
+ {
+  "bytes_hex": "f1bfbfbf",
+  "replaced": "񿿿"
+ },
+ {
+  "bytes_hex": "f1c08080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f1c080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f1c0bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f1c0bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f47f8080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f47f80bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f47fbf80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f47fbfbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f4808080",
+  "replaced": "􀀀"
+ },
+ {
+  "bytes_hex": "f48080bf",
+  "replaced": "􀀿"
+ },
+ {
+  "bytes_hex": "f480bf80",
+  "replaced": "􀿀"
+ },
+ {
+  "bytes_hex": "f480bfbf",
+  "replaced": "􀿿"
+ },
+ {
+  "bytes_hex": "f48f8080",
+  "replaced": "􏀀"
+ },
+ {
+  "bytes_hex": "f48f80bf",
+  "replaced": "􏀿"
+ },
+ {
+  "bytes_hex": "f48fbf80",
+  "replaced": "􏿀"
+ },
+ {
+  "bytes_hex": "f48fbfbf",
+  "replaced": "􏿿"
+ },
+ {
+  "bytes_hex": "f4908080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f49080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f490bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f490bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4bf8080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4bf80bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4bfbf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4bfbfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4c08080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4c080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4c0bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f4c0bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f57f8080",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f57f80bf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f57fbf80",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f57fbfbf",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f5808080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f58080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f580bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f580bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f58f8080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f58f80bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f58fbf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f58fbfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5908080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f59080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f590bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f590bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5bf8080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5bf80bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5bfbf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5bfbfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5c08080",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5c080bf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5c0bf80",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "f5c0bfbf",
+  "replaced": "����"
+ },
+ {
+  "bytes_hex": "fffe",
+  "replaced": "��"
+ },
+ {
+  "bytes_hex": "61ff62",
+  "replaced": "a�b"
+ },
+ {
+  "bytes_hex": "ffffff",
+  "replaced": "���"
+ },
+ {
+  "bytes_hex": "f09f9880",
+  "replaced": "😀"
+ },
+ {
+  "bytes_hex": "e4b8adff",
+  "replaced": "中�"
+ },
+ {
+  "bytes_hex": "e4b8ad",
+  "replaced": "中"
+ },
+ {
+  "bytes_hex": "e4b8",
+  "replaced": "�"
+ },
+ {
+  "bytes_hex": "e4b8ade69687e58685e5aeb9",
+  "replaced": "中文内容"
+ },
+ {
+  "bytes_hex": "eda080edb080",
+  "replaced": "������"
+ },
+ {
+  "bytes_hex": "",
+  "replaced": ""
+ },
+ {
+  "bytes_hex": "68656c6c6f",
+  "replaced": "hello"
+ },
+ {
+  "bytes_hex": "000102",
+  "replaced": "\u0000\u0001\u0002"
+ }
+]
