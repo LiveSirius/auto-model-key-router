@@ -222,6 +222,62 @@ Python 侧基线：`python -X utf8 -m pytest -q` → **485 passed**（约 250 �
 8. Python 退役。`update.py` 已按决策 8 砍掉（改由 `go install` / 包管理器分发），
    不再移植。
 
+## 阶段 3：Python 退役顺序（已实测计算，非估计）
+
+用 AST 解析全部 Python 模块的真实 import 边，算出「反向依赖数」与「还被哪些语料生成器
+（传递地）需要」，据此定序。**踩过的坑**：`from . import X` 这种形式（`config_editor.py:33`
+与 `management_api.py:33` 都用它导入 `config_operations`）在第一版脚本里被漏掉了，导致
+`config_operations` 被误判为「没有生成器需要」。修正后它是 4。**删除顺序必须建立在这张
+修正过的表上**，否则会删掉仍被 app 驱动型生成器需要的模块。
+
+### 解锁前提（必须先做）
+
+`auto_model_key_router/__init__.py:29` 的 `from .app import create_app, mount_app` 会让
+**导入任意子模块都执行 `__init__`**，从而拉进整个 app。实测后果：8 个生成器的传递闭包
+覆盖全部 35 个模块，于是删掉任何一个 app 依赖的模块都会让**所有**生成器失效。
+
+因此第一步是给 `__init__.py` 瘦身（只留 `__version__` 与 `_resolve_version`）。这与决策 3
+一致——`mount_app` 嵌入 API 已决定退役；其唯一使用者是 `tests/test_embedding.py`，该测试
+随之一并退役。
+
+### 第一批（自包含簇，删除不影响任何门禁）
+
+| 模块 | 行数 | 反向依赖 | 生成器需求 | 删除依据 |
+| --- | --- | --- | --- | --- |
+| `dashboard.py` | 949 | 1（main） | **0** | 决策 7：由 WebUI 覆盖，Go 永不实现 |
+| `logs_tui.py` | 614 | 2（main, dashboard） | **0** | 决策 7 同上 |
+| `unified_model.py` | 65 | 2（dashboard, main） | **0** | Go 侧 `internal/unifiedmodel` 已提交并测试 |
+
+三者的反向依赖**全部落在簇内**，所以可以一起删。注意 `main.py` 引用了 dashboard/logs_tui，
+需要同步去掉对应子命令（而完整 24 flags CLI 尚未移植，故 `main.py` 本身**暂不删**）。
+
+`protocols/__init__.py` 反向依赖为 0，但它属于 protocols 簇，随簇一起删。
+
+### 后续批次（按反向依赖数升序，每批删完必须复测）
+
+反向依赖越多越靠后：`clipboard`/`endpoint_capabilities`/`key_health`/`ops_api`/
+`proxy_handler`/`routing`/`streaming`/`websocket_proxy` 等为 1；`app`/`agent_config`/
+`config_editor`/`log_files`/`management_api`/`runtime`/`webui` 为 2；`proxy_support`/
+`formatting`/`update` 为 3–4；`auth`/`key_pool`/`service` 为 5；`config_service`/`tui` 为
+6；`visitor` 为 8；`metrics` 为 9；**`config` 为 18（最后）**。
+
+**被生成器需要 = 4–8 的那些模块不能先删**，因为它们被 app 驱动型生成器
+（management_api / proxy_handler / server / ops_api）传递依赖；那些生成器本身要先退役。
+
+### 每个模块的删除清单
+
+1. 确认 Go 侧已验证：差分语料回放全绿 + 真实运行冒烟覆盖到该模块。
+2. 退役该模块的语料生成器（`scripts/gen_*.py`）与 CI 里的 `--check` step——**语料保留在
+   仓库里作为冻结夹具**，Go 测试继续回放它，回归价值不丢；丢掉的只是「Python 是否漂移」
+   的检测能力，而 Python 正在退役，这可以接受。
+3. 删除 Python 模块与其 Python 测试。
+4. 清理引用：`pyproject.toml` 的打包清单、`__init__.py` 的再导出、其它 Python 模块的
+   import、`scripts/` 下仅为其服务的脚本。
+5. 复测：`gofmt -l .`、`go vet ./...`、`go test ./...`、以及**剩余未退役门禁**全部仍为绿。
+6. 独立提交，提交信息写明删除依据（哪些测试/冒烟证明它已被 Go 取代）。
+
+最终：`python` CI 作业整体删除，只剩 `go` 作业；`pyproject.toml` 与 `release.yml` 的 Python
+分支一并清理。
 ## 提交约定
 
 按模块独立提交，Conventional Commits：`<type>(<scope>): <中文摘要>`，正文说明
