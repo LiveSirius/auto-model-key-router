@@ -309,6 +309,40 @@ Python 侧基线：`python -X utf8 -m pytest -q` → **485 passed**（约 250 �
 CI 里应保留它的 `node` 步骤。
 最终：`python` CI 作业整体删除，只剩 `go` 作业；`pyproject.toml` 与 `release.yml` 的 Python
 分支一并清理。
+## 阶段 3 的隐含语义变更（退役时才暴露，必须先处理再删 Python）
+
+**`internal/updatecheck` 的「PyPI 优先」在 Python 退役后会变成错误行为。**
+
+现状（`updatecheck.go` 的 `CheckLatestVersion`）：
+
+```go
+pypi := CheckLatestPyPI(fetch, currentVersion, timeout)
+if pypi.Error == nil {
+    return pypi            // PyPI 成功就返回，GitHub 根本不查
+}
+github := CheckLatestRelease(...)
+```
+
+它查的是 PyPI 上的 `auto-model-key-router`（`PackageName`，当前 `pyproject.toml` 是 4.1.0）。
+这个顺序在 Python 仍是发布渠道时是对的——两者同版本发布。
+
+**Python 退役后**：PyPI 上那个包会**冻结在最后一个 Python 版本**，而 Go 版本继续在 GitHub 发布。
+于是 `GET /api/update/check` 或 `GET /api/tool` 会拿到 PyPI 的旧版本号当作"最新"，且因为 PyPI
+**成功**（返回 200，不是错误）而**永不回退到 GitHub**：
+
+- 用户跑 Go 5.0.0、PyPI 停在 4.1.0 → `is_newer_version("4.1.0", "5.0.0")` = false
+  → `update_available: false` → **永远收不到新版本提示**；
+- 而且是静默的：没有报错、没有日志，只是永远说"已是最新"。
+
+**处置（必须在删 Python 之前或同时做）**：二选一——
+1. 删掉 PyPI 分支，只查 GitHub（推荐：Python 退役后 PyPI 不再是发布渠道）；
+2. 反转顺序：GitHub 优先，PyPI 仅作回退。
+
+已有的 `gen_updatecheck_corpus.py` 语料按「PyPI 优先、GitHub 回退」生成，所以**改顺序必须
+同时更新或退役该语料**——这正是「先完成对拍固化、再删生成器」这条顺序约束的实例。
+
+（保留 PyPI 检查的唯一理由：若仍希望**老的 Python 用户**收到"该迁到 Go 版了"的提示，那就得
+在 PyPI 上发布一个终结版本。这属于产品决策，未定。）
 ## 提交约定
 
 按模块独立提交，Conventional Commits：`<type>(<scope>): <中文摘要>`，正文说明
