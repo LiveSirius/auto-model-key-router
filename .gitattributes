@@ -19,6 +19,7 @@ internal/logfiles/testdata/** -text
 internal/metrics/testdata/** -text
 internal/proxysupport/testdata/** -text
 internal/proxy/testdata/** -text
+internal/server/testdata/** -text
 internal/servicestatus/testdata/** -text
 internal/updatecheck/testdata/** -text
 
