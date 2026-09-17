@@ -7,11 +7,13 @@
 # 这里只对语料目录声明 -text，让 git 原样存取、不做换行转换。刻意不写全仓库的
 # *.py/*.go 策略：那会把既有的 CRLF 文件（如 scripts/release.py）一并改写，产生
 # 与本迁移无关的巨大 diff。
+internal/agentconfig/testdata/** -text
 internal/canonical/testdata/** -text
 internal/clipboard/testdata/** -text
 internal/config/testdata/** -text
 internal/configops/testdata/** -text
 internal/formatting/testdata/** -text
+internal/api/testdata/** -text
 internal/keypool/testdata/** -text
 internal/logfiles/testdata/** -text
 internal/metrics/testdata/** -text
