@@ -1,0 +1,29 @@
+{"input": "null", "kwargs": {"task_name": "\"TASK_1\""}, "name": "none", "ok": true, "output": "{}"}
+{"input": "{}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "empty", "ok": true, "output": "{}"}
+{"error": "任务 TASK_1 的 params 必须是对象", "error_type": "ValueError", "input": "[\"x\"]", "kwargs": {"task_name": "\"TASK_1\""}, "name": "not_dict", "ok": false}
+{"error": "任务 TASK_1 的 params 不支持的参数: temprature（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, reasoning_effort）", "error_type": "ValueError", "input": "{\"temprature\":0.5}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "unknown_key_rejected", "ok": false}
+{"input": "{\"temperature\":0.2,\"top_p\":0.9,\"top_k\":40,\"frequency_penalty\":0.1,\"presence_penalty\":-0.1,\"seed\":7}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "all_sampling_params", "ok": true, "output": "{\"frequency_penalty\":0.1,\"presence_penalty\":-0.1,\"seed\":7,\"temperature\":0.2,\"top_k\":40,\"top_p\":0.9}"}
+{"input": "{\"temperature\":null,\"seed\":null}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "null_values_skipped", "ok": true, "output": "{}"}
+{"input": "{\"stop\":[\"a\",\"b\"]}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "stop_as_list", "ok": true, "output": "{\"stop\":[\"a\",\"b\"]}"}
+{"input": "{\"stop\":\"a\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "stop_as_scalar", "ok": true, "output": "{\"stop\":[\"a\"]}"}
+{"input": "{\"stop\":[\"a\",\"\",\"b\"]}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "stop_with_empty", "ok": true, "output": "{\"stop\":[\"a\",\"b\"]}"}
+{"input": "{\"stop\":[]}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "stop_empty_list_omitted", "ok": true, "output": "{}"}
+{"input": "{\"stop\":[1,2.5]}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "stop_non_string", "ok": true, "output": "{\"stop\":[\"1\",\"2.5\"]}"}
+{"input": "{\"top_k\":40.0}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "top_k_float_integral", "ok": true, "output": "{\"top_k\":40}"}
+{"error": "任务 TASK_1 的 top_k 必须是整数", "error_type": "ValueError", "input": "{\"top_k\":1.5}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "top_k_float_fractional_rejected", "ok": false}
+{"input": "{\"seed\":\"42\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "seed_string_integral", "ok": true, "output": "{\"seed\":42}"}
+{"error": "任务 TASK_1 的 seed 必须是整数", "error_type": "ValueError", "input": "{\"seed\":\"42.5\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "seed_string_fractional_rejected", "ok": false}
+{"error": "任务 TASK_1 的 seed 必须是整数", "error_type": "ValueError", "input": "{\"seed\":\"abc\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "seed_rejected_text", "ok": false}
+{"input": "{\"top_k\":true}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "top_k_bool", "ok": true, "output": "{\"top_k\":1}"}
+{"input": "{\"temperature\":\"0.5\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "temperature_string", "ok": true, "output": "{\"temperature\":0.5}"}
+{"error": "任务 TASK_1 的 temperature 必须是数字", "error_type": "ValueError", "input": "{\"temperature\":\"hot\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "temperature_bad", "ok": false}
+{"input": "{\"reasoning_effort\":\"high\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "reasoning_effort_valid", "ok": true, "output": "{\"reasoning_effort\":\"high\"}"}
+{"input": "{\"reasoning_effort\":\"default\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "reasoning_effort_default_skipped", "ok": true, "output": "{}"}
+{"input": "{\"reasoning_effort\":\"downstream\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "reasoning_effort_downstream_skipped", "ok": true, "output": "{}"}
+{"input": "{\"reasoning_effort\":\"  \"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "reasoning_effort_blank_skipped", "ok": true, "output": "{}"}
+{"error": "任务 TASK_1 的 reasoning_effort 必须是 none、minimal、low、medium、high、xhigh、max", "error_type": "ValueError", "input": "{\"reasoning_effort\":\"insane\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "reasoning_effort_invalid", "ok": false}
+{"input": "{\"reasoning_effort\":\"xhigh\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "reasoning_effort_all_valid", "ok": true, "output": "{\"reasoning_effort\":\"xhigh\"}"}
+{"input": "{\"temperature\":1,\"seed\":3,\"stop\":[\"x\"],\"reasoning_effort\":\"minimal\"}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "mixed", "ok": true, "output": "{\"reasoning_effort\":\"minimal\",\"seed\":3,\"stop\":[\"x\"],\"temperature\":1.0}"}
+{"input": "{\"  temperature  \":0.3}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "key_with_spaces_trimmed", "ok": true, "output": "{\"temperature\":0.3}"}
+{"error": "任务 TASK_1 的 params 不支持的参数: bogus（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, reasoning_effort）", "error_type": "ValueError", "input": "{\"  bogus  \":0.3}", "kwargs": {"task_name": "\"TASK_1\""}, "name": "key_with_spaces_unknown", "ok": false}
+{"error": "任务 TASK_ERR 的 params 不支持的参数: bogus（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, reasoning_effort）", "error_type": "ValueError", "input": "{\"bogus\":1}", "kwargs": {"task_name": "\"TASK_ERR\""}, "name": "task_name_in_error", "ok": false}

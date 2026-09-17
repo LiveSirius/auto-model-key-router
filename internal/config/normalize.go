@@ -1,0 +1,326 @@
+package config
+
+import (
+	"strings"
+
+	"github.com/Sparrived/auto-model-key-router/internal/canonical"
+)
+
+// CONFIG_VERSION 是当前配置文件版本。
+const CONFIG_VERSION = 4
+
+// UNIFIED_MODEL_ID 是 unified_model 伪模型的保留名称。
+const UNIFIED_MODEL_ID = "unified-model"
+
+// VISITOR_API_KEY 是访客模式的保留 key（见 visitor.go）。
+const VISITOR_API_KEY = "amkr-visitor"
+
+// reasoningEfforts 是允许的推理强度取值。
+var reasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+// taskSamplingParams 是任务可固定的采样参数。
+var taskSamplingParams = []string{
+	"temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty", "seed", "stop",
+}
+
+// TaskParamKeys 是任务参数的完整白名单（采样参数 + reasoning_effort）。
+var TaskParamKeys = append(append([]string{}, taskSamplingParams...), "reasoning_effort")
+
+// upstreamRouteModes 是允许的上游路由模式。
+var upstreamRouteModes = []string{"openai", "anthropic", "responses", "images", "embeddings"}
+
+// upstreamRouteLabels 是模式的可读名称（管理界面用）。
+var upstreamRouteLabels = map[string]string{
+	"openai":     "OpenAI Chat",
+	"anthropic":  "Anthropic Messages",
+	"responses":  "OpenAI Responses",
+	"images":     "OpenAI Images",
+	"embeddings": "OpenAI Embeddings",
+}
+
+// upstreamRouteDefaultPaths 是各模式的标准相对路径。
+var upstreamRouteDefaultPaths = map[string]string{
+	"openai":     "v1/chat/completions",
+	"anthropic":  "v1/messages",
+	"responses":  "v1/responses",
+	"images":     "v1/images/generations",
+	"embeddings": "v1/embeddings",
+}
+
+// upstreamRouteModeAliases 把用户写法折叠到标准模式名。
+var upstreamRouteModeAliases = map[string]string{
+	"chat":               "openai",
+	"chat_completions":   "openai",
+	"chat-completions":   "openai",
+	"openai_chat":        "openai",
+	"openai-chat":        "openai",
+	"messages":           "anthropic",
+	"anthropic_messages": "anthropic",
+	"anthropic-messages": "anthropic",
+	"codex":              "responses",
+	"image":              "images",
+	"img":                "images",
+	"dall-e":             "images",
+	"dalle":              "images",
+	"images/generations": "images",
+	"image_generation":   "images",
+	"image-generation":   "images",
+	"embedding":          "embeddings",
+	"embed":              "embeddings",
+	"embeddings":         "embeddings",
+}
+
+// UpstreamRouteModes 返回允许的路由模式列表（只读副本）。
+func UpstreamRouteModes() []string {
+	out := make([]string, len(upstreamRouteModes))
+	copy(out, upstreamRouteModes)
+	return out
+}
+
+// UpstreamRouteDefaultPath 返回某模式的默认路径。
+func UpstreamRouteDefaultPath(mode string) string { return upstreamRouteDefaultPaths[mode] }
+
+// NormalizeUpstreamRouteMode 规范化路由模式名。
+//
+// 对齐 config.py:93：先小写去空白，再查别名表，最后校验。
+func NormalizeUpstreamRouteMode(value *canonical.Value) (string, error) {
+	mode := strings.ToLower(strings.TrimSpace(value.StringValue()))
+	if alias, ok := upstreamRouteModeAliases[mode]; ok {
+		mode = alias
+	}
+	for _, allowed := range upstreamRouteModes {
+		if mode == allowed {
+			return mode, nil
+		}
+	}
+	return "", errf("upstream_routes 模式必须是 openai、anthropic、responses、images 或 embeddings")
+}
+
+// NormalizeUpstreamRoutePath 规范化单个路由路径。
+//
+// 对齐 config.py:103。注意 `str(value or "")` 的语义：数字 0、布尔 false、
+// 空容器都被当作空串，但 True 会渲染成 "True"（Python 的 str(True)）。
+func NormalizeUpstreamRoutePath(mode string, value *canonical.Value) (string, error) {
+	mode, err := NormalizeUpstreamRouteMode(canonical.NewString(mode))
+	if err != nil {
+		return "", err
+	}
+	route := strings.ReplaceAll(strings.TrimSpace(value.StringValue()), "\\", "/")
+	if route == "" {
+		return "", errf("upstream_routes 路径不能为空")
+	}
+	if strings.Contains(route, "://") {
+		return "", errf("upstream_routes 只能配置相对路径或路径前缀")
+	}
+	if strings.ContainsAny(route, "?#") {
+		return "", errf("upstream_routes 不能包含 query string 或 fragment")
+	}
+	for strings.Contains(route, "//") {
+		route = strings.ReplaceAll(route, "//", "/")
+	}
+	route = strings.Trim(route, "/")
+	if route == "" {
+		return "", errf("upstream_routes 路径不能为空")
+	}
+
+	endpoint := upstreamRouteDefaultPaths[mode]
+	if route == endpoint || strings.HasSuffix(route, "/"+endpoint) {
+		return route, nil
+	}
+	if route == "v1" || strings.HasSuffix(route, "/v1") {
+		return route + "/" + strings.TrimPrefix(endpoint, "v1/"), nil
+	}
+	return route + "/" + endpoint, nil
+}
+
+// NormalizeUpstreamRoutes 规范化 {模式: 路径} 映射。
+//
+// 对齐 config.py:125：值为 None 或空白字符串的条目被静默跳过（而不是报错）。
+func NormalizeUpstreamRoutes(raw *canonical.Value) (map[string]string, error) {
+	if raw == nil || raw.IsNull() {
+		return map[string]string{}, nil
+	}
+	if !raw.IsObject() {
+		return nil, errf("upstream_routes 必须是对象")
+	}
+	routes := map[string]string{}
+	for _, rawMode := range raw.Obj.Keys() {
+		rawRoute := raw.Lookup(rawMode)
+		// 跳过 None 与空白：与 Python 的 `if raw_route is None or not str(raw_route).strip()`
+		// 一致。注意这里用 PyStr 而非 StringValue——判断条件只排除 None 与空白，
+		// 数字 0、False 等假值会走到下面的路径校验并报错。
+		if rawRoute == nil || rawRoute.IsNull() || strings.TrimSpace(rawRoute.PyStr()) == "" {
+			continue
+		}
+		mode, err := NormalizeUpstreamRouteMode(canonical.NewString(rawMode))
+		if err != nil {
+			return nil, err
+		}
+		path, err := NormalizeUpstreamRoutePath(mode, rawRoute)
+		if err != nil {
+			return nil, err
+		}
+		routes[mode] = path
+	}
+	return routes, nil
+}
+
+// NormalizeTaskParams 校验并规整任务的固定参数。
+//
+// 对齐 config.py:139。只认白名单里的键：写错的名字（比如 temprature）立即报错，
+// 而不是等请求打过来才静默地不生效。
+func NormalizeTaskParams(raw *canonical.Value, taskName string) (*canonical.Value, error) {
+	if raw == nil || raw.IsNull() {
+		return canonical.NewObject(), nil
+	}
+	if !raw.IsObject() {
+		return nil, errf("任务 %s 的 params 必须是对象", taskName)
+	}
+	result := canonical.NewObject()
+	for _, rawKey := range raw.Obj.Keys() {
+		value := raw.Lookup(rawKey)
+		key := strings.TrimSpace(rawKey)
+		if !containsString(TaskParamKeys, key) {
+			return nil, errf("任务 %s 的 params 不支持的参数: %s（可用: %s）",
+				taskName, key, strings.Join(TaskParamKeys, ", "))
+		}
+		if value == nil || value.IsNull() {
+			continue
+		}
+		if key == "reasoning_effort" {
+			effort := strings.TrimSpace(value.StringValue())
+			if effort == "" || effort == "default" || effort == "downstream" {
+				continue
+			}
+			if !containsString(reasoningEfforts, effort) {
+				return nil, errf("任务 %s 的 reasoning_effort 必须是 %s",
+					taskName, strings.Join(reasoningEfforts, "、"))
+			}
+			result.SetKey(key, canonical.NewString(effort))
+			continue
+		}
+		if key == "stop" {
+			values := []*canonical.Value{value}
+			if value.IsArray() {
+				values = value.Items()
+			}
+			stops := make([]string, 0, len(values))
+			for _, item := range values {
+				// str(item)：None 得到 "None"、False 得到 "False"，均为真值字符串，
+				// 因此用 PyStr 而非 StringValue。
+				if rendered := item.PyStr(); rendered != "" {
+					stops = append(stops, rendered)
+				}
+			}
+			if len(stops) > 0 {
+				result.SetKey(key, canonical.NewStringArray(stops))
+			}
+			continue
+		}
+		if key == "top_k" || key == "seed" {
+			number, ok := value.AsFloat()
+			if !ok {
+				return nil, errf("任务 %s 的 %s 必须是整数", taskName, key)
+			}
+			// int(1.5) 会静默截断成 1，那是在替调用方改参数值，宁可报错。
+			if number != float64(int64(number)) {
+				return nil, errf("任务 %s 的 %s 必须是整数", taskName, key)
+			}
+			result.SetKey(key, canonical.NewIntValue(int64(number)))
+			continue
+		}
+		number, ok := value.AsFloat()
+		if !ok {
+			return nil, errf("任务 %s 的 %s 必须是数字", taskName, key)
+		}
+		result.SetKey(key, canonical.NewFloat(number))
+	}
+	return result, nil
+}
+
+// NormalizeUpstreamBaseURL 规范化上游 URL。
+//
+// 对齐 config.py:193：去空白并去掉末尾斜杠。
+func NormalizeUpstreamBaseURL(value *canonical.Value) (string, error) {
+	baseURL := strings.TrimRight(strings.TrimSpace(value.StringValue()), "/")
+	if baseURL == "" {
+		return "", errf("upstream_routes 上游 URL 不能为空")
+	}
+	return baseURL, nil
+}
+
+// mergeUpstreamRoutesForURL 把某 URL 的路由并入总表，冲突时报错。
+//
+// 对齐 config.py:200。冲突检测是必要的：同一上游 URL 的同一模式若有两套路径，
+// 实际用哪套取决于遍历顺序，静默覆盖会产生难以排查的行为差异。
+func mergeUpstreamRoutesForURL(routesByURL map[string]map[string]string, baseURL string, routes map[string]string) error {
+	if len(routes) == 0 {
+		return nil
+	}
+	normalized, err := NormalizeUpstreamBaseURL(canonical.NewString(baseURL))
+	if err != nil {
+		return err
+	}
+	target, ok := routesByURL[normalized]
+	if !ok {
+		target = map[string]string{}
+		routesByURL[normalized] = target
+	}
+	for mode, path := range routes {
+		if existing, present := target[mode]; present && existing != path {
+			return errf("上游 URL %s 的 %s 路由配置冲突", normalized, mode)
+		}
+		target[mode] = path
+	}
+	return nil
+}
+
+// NormalizeUpstreamURLRoutes 规范化按上游 URL 分组的路由表。
+//
+// 对齐 config.py:218：空路由组会被整组丢弃。
+func NormalizeUpstreamURLRoutes(raw *canonical.Value) (map[string]map[string]string, error) {
+	if raw == nil || raw.IsNull() {
+		return map[string]map[string]string{}, nil
+	}
+	if !raw.IsObject() {
+		return nil, errf("upstream_routes 必须是按上游 URL 分组的对象")
+	}
+	routesByURL := map[string]map[string]string{}
+	for _, rawBaseURL := range raw.Obj.Keys() {
+		routes, err := NormalizeUpstreamRoutes(raw.Lookup(rawBaseURL))
+		if err != nil {
+			return nil, err
+		}
+		if len(routes) == 0 {
+			continue
+		}
+		baseURL, err := NormalizeUpstreamBaseURL(canonical.NewString(rawBaseURL))
+		if err != nil {
+			return nil, err
+		}
+		routesByURL[baseURL] = routes
+	}
+	return routesByURL, nil
+}
+
+// UpstreamRoutePath 返回某模式的实际路径，缺省时回落到标准路径。
+func UpstreamRoutePath(routes map[string]string, mode string) (string, error) {
+	normalized, err := NormalizeUpstreamRouteMode(canonical.NewString(mode))
+	if err != nil {
+		return "", err
+	}
+	if path, ok := routes[normalized]; ok && path != "" {
+		return path, nil
+	}
+	return upstreamRouteDefaultPaths[normalized], nil
+}
+
+// containsString 报告切片是否包含目标值。
+func containsString(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}

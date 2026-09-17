@@ -1,0 +1,38 @@
+{"input": "null", "name": "none", "ok": true, "output": "{}"}
+{"input": "{}", "name": "empty", "ok": true, "output": "{}"}
+{"error": "upstream_routes 必须是对象", "error_type": "ValueError", "input": "[\"x\"]", "name": "not_dict", "ok": false}
+{"input": "{\"openai\":\"v1/chat/completions\"}", "name": "openai_default_path", "ok": true, "output": "{\"openai\":\"v1/chat/completions\"}"}
+{"input": "{\"openai\":\"my-prefix\"}", "name": "openai_prefix", "ok": true, "output": "{\"openai\":\"my-prefix/v1/chat/completions\"}"}
+{"input": "{\"openai\":\"v1\"}", "name": "openai_v1_prefix", "ok": true, "output": "{\"openai\":\"v1/chat/completions\"}"}
+{"input": "{\"openai\":\"v1/\"}", "name": "openai_v1_slash", "ok": true, "output": "{\"openai\":\"v1/chat/completions\"}"}
+{"input": "{\"openai\":\"some/path/v1/chat/completions\"}", "name": "openai_full_prefix", "ok": true, "output": "{\"openai\":\"some/path/v1/chat/completions\"}"}
+{"input": "{\"messages\":\"anthropic\"}", "name": "anthropic_alias_messages", "ok": true, "output": "{\"anthropic\":\"anthropic/v1/messages\"}"}
+{"input": "{\"anthropic_messages\":\"x\"}", "name": "anthropic_alias_underscore", "ok": true, "output": "{\"anthropic\":\"x/v1/messages\"}"}
+{"input": "{\"anthropic-messages\":\"x\"}", "name": "anthropic_alias_dash", "ok": true, "output": "{\"anthropic\":\"x/v1/messages\"}"}
+{"input": "{\"codex\":\"responses\"}", "name": "codex_alias_responses", "ok": true, "output": "{\"responses\":\"responses/v1/responses\"}"}
+{"input": "{\"image\":\"img\",\"img\":\"img2\",\"dall-e\":\"d\",\"dalle\":\"d2\"}", "name": "image_aliases", "ok": true, "output": "{\"images\":\"d2/v1/images/generations\"}"}
+{"input": "{\"images/generations\":\"ig\"}", "name": "images_generations_key", "ok": true, "output": "{\"images\":\"ig/v1/images/generations\"}"}
+{"input": "{\"embedding\":\"e1\",\"embed\":\"e2\"}", "name": "embeddings_alias", "ok": true, "output": "{\"embeddings\":\"e2/v1/embeddings\"}"}
+{"input": "{\"chat\":\"c\",\"chat_completions\":\"cc\",\"chat-completions\":\"cd\",\"openai_chat\":\"oc\",\"openai-chat\":\"od\"}", "name": "chat_aliases", "ok": true, "output": "{\"openai\":\"od/v1/chat/completions\"}"}
+{"input": "{\"OPENAI\":\"x\"}", "name": "uppercase_mode", "ok": true, "output": "{\"openai\":\"x/v1/chat/completions\"}"}
+{"input": "{\"  openai  \":\"  x  \"}", "name": "mode_with_spaces", "ok": true, "output": "{\"openai\":\"x/v1/chat/completions\"}"}
+{"error": "upstream_routes 模式必须是 openai、anthropic、responses、images 或 embeddings", "error_type": "ValueError", "input": "{\"bogus\":\"x\"}", "name": "unknown_mode_rejected", "ok": false}
+{"input": "{\"openai\":null}", "name": "null_route_skipped", "ok": true, "output": "{}"}
+{"input": "{\"openai\":\"   \"}", "name": "blank_route_skipped", "ok": true, "output": "{}"}
+{"input": "{\"openai\":\"\"}", "name": "empty_route_rejected", "ok": true, "output": "{}"}
+{"error": "upstream_routes 只能配置相对路径或路径前缀", "error_type": "ValueError", "input": "{\"openai\":\"https://evil.example/v1\"}", "name": "absolute_url_rejected", "ok": false}
+{"input": "{\"openai\":\"a//b///c\"}", "name": "double_slash_collapsed", "ok": true, "output": "{\"openai\":\"a/b/c/v1/chat/completions\"}"}
+{"input": "{\"openai\":\"a\\\\b\"}", "name": "backslash_to_slash", "ok": true, "output": "{\"openai\":\"a/b/v1/chat/completions\"}"}
+{"input": "{\"openai\":\"/prefix/\"}", "name": "leading_trailing_slashes", "ok": true, "output": "{\"openai\":\"prefix/v1/chat/completions\"}"}
+{"error": "upstream_routes 不能包含 query string 或 fragment", "error_type": "ValueError", "input": "{\"openai\":\"p?x=1\"}", "name": "query_rejected", "ok": false}
+{"error": "upstream_routes 不能包含 query string 或 fragment", "error_type": "ValueError", "input": "{\"openai\":\"p#f\"}", "name": "fragment_rejected", "ok": false}
+{"error": "upstream_routes 路径不能为空", "error_type": "ValueError", "input": "{\"openai\":\"///\"}", "name": "only_slashes_rejected", "ok": false}
+{"input": "{\"openai\":\"p1\",\"anthropic\":\"p2\",\"responses\":\"p3\",\"images\":\"p4\",\"embeddings\":\"p5\"}", "name": "multi_modes", "ok": true, "output": "{\"anthropic\":\"p2/v1/messages\",\"embeddings\":\"p5/v1/embeddings\",\"images\":\"p4/v1/images/generations\",\"openai\":\"p1/v1/chat/completions\",\"responses\":\"p3/v1/responses\"}"}
+{"input": "{\"openai\":123}", "name": "non_string_value", "ok": true, "output": "{\"openai\":\"123/v1/chat/completions\"}"}
+{"input": "{\"openai\":\"  //p//  \"}", "name": "trim_chars", "ok": true, "output": "{\"openai\":\"p/v1/chat/completions\"}"}
+{"error": "upstream_routes 路径不能为空", "error_type": "ValueError", "input": "{\"openai\":0}", "name": "route_zero", "ok": false}
+{"error": "upstream_routes 路径不能为空", "error_type": "ValueError", "input": "{\"openai\":false}", "name": "route_false", "ok": false}
+{"error": "upstream_routes 路径不能为空", "error_type": "ValueError", "input": "{\"openai\":[]}", "name": "route_empty_list", "ok": false}
+{"error": "upstream_routes 路径不能为空", "error_type": "ValueError", "input": "{\"openai\":{}}", "name": "route_empty_dict", "ok": false}
+{"input": "{\"openai\":true}", "name": "route_true", "ok": true, "output": "{\"openai\":\"True/v1/chat/completions\"}"}
+{"input": "{\"openai\":1.5}", "name": "route_number_float", "ok": true, "output": "{\"openai\":\"1.5/v1/chat/completions\"}"}
