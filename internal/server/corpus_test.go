@@ -13,6 +13,7 @@ import (
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
+	"github.com/Sparrived/auto-model-key-router/internal/metrics"
 )
 
 // 本文件回放 scripts/gen_server_corpus.py 生成的语料。
@@ -20,16 +21,20 @@ import (
 // 语料由**真实 Python FastAPI 应用**产出，断言「状态码 + 响应体字节 + content-type
 // + content-length」。与 internal/api 的语料回放同一套做法：不做任何宽容化。
 //
-// # 两处回放侧的必要处理
+// # 三处回放侧的必要处理
 //
-//  1. **时间与路径归一化**。响应体里的窗口时间、started_at、系列点位时间戳来自墙钟，
-//     而两侧都没有跨 HTTP 边界的可注入时钟，因此生成时已把它们替换成
-//     <TIMESTAMP>、把夹具目录替换成 <FIXTURE_DIR>；这里用同样的规则归一化 Go 的
-//     响应体再比对。归一化只覆盖这两类内容，其余字节（键序、`24.0` 与 `1e-05` 这种
+//  1. **固定时钟**。度量窗口、系列分桶与点位数都是「当前时刻」的函数：`hours=1`
+//     配 `bucket_seconds=86400` 只在跨北京零点时横跨两个自然日，语料因此曾经每天
+//     只有零点后一小时能对上。生成脚本把参照实现的 `metrics._now_beijing` 钉在
+//     一个固定时刻并记进语料的 `now_beijing`；这里用 `metrics.SetNowForTest`
+//     钉到同一瞬间，两侧才真正可比。没有这一步，任何断言都只是「恰好现在对」。
+//  2. **时间与路径归一化**。响应体里的窗口时间、started_at、系列点位时间戳在生成时
+//     已替换成 <TIMESTAMP>、夹具目录替换成 <FIXTURE_DIR>；这里用同样的规则归一化 Go
+//     的响应体再比对。归一化只覆盖这两类内容，其余字节（键序、`24.0` 与 `1e-05` 这种
 //     浮点写法、Pydantic 错误文本）全部逐字节比对。
 //     副作用：被归一化的用例不再比对 content-length（占位符长度与真实值不同），
 //     改为断言「响应头与自身体长一致」；未归一化的用例照旧逐字节比对长度。
-//  2. **HEAD 的响应体**。真实 http.Server 会丢弃 HEAD 的响应体（保留显式
+//  3. **HEAD 的响应体**。真实 http.Server 会丢弃 HEAD 的响应体（保留显式
 //     Content-Length），而 httptest.ResponseRecorder 只是记录处理器写了什么。
 //     因此回放 HEAD 用例时用「空体」与语料比较，长度仍按语料断言。
 const serverCorpusPath = "testdata/server_corpus.json"
@@ -64,6 +69,7 @@ type serverCorpusCase struct {
 // serverCorpus 是整份语料。
 type serverCorpus struct {
 	version    int
+	nowBeijing string
 	fixtureDir string
 	fixture    *canonical.Value
 	cases      []serverCorpusCase
@@ -79,6 +85,7 @@ func loadServerCorpus(t *testing.T) *serverCorpus {
 	}
 	var meta struct {
 		Version    int                `json:"version"`
+		NowBeijing string             `json:"now_beijing"`
 		FixtureDir string             `json:"fixture_dir"`
 		Cases      []serverCorpusCase `json:"cases"`
 	}
@@ -104,11 +111,32 @@ func loadServerCorpus(t *testing.T) *serverCorpus {
 	}
 	return &serverCorpus{
 		version:    meta.Version,
+		nowBeijing: meta.NowBeijing,
 		fixtureDir: meta.FixtureDir,
 		fixture:    root.Lookup("fixture"),
 		cases:      meta.Cases,
 		replaces:   replaces,
 	}
+}
+
+// pinCorpusClock 把 internal/metrics 的时钟钉到语料记录的固定瞬间。
+//
+// 生成脚本用同一个瞬间 monkeypatch 了参照实现的 metrics._now_beijing，因此这是
+// 「两侧同一个时钟」的另一半。缺少它时不是断言变弱，而是断言变成「恰好现在对」：
+// 1 小时窗口配 86400 秒桶时会随运行时刻在 1 / 2 个点位之间摇摆。
+func pinCorpusClock(t *testing.T, corpus *serverCorpus) {
+	t.Helper()
+	if corpus.nowBeijing == "" {
+		t.Fatal("语料缺少 now_beijing：生成脚本应写入钉死的固定时刻")
+	}
+	moment, err := time.Parse(time.RFC3339, corpus.nowBeijing)
+	if err != nil {
+		t.Fatalf("解析语料 now_beijing %q 失败: %v", corpus.nowBeijing, err)
+	}
+	// 与生产路径同形：nowBeijing 返回的永远是北京时间。
+	moment = moment.In(metrics.BeijingTZ())
+	restore := metrics.SetNowForTest(func() time.Time { return moment })
+	t.Cleanup(restore)
 }
 
 // jsonEscaped 返回路径在 JSON 字符串里的样子（与生成脚本的同名函数一致）。
@@ -236,6 +264,7 @@ func TestServerMatchesPython(t *testing.T) {
 	if len(corpus.cases) == 0 {
 		t.Fatal("语料为空")
 	}
+	pinCorpusClock(t, corpus)
 	for _, entry := range corpus.cases {
 		t.Run(entry.Name, func(t *testing.T) {
 			recorder, body := replayServerCorpusCase(t, corpus, entry)

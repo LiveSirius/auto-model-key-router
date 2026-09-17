@@ -30,14 +30,20 @@
 2. **不断言上游调用**。这些路由**一个上游请求都不会发**（打到 proxy 的两条用例在
    选 key 之前就返回了），脚本末尾用「metrics 表行数恒为 0」把这一点钉住——如果哪天
    某条用例真的打到了上游，这里会直接报错。
-3. **只能归一化时间与路径**。响应体里的 ``window.from/to``、``started_at``、系列
-   点位时间戳都来自**墙钟**，而两侧都没有跨 HTTP 边界的可注入时钟（Go 侧
-   internal/metrics 的时钟是包内私有变量，外部测试改不了）。因此语料把这些位置替换
-   成占位符（``<TIMESTAMP>`` / ``<FIXTURE_DIR>``），并在
-   ``body_normalized`` 里标记。代价：被归一化的响应不再比对 content-length
-   （它随占位符长度变化），Go 侧只在未归一化时断言 content-length。
-   其余所有字节——键序、`hours` 的浮点写法（``24.0`` / ``1e-05``）、错误信封、
-   Pydantic 错误文本——都逐字节比对。
+3. **钉死时钟**。响应体里的 ``window.from/to``、``started_at``、系列点位时间戳、
+   **点位数**都来自 ``metrics._now_beijing()``。点位数是真的会变的：``hours=1``
+   配 ``bucket_seconds=86400`` 只在跨北京零点时横跨两个自然日，于是每天只有零点后
+   那一小时是 2 个点位，其余时间是 1 个——语料因此曾经随运行时刻漂移。这里把
+   ``metrics._now_beijing`` 全局换成固定时刻 ``NOW_BEIJING``（**全局固定，不做
+   逐用例区分**，最简单也够用），并把该时刻写进语料的 ``now_beijing`` 字段，
+   Go 侧用 ``metrics.SetNowForTest`` 钉到同一个瞬间。
+   时刻选在北京刚过零点的 ``00:36``：1 小时窗口必然横跨两个自然日（跨零点布局），
+   同时用 ``hours=0.5`` 的用例覆盖不跨零点的布局——两种日桶布局都被钉住。
+   时间戳本身仍然归一化成占位符（``<TIMESTAMP>``），夹具目录归一化成
+   ``<FIXTURE_DIR>``，回归由 ``body_normalized`` 标记。代价：被归一化的响应不再
+   比对 content-length（它随占位符长度变化），Go 侧只在未归一化时断言
+   content-length。其余所有字节——键序、`hours` 的浮点写法（``24.0`` / ``1e-05``）、
+   错误信封、Pydantic 错误文本——都逐字节比对。
 4. **每个用例一个全新应用**。度量库、key pool 游标、配置 mtime 都是进程内状态，
    复用应用会让用例之间互相污染（尤其是 ``config_replace`` 用例会改写配置文件）。
 
@@ -57,6 +63,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from datetime import datetime
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -65,6 +72,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from starlette.testclient import TestClient  # noqa: E402
 
+from auto_model_key_router import metrics as metrics_module  # noqa: E402
 from auto_model_key_router.app import create_app  # noqa: E402
 from auto_model_key_router.config import (  # noqa: E402
     RouterConfig,
@@ -77,6 +85,16 @@ CORPUS_VERSION = 1
 BASE_DIR = Path(tempfile.gettempdir()) / "amkr_server_corpus"
 CONFIG_PATH = BASE_DIR / "router-config.json"
 METRICS_PATH = BASE_DIR / "metrics.sqlite3"
+
+# NOW_BEIJING 是语料钉死的「当前时刻」（见文件头第 3 点）。
+#
+# 故意选在**北京刚过零点**的尴尬时刻（00:36，且不在整点/整分上）：
+#   * hours=1 + bucket_seconds=86400 的窗口 [前一天 23:36, 当天 00:36] 横跨两个
+#     自然日 → 2 个日桶点位（第一个 complete=true、第二个 false），把跨零点布局钉住；
+#   * hours=0.5 的窗口 [00:06, 00:36] 落在同一天 → 1 个日桶点位，把不跨零点布局钉住；
+#   * 3600 / 60 秒桶也都不落在桶边界上，第一个点位是部分桶。
+# 日期本身不承载语义（上海无夏令时，1970 年后恒为 +08:00），只要求是个合法日期。
+NOW_BEIJING = datetime(2026, 3, 15, 0, 36, 0, tzinfo=metrics_module.BEIJING_TZ)
 
 FIXED_LOCAL_API_KEY = "local-key"
 FULL_AUTH = {"Authorization": f"Bearer {FIXED_LOCAL_API_KEY}"}
@@ -315,6 +333,11 @@ def build_cases() -> None:
     # series 没有 all_history 参数：未知参数被完全忽略（不是 422，也不生效）。
     case("series_unknown_params_ignored", "GET",
          "/metrics/series?all_history=true&bucket_seconds=86400")
+    # 同一固定时刻下**不跨零点**的日桶窗口（0.5 小时 = 30 分钟，窗口 [00:06, 00:36]
+    # 落在同一天）：只有 1 个点位。与上面两条 hours=1 的跨零点用例配成一对，把两种
+    # 日桶布局都钉死（这正是语料曾经每天只有零点后一小时能通过的根因）。
+    case("series_bucket_daily_within_one_day", "GET",
+         "/metrics/series?hours=0.5&bucket_seconds=86400")
 
     # —— 接线：管理 API 与代理 catch-all —— #
     case("api_route_not_shadowed", "GET", "/api/providers", auth="none",
@@ -352,6 +375,15 @@ def normalize(body: str) -> str:
 def reset_base_dir() -> None:
     shutil.rmtree(BASE_DIR, ignore_errors=True)
     BASE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def pin_clock(value: datetime = NOW_BEIJING) -> None:
+    """把参照实现的时钟钉死在 ``value`` 上（对应测试里的 monkeypatch）。
+
+    只替换模块级函数对象；``metrics.py`` 内部按全局名查找 ``_now_beijing``，
+    所以之后构造的应用与查询都只看这个固定时刻，与真实墙钟彻底无关。
+    """
+    metrics_module._now_beijing = lambda: value
 
 
 def headers_for(auth: str) -> dict:
@@ -412,6 +444,8 @@ def run_case(entry: dict) -> dict:
 
 
 def build_corpus() -> dict:
+    # 全局钉死时钟：语料里的每一个时间都来自 NOW_BEIJING，不再随运行时刻漂移。
+    pin_clock()
     build_cases()
     results = [run_case(entry) for entry in CASES]
     covered = {pattern for result in results for pattern in result["covers"]}
@@ -422,10 +456,13 @@ def build_corpus() -> dict:
         "version": CORPUS_VERSION,
         "note": (
             "由 scripts/gen_server_corpus.py 驱动真实 Python FastAPI 应用生成。"
-            "body_text 已把墙钟时间戳与夹具目录替换成 <TIMESTAMP> / <FIXTURE_DIR>"
-            "（见脚本头部说明），body_normalized 标记该用例是否被归一化过。"
+            "now_beijing 是生成时钉死的固定时钟（两侧必须一致，见脚本头部第 3 点），"
+            "Go 侧回放时用 metrics.SetNowForTest 钉到同一瞬间。"
+            "body_text 已把时间戳与夹具目录替换成 <TIMESTAMP> / <FIXTURE_DIR>，"
+            "body_normalized 标记该用例是否被归一化过。"
             "fixture_dir 是生成时的固定临时目录，Go 侧回放时应替换成自己的临时目录。"
         ),
+        "now_beijing": NOW_BEIJING.isoformat(),
         "fixture_dir": str(BASE_DIR),
         "fixture": fixture(),
         "empty_fixture": empty_fixture(),

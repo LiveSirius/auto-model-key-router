@@ -38,6 +38,18 @@ const readerConns = 4
 // nowBeijing 可被测试替换，对应测试里 monkeypatch metrics_module._now_beijing。
 var nowBeijing = func() time.Time { return time.Now().In(beijingTZ) }
 
+// SetNowForTest 替换包内时钟并返回还原函数；仅供测试使用。
+//
+// 这是给**别的包**留的测试缝隙：包内测试直接改 nowBeijing 就够了，但
+// internal/server 的语料回放要先读语料里记录的固定时刻，再让回放落在同一个
+// 瞬间上（对应生成脚本对 metrics_module._now_beijing 的 monkeypatch），跨包
+// 改不了未导出的变量。不改动任何生产路径。
+func SetNowForTest(now func() time.Time) (restore func()) {
+	previous := nowBeijing
+	nowBeijing = now
+	return func() { nowBeijing = previous }
+}
+
 // Store 对应 metrics.py 的 MetricsStore。
 //
 // 写操作由 writeMu 串行化：SQLite 同一时刻只允许一个写事务，串行化把
