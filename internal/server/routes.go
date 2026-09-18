@@ -21,6 +21,8 @@ import (
 //	@app.get("/metrics/requests")       app.py:235  -> "/metrics/requests"
 //	@app.get("/metrics/series")         app.py:279  -> "/metrics/series"
 //	app.add_api_route("/v1/{path:path}") app.py:371 -> "/v1/" 交给 proxy
+//	@app.websocket("/ws/events")        app.py:325  -> "/ws/events" 交给 eventbus
+//	register_websocket_proxy(app, ...)  app.py:374  -> "/v1/" 的升级请求交给 wsproxy
 //
 // 运维面**没有**独立的前缀分支：与参照实现一样，7 条 /api/* 运维路由注册在管理 API
 // 的同一棵 mux 上（api.Server.Handler 在 OpsEnabled 为真时调用 RegisterOps），所以
@@ -79,6 +81,14 @@ func (a *App) buildHandler() http.Handler {
 	// "/v1"），而 ServeMux 会 307 重定向到 "/v1/"。显式注册精确模式挡掉重定向。
 	mux.HandleFunc("/v1", a.handleRoot)
 
+	// GET /ws/events（app.py:325）。**没有开关**：参照实现把它无条件注册在
+	// create_app 里，webui_enabled / ops_enabled 都不影响它（app.py:325-349 不在任何
+	// if 里，实测：webui 与 ops 全关时 /ws/events 的升级仍然被接受）。因此这里也不
+	// 引入 Options 上的新开关。普通 HTTP 请求不匹配 websocket 路由（Starlette 的
+	// WebSocketRoute 只在 scope["type"]=="websocket" 时匹配），落到兜底 404——由
+	// handleWSEvents 自己给出，与语料的 ws_events_http_* 逐字节对齐。
+	mux.HandleFunc("/ws/events", a.handleWSEvents)
+
 	mux.HandleFunc("/", a.handleRoot)
 	return mux
 }
@@ -104,9 +114,18 @@ var proxyMethods = map[string]bool{
 // 都是单元素（Python 侧同样稳定），它们已被语料逐字节锁定。
 const proxyMethodList = "GET, POST, PUT, PATCH, DELETE"
 
-// handleProxyRoute 处理 /v1/{path}：只有参照实现注册的那五个方法才进 proxy，
-// 其余方法（HEAD/OPTIONS/TRACE）是 405。
+// handleProxyRoute 处理 /v1/{path}：WebSocket 升级交给 wsproxy，其余只有参照实现
+// 注册的那五个方法才进 proxy，其它方法（HEAD/OPTIONS/TRACE）是 405。
+//
+// 升级判定必须排在方法判定**之前**：参照实现的两条路由在 ASGI 上是互斥的——
+// websocket scope 只匹配 websocket 路由（它没有方法集合），http scope 才匹配
+// `methods=["GET","POST","PUT","PATCH","DELETE"]` 的那条。实测（真实 uvicorn）：
+// 带升级头的 `GET /v1/does-not-exist` 返回 101（走 websocket 路由）。
 func (a *App) handleProxyRoute(w http.ResponseWriter, r *http.Request) {
+	if isWebSocketUpgrade(r) {
+		a.handleWSProxy(w, r)
+		return
+	}
 	if !proxyMethods[r.Method] {
 		writeMethodNotAllowed(w, proxyMethodList)
 		return
@@ -115,7 +134,15 @@ func (a *App) handleProxyRoute(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleModelsRoute 按方法把 /v1/models 分派到 app 面或 proxy（见 buildHandler 的说明）。
+//
+// 升级请求同样要先拦：参照实现里 `/v1/models` 只注册了 HTTP 方法，websocket 升级会落到
+// 通配的 websocket 路由 `/v1/{path:path}` 上，path = "models"。Go 的 ServeMux 里
+// "/v1/models" 比 "/v1/" 更精确，不在这里拦就会走进 app 面。
 func (a *App) handleModelsRoute(w http.ResponseWriter, r *http.Request) {
+	if isWebSocketUpgrade(r) {
+		a.handleWSProxy(w, r)
+		return
+	}
 	switch {
 	case r.Method == http.MethodGet:
 		a.handleModels(w, r)
@@ -170,10 +197,14 @@ func (a *App) handleProxy(w http.ResponseWriter, r *http.Request) {
 	//
 	// Go 侧比 Python 简单：proxy.Handle **同步**写完整个响应（流式也写完才返回），
 	// 所以 defer 释放天然覆盖整条流，不需要 _wrap_active_stream 那样给流式响应换
-	// 迭代器。_metrics_dirty.set()（app.py:355）没有对应动作——它只用来唤醒
-	// WebSocket 广播，见包文档。
+	// 迭代器。
 	if adapter := a.currentMetricsAdapter(); adapter != nil {
 		adapter.AcquireActive()
+		// app.py:355 的 `_metrics_dirty.set()`：**请求一进来**就置位，而不是等写库。
+		// 它让订阅者马上看到 active_requests 变了（长流式请求期间唯一的观测手段）。
+		// 没有客户端时这次置位不产生任何快照（Broadcaster.Tick 的门禁），代价只是一次
+		// 非阻塞的通道发送。
+		a.markMetricsDirty()
 		defer adapter.ReleaseActive()
 	}
 	a.proxy.Handle(w, r, path)

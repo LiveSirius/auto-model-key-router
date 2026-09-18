@@ -29,11 +29,8 @@ import (
 //  4. **metrics_db_path 变化才换指标库**（app.py:462-463）。换库时旧库继续服务
 //     到最后一个租约归还（RuntimeManager.closeUnused 负责关它）。
 //
-// 与参照实现的两处差异：
+// 与参照实现的一处差异：
 //
-//   - app.py:468 的 `metrics.on_record = old_runtime.metrics.on_record` 用来把
-//     「写指标后唤醒 WebSocket 广播」的回调带到新库上。本任务不含 WebSocket
-//     （见包文档），因此没有回调可带；
 //   - app.py:469 的 `await state.runtime_manager.replace(...)` 在 Go 侧是同步的
 //     （内部用互斥锁而不是 await），行为一致。
 //
@@ -78,6 +75,11 @@ func (a *App) reload() {
 			return
 		}
 		store = newMetricsAdapter(opened)
+		// app.py:468 的 `metrics.on_record = old_runtime.metrics.on_record`：把「写指标后
+		// 唤醒广播」的回调带到新库上。少了这一步，换库之后写入不再产生 dirty 信号，
+		// metrics_snapshot 会静默退化成 30 秒一次的空闲心跳（只有 /ws/events 能观察到，
+		// 所以由 websocket_test.go 的 TestMetricsBroadcastSurvivesStoreSwap 钉住）。
+		a.bindMetricsDirty(opened)
 	}
 
 	// 参照实现把 KeyPool 的构造放在 try 里（app.py:464-467），因为它会读端点探测
@@ -97,4 +99,8 @@ func (a *App) reload() {
 	} else {
 		a.configMtime = mtime
 	}
+	// app.py:473-475：换完之后（且**只有真的换了**）向订阅者广播一次 config_change。
+	// 参照实现在调用点自己判了 `if event_bus.client_count > 0`，Go 侧把这个门禁收进
+	// eventbus.Bus.BroadcastConfigChange 里——没人订阅时不广播，也**不构建帧**。
+	a.eventBus.BroadcastConfigChange(a.broadcastContext())
 }

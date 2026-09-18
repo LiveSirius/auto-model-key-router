@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "由 scripts/gen_server_corpus.py 驱动真实 Python FastAPI 应用生成。now_beijing 是生成时钉死的固定时钟（两侧必须一致，见脚本头部第 3 点），Go 侧回放时用 metrics.SetNowForTest 钉到同一瞬间。body_text 已把时间戳与夹具目录替换成 <TIMESTAMP> / <FIXTURE_DIR>，body_normalized 标记该用例是否被归一化过。fixture_dir 是生成时的固定临时目录，Go 侧回放时应替换成自己的临时目录。",
+  "note": "由 scripts/gen_server_corpus.py 驱动真实 Python FastAPI 应用生成。now_beijing 是生成时钉死的固定时钟（两侧必须一致，见脚本头部第 3 点），Go 侧回放时用 metrics.SetNowForTest 钉到同一瞬间。body_text 已把时间戳与夹具目录替换成 <TIMESTAMP> / <FIXTURE_DIR>，body_normalized 标记该用例是否被归一化过。fixture_dir 是生成时的固定临时目录，Go 侧回放时应替换成自己的临时目录。ws_cases / ws_proxy_cases 是 WebSocket 语料（用 websocket_connect 驱动），同样已归一化；Go 侧用 coder/websocket 客户端回放。",
   "now_beijing": "2026-03-15T00:36:00+08:00",
   "fixture_dir": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_server_corpus",
   "fixture": {
@@ -122,7 +122,7 @@
     "providers": {},
     "models": {}
   },
-  "case_count": 88,
+  "case_count": 93,
   "cases": [
     {
       "name": "head_root",
@@ -1303,6 +1303,200 @@
       "content_length": "92",
       "body_text": "{\"error\":{\"message\":\"模型  未配置；请先在 AMKR 的模型设置中配置该模型\"}}",
       "body_normalized": false
+    },
+    {
+      "name": "ws_events_http_get",
+      "method": "GET",
+      "path": "/ws/events",
+      "auth": "none",
+      "covers": [
+        "GET /ws/events"
+      ],
+      "config_replace": null,
+      "status": 404,
+      "content_type": "application/json",
+      "content_length": "22",
+      "body_text": "{\"detail\":\"Not Found\"}",
+      "body_normalized": false
+    },
+    {
+      "name": "ws_events_http_post",
+      "method": "POST",
+      "path": "/ws/events",
+      "auth": "none",
+      "covers": [],
+      "config_replace": null,
+      "status": 404,
+      "content_type": "application/json",
+      "content_length": "22",
+      "body_text": "{\"detail\":\"Not Found\"}",
+      "body_normalized": false
+    },
+    {
+      "name": "ws_events_http_head",
+      "method": "HEAD",
+      "path": "/ws/events",
+      "auth": "none",
+      "covers": [],
+      "config_replace": null,
+      "status": 404,
+      "content_type": "application/json",
+      "content_length": "22",
+      "body_text": "",
+      "body_normalized": false
+    },
+    {
+      "name": "ws_events_http_query",
+      "method": "GET",
+      "path": "/ws/events?x=1",
+      "auth": "none",
+      "covers": [],
+      "config_replace": null,
+      "status": 404,
+      "content_type": "application/json",
+      "content_length": "22",
+      "body_text": "{\"detail\":\"Not Found\"}",
+      "body_normalized": false
+    },
+    {
+      "name": "ws_events_http_trailing_slash",
+      "method": "GET",
+      "path": "/ws/events/",
+      "auth": "none",
+      "covers": [],
+      "config_replace": null,
+      "status": 404,
+      "content_type": "application/json",
+      "content_length": "22",
+      "body_text": "{\"detail\":\"Not Found\"}",
+      "body_normalized": false
+    }
+  ],
+  "ws_cases": [
+    {
+      "name": "ws_auth_valid",
+      "kind": "ws_auth",
+      "note": "合法首帧 + 完整权限：client_count / metrics_snapshot 是 authenticate() 内部的回调广播的，connected 是路由补发的（app.py:339-342）",
+      "send": {
+        "kind": "text",
+        "text": "{\"type\": \"auth\", \"token\": \"local-key\"}"
+      },
+      "covers": [
+        "WS /ws/events"
+      ],
+      "divergence": "",
+      "expect": "{\"frame_types\":[\"client_count\",\"metrics_snapshot\",\"connected\"],\"frames\":[\"{\\\"type\\\": \\\"client_count\\\", \\\"data\\\": {\\\"count\\\": 1}}\",\"{\\\"type\\\": \\\"metrics_snapshot\\\", \\\"data\\\": {\\\"count_semantics\\\": \\\"upstream_attempt\\\", \\\"window\\\": {\\\"from\\\": \\\"<TIMESTAMP>\\\", \\\"to\\\": \\\"<TIMESTAMP>\\\", \\\"hours\\\": null}, \\\"started_at\\\": \\\"<TIMESTAMP>\\\", \\\"database_path\\\": \\\"<FIXTURE_DIR>\\\\\\\\metrics.sqlite3\\\", \\\"rate_window_seconds\\\": 60, \\\"current_rpm\\\": 0, \\\"current_tpm\\\": 0, \\\"router_status\\\": \\\"green\\\", \\\"active_requests\\\": 0, \\\"total\\\": {\\\"requests\\\": 0, \\\"successes\\\": 0, \\\"failures\\\": 0, \\\"retries\\\": 0, \\\"prompt_tokens\\\": 0, \\\"completion_tokens\\\": 0, \\\"total_tokens\\\": 0, \\\"cached_tokens\\\": 0, \\\"cache_creation_input_tokens\\\": 0, \\\"cache_read_input_tokens\\\": 0, \\\"cached_token_rate\\\": 0.0, \\\"total_duration_ms\\\": 0, \\\"avg_duration_ms\\\": 0, \\\"min_duration_ms\\\": 0, \\\"max_duration_ms\\\": 0, \\\"total_first_token_ms\\\": 0, \\\"avg_first_token_ms\\\": 0, \\\"min_first_token_ms\\\": 0, \\\"max_first_token_ms\\\": 0, \\\"status_codes\\\": {}}, \\\"caller_types\\\": {\\\"local\\\": {\\\"requests\\\": 0, \\\"successes\\\": 0, \\\"failures\\\": 0, \\\"retries\\\": 0, \\\"prompt_tokens\\\": 0, \\\"completion_tokens\\\": 0, \\\"total_tokens\\\": 0, \\\"cached_tokens\\\": 0, \\\"cache_creation_input_tokens\\\": 0, \\\"cache_read_input_tokens\\\": 0, \\\"cached_token_rate\\\": 0.0, \\\"total_duration_ms\\\": 0, \\\"avg_duration_ms\\\": 0, \\\"min_duration_ms\\\": 0, \\\"max_duration_ms\\\": 0, \\\"total_first_token_ms\\\": 0, \\\"avg_first_token_ms\\\": 0, \\\"min_first_token_ms\\\": 0, \\\"max_first_token_ms\\\": 0, \\\"status_codes\\\": {}}, \\\"visitor\\\": {\\\"requests\\\": 0, \\\"successes\\\": 0, \\\"failures\\\": 0, \\\"retries\\\": 0, \\\"prompt_tokens\\\": 0, \\\"completion_tokens\\\": 0, \\\"total_tokens\\\": 0, \\\"cached_tokens\\\": 0, \\\"cache_creation_input_tokens\\\": 0, \\\"cache_read_input_tokens\\\": 0, \\\"cached_token_rate\\\": 0.0, \\\"total_duration_ms\\\": 0, \\\"avg_duration_ms\\\": 0, \\\"min_duration_ms\\\": 0, \\\"max_duration_ms\\\": 0, \\\"total_first_token_ms\\\": 0, \\\"avg_first_token_ms\\\": 0, \\\"min_first_token_ms\\\": 0, \\\"max_first_token_ms\\\": 0, \\\"status_codes\\\": {}}}, \\\"models\\\": {}, \\\"requested_models\\\": {}, \\\"model_requested_models\\\": {}, \\\"keys\\\": {}, \\\"providers\\\": {}, \\\"provider_pools\\\": {}, \\\"upstream_models\\\": {}, \\\"unattributed\\\": {\\\"requests\\\": 0, \\\"successes\\\": 0, \\\"failures\\\": 0, \\\"retries\\\": 0, \\\"prompt_tokens\\\": 0, \\\"completion_tokens\\\": 0, \\\"total_tokens\\\": 0, \\\"cached_tokens\\\": 0, \\\"cache_creation_input_tokens\\\": 0, \\\"cache_read_input_tokens\\\": 0, \\\"cached_token_rate\\\": 0.0, \\\"total_duration_ms\\\": 0, \\\"avg_duration_ms\\\": 0, \\\"min_duration_ms\\\": 0, \\\"max_duration_ms\\\": 0, \\\"total_first_token_ms\\\": 0, \\\"avg_first_token_ms\\\": 0, \\\"min_first_token_ms\\\": 0, \\\"max_first_token_ms\\\": 0, \\\"status_codes\\\": {}}}}\",\"{\\\"type\\\":\\\"connected\\\",\\\"data\\\":{}}\"],\"close\":null,\"raised\":null}"
+    },
+    {
+      "name": "ws_auth_wrong_token",
+      "kind": "ws_auth",
+      "note": "token 不对 -> 4003 auth failed（event_bus.py:50）",
+      "send": {
+        "kind": "text",
+        "text": "{\"type\": \"auth\", \"token\": \"nope\"}"
+      },
+      "covers": [],
+      "divergence": "",
+      "expect": "{\"frame_types\":[],\"frames\":[],\"close\":{\"code\":4003,\"reason\":\"auth failed\"},\"raised\":null}"
+    },
+    {
+      "name": "ws_auth_visitor_token",
+      "kind": "ws_auth",
+      "note": "访客 key 能过 HTTP 的 /v1/models，但事件流只对 is_full 开放 -> 4003",
+      "send": {
+        "kind": "text",
+        "text": "{\"type\": \"auth\", \"token\": \"amkr-visitor\"}"
+      },
+      "covers": [],
+      "divergence": "",
+      "expect": "{\"frame_types\":[],\"frames\":[],\"close\":{\"code\":4003,\"reason\":\"auth failed\"},\"raised\":null}"
+    },
+    {
+      "name": "ws_auth_bad_json",
+      "kind": "ws_auth",
+      "note": "坏 JSON -> 4001（与超时同一个 except 分支）",
+      "send": {
+        "kind": "text",
+        "text": "{oops"
+      },
+      "covers": [],
+      "divergence": "",
+      "expect": "{\"frame_types\":[],\"frames\":[],\"close\":{\"code\":4001,\"reason\":\"auth timeout or invalid message\"},\"raised\":null}"
+    },
+    {
+      "name": "ws_auth_type_mismatch",
+      "kind": "ws_auth",
+      "note": "type 不是 auth -> 4003，且 verify 不会被调用（短路）",
+      "send": {
+        "kind": "text",
+        "text": "{\"type\": \"hello\", \"token\": \"local-key\"}"
+      },
+      "covers": [],
+      "divergence": "",
+      "expect": "{\"frame_types\":[],\"frames\":[],\"close\":{\"code\":4003,\"reason\":\"auth failed\"},\"raised\":null}"
+    },
+    {
+      "name": "ws_auth_json_null",
+      "kind": "ws_auth",
+      "note": "合法 JSON 但不是对象：AttributeError 冒泡，不关 4001/4003",
+      "send": {
+        "kind": "text",
+        "text": "null"
+      },
+      "covers": [],
+      "divergence": "首帧是合法 JSON 但不是对象：参照实现抛 AttributeError 冒泡，连接被 ASGI 服务器异常关闭（不发关闭帧）；Go 侧在 eventbus.Authenticate 返回 ErrUnsupportedAuthFrame 后直接 CloseNow，同样不发关闭帧。客户端观测一致（无帧 + 异常终止），但 Python 的 TestClient 会把这个异常**抛回调用线程**，Go 侧只能观察到一个读错误，因此这一条的期望值不逐字节比对。",
+      "expect": "{\"frame_types\":[],\"frames\":[],\"close\":null,\"raised\":{\"exception\":\"AttributeError\",\"message\":\"'NoneType' object has no attribute 'get'\"}}"
+    }
+  ],
+  "ws_proxy_cases": [
+    {
+      "name": "ws_proxy_json_ok",
+      "kind": "ws_proxy",
+      "note": "升级请求里的查询串会带到上游（websocket_proxy.py:51-67 复制整个 scope），非流式响应一帧文本 + 1000",
+      "url": "/v1/chat/completions?trace=1",
+      "headers": {
+        "Authorization": "Bearer local-key",
+        "connection": "upgrade",
+        "sec-websocket-key": "testserver==",
+        "sec-websocket-version": "13"
+      },
+      "send": {
+        "kind": "text",
+        "text": "{\"model\": \"model-a\", \"messages\": []}"
+      },
+      "covers": [
+        "WS /v1/{path}"
+      ],
+      "divergence": "",
+      "upstream_response": {
+        "status": 200,
+        "content_type": "application/json",
+        "body": "{\"id\": \"ok\"}"
+      },
+      "expect": "{\"frames\":[\"{\\\"id\\\": \\\"ok\\\"}\"],\"close\":{\"code\":1000,\"reason\":\"\"},\"raised\":null,\"upstream\":[{\"method\":\"POST\",\"path\":\"/v1/chat/completions\",\"query\":\"trace=1\",\"authorization\":\"Bearer sk-secret-a\",\"content_type\":null,\"upgrade\":null,\"sec_websocket_key\":null,\"body\":\"{\\\"messages\\\":[],\\\"model\\\":\\\"model-a\\\"}\"}]}"
+    },
+    {
+      "name": "ws_proxy_auth_failure",
+      "kind": "ws_proxy",
+      "note": "没有凭据：proxy 回 401，帧里是错误信封，关闭码 1008（4xx -> 1008），且一次上游请求都不发",
+      "url": "/v1/chat/completions",
+      "headers": {
+        "connection": "upgrade",
+        "sec-websocket-key": "testserver==",
+        "sec-websocket-version": "13"
+      },
+      "send": {
+        "kind": "text",
+        "text": "{\"model\": \"model-a\", \"messages\": []}"
+      },
+      "covers": [],
+      "divergence": "",
+      "upstream_response": {
+        "status": null,
+        "content_type": null,
+        "body": null
+      },
+      "expect": "{\"frames\":[\"{\\\"error\\\":{\\\"message\\\":\\\"本地 API key 验证失败\\\"}}\"],\"close\":{\"code\":1008,\"reason\":\"\"},\"raised\":null,\"upstream\":[]}"
     }
   ]
 }

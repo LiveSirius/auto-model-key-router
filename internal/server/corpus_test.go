@@ -74,6 +74,10 @@ type serverCorpus struct {
 	fixture    *canonical.Value
 	cases      []serverCorpusCase
 	replaces   map[string]*canonical.Value
+	// wsCases / wsProxyCases 是两块 WebSocket 语料，由 websocket_corpus_test.go
+	// 回放（普通 HTTP 请求匹配不到 websocket 路由，只能真升级）。
+	wsCases      []serverCorpusWSCase
+	wsProxyCases []serverCorpusWSCase
 }
 
 // loadServerCorpus 读取并解析语料。
@@ -110,12 +114,14 @@ func loadServerCorpus(t *testing.T) *serverCorpus {
 		}
 	}
 	return &serverCorpus{
-		version:    meta.Version,
-		nowBeijing: meta.NowBeijing,
-		fixtureDir: meta.FixtureDir,
-		fixture:    root.Lookup("fixture"),
-		cases:      meta.Cases,
-		replaces:   replaces,
+		version:      meta.Version,
+		nowBeijing:   meta.NowBeijing,
+		fixtureDir:   meta.FixtureDir,
+		fixture:      root.Lookup("fixture"),
+		cases:        meta.Cases,
+		replaces:     replaces,
+		wsCases:      loadWebSocketCorpus(t, root, "ws_cases"),
+		wsProxyCases: loadWebSocketCorpus(t, root, "ws_proxy_cases"),
 	}
 }
 
@@ -137,6 +143,40 @@ func pinCorpusClock(t *testing.T, corpus *serverCorpus) {
 	moment = moment.In(metrics.BeijingTZ())
 	restore := metrics.SetNowForTest(func() time.Time { return moment })
 	t.Cleanup(restore)
+}
+
+// assertCorpusClockPinned 断言 internal/metrics 的时钟确实钉在语料记录的瞬间。
+//
+// 与 pinCorpusClock 分成两个调用是有意的：这条断言独立于钉时钟的那一行，因此
+// 一旦有人把它删掉，测试会在**任何**运行时刻立刻失败，而不是退回「每天只有零点后
+// 那一小时碰巧通过」的老毛病（本次 bug 正是这样潜伏的）。判据取自存储层本身：
+// 空库上 1 小时窗口的右端就是 nowBeijing()。
+func assertCorpusClockPinned(t *testing.T, want string) {
+	t.Helper()
+	store, err := metrics.Open(filepath.Join(t.TempDir(), "clock-check.sqlite3"))
+	if err != nil {
+		t.Fatalf("打开时钟校验库失败: %v", err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Errorf("关停时钟校验库失败: %v", closeErr)
+		}
+	}()
+	series, err := store.TimeSeries(metrics.TimeSeriesParams{Hours: 1, BucketSeconds: 86400})
+	if err != nil {
+		t.Fatalf("时钟校验查询失败: %v", err)
+	}
+	window := series.Lookup("window")
+	if window == nil {
+		t.Fatal("时钟校验查询缺少 window")
+	}
+	until := window.Lookup("to")
+	if until == nil || until.Kind != canonical.KindString {
+		t.Fatalf("时钟校验查询的 window.to 不是字符串: %v", until)
+	}
+	if until.Str != want {
+		t.Fatalf("指标时钟未被钉住: 存储层看到的窗口右端是 %q，语料钉的是 %q", until.Str, want)
+	}
 }
 
 // jsonEscaped 返回路径在 JSON 字符串里的样子（与生成脚本的同名函数一致）。
@@ -201,14 +241,14 @@ func corpusAuthorization(t *testing.T, auth string) string {
 	return ""
 }
 
-// replayServerCorpusCase 回放一条用例，返回记录器与「归一化后的 Go 响应体」。
-func replayServerCorpusCase(t *testing.T, corpus *serverCorpus, entry serverCorpusCase) (*httptest.ResponseRecorder, string) {
+// newCorpusApp 用一份（已把夹具目录替换成本次临时目录的）语料配置装配服务。
+//
+// 与生成脚本同序：写夹具 -> New。WebSocket 语料同样走它，只是夹具可能被改过
+// （例如把 prov-a 的 base_url 换成桩上游）。
+func newCorpusApp(t *testing.T, fixture *canonical.Value, dir string) *App {
 	t.Helper()
-	dir := t.TempDir()
 	configPath := filepath.Join(dir, "router-config.json")
-
-	initial := substituteCorpusPaths(corpus.fixture, corpus.fixtureDir, dir)
-	migrated, err := config.MigrateConfigData(initial)
+	migrated, err := config.MigrateConfigData(fixture)
 	if err != nil {
 		t.Fatalf("迁移夹具失败: %v", err)
 	}
@@ -219,18 +259,27 @@ func replayServerCorpusCase(t *testing.T, corpus *serverCorpus, entry serverCorp
 	if err != nil {
 		t.Fatalf("载入夹具失败: %v", err)
 	}
-
-	// 与生成脚本完全同序：写夹具 -> create_app（这里 New）-> （可选）替换配置 ->
-	// 主请求。mtime 必须在应用构造**之后**变化，热重载才会触发。
 	app, err := New(Options{ConfigPath: configPath, Config: loaded, Version: "0.0.0-corpus"})
 	if err != nil {
 		t.Fatalf("装配失败: %v", err)
 	}
-	defer func() {
+	t.Cleanup(func() {
 		if closeErr := app.Close(); closeErr != nil {
 			t.Errorf("关停失败: %v", closeErr)
 		}
-	}()
+	})
+	return app
+}
+
+// replayServerCorpusCase 回放一条用例，返回记录器与「归一化后的 Go 响应体」。
+func replayServerCorpusCase(t *testing.T, corpus *serverCorpus, entry serverCorpusCase) (*httptest.ResponseRecorder, string) {
+	t.Helper()
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "router-config.json")
+
+	// 与生成脚本完全同序：写夹具 -> create_app（这里 New）-> （可选）替换配置 ->
+	// 主请求。mtime 必须在应用构造**之后**变化，热重载才会触发。
+	app := newCorpusApp(t, substituteCorpusPaths(corpus.fixture, corpus.fixtureDir, dir), dir)
 
 	if entry.configReplace != nil {
 		// 睡一小会儿再写：与生成脚本一样，保证 mtime 真的变化（文件系统时间戳
@@ -265,6 +314,7 @@ func TestServerMatchesPython(t *testing.T) {
 		t.Fatal("语料为空")
 	}
 	pinCorpusClock(t, corpus)
+	assertCorpusClockPinned(t, corpus.nowBeijing)
 	for _, entry := range corpus.cases {
 		t.Run(entry.Name, func(t *testing.T) {
 			recorder, body := replayServerCorpusCase(t, corpus, entry)
@@ -307,11 +357,23 @@ func TestServerMatchesPython(t *testing.T) {
 //
 // 清单与 routes.go 的注册手工对齐；新增路由时必须同步（否则这条测试不会失败——
 // 因此它同时检查「语料声明的路由都在清单里」这一反向，防止笔误）。
+//
+// covers 来自三块语料：HTTP 的 cases，以及两块 WebSocket 语料（握手与升级）。
 func TestServerCorpusCoversEveryRoute(t *testing.T) {
 	corpus := loadServerCorpus(t)
 	covered := map[string]bool{}
 	for _, entry := range corpus.cases {
 		for _, pattern := range entry.Covers {
+			covered[pattern] = true
+		}
+	}
+	for _, entry := range corpus.wsCases {
+		for _, pattern := range canonicalStringArray(t, entry.covers) {
+			covered[pattern] = true
+		}
+	}
+	for _, entry := range corpus.wsProxyCases {
+		for _, pattern := range canonicalStringArray(t, entry.covers) {
 			covered[pattern] = true
 		}
 	}
@@ -327,8 +389,14 @@ func TestServerCorpusCoversEveryRoute(t *testing.T) {
 		"GET /metrics/series",
 		"GET /v1/{path}",
 		"GET /api/providers",
+		// 两条 WebSocket 路由（以及 /ws/events 上的普通 HTTP 请求）。它们的语料在
+		// ws_cases / ws_proxy_cases 里，但覆盖面清单是同一份——新增 WebSocket 路由时
+		// 必须同步这里与 scripts/gen_server_corpus.py 的 ROUTE_PATTERNS。
+		"GET /ws/events",
+		"WS /ws/events",
+		"WS /v1/{path}",
 	}
-	if len(expected) != 10 {
+	if len(expected) != 13 {
 		t.Fatalf("app 面路由数量不对: %d", len(expected))
 	}
 	for _, pattern := range expected {

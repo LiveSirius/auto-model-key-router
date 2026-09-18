@@ -22,13 +22,20 @@
 // # 与参照实现的有意分歧
 //
 // 除下面这些点，本包的行为与 app.py 逐字节对齐（已由 testdata/server_corpus.json
-// 的差分语料锁定）：
+// 的差分语料锁定；WebSocket 的两个路由另有 ws_cases / ws_proxy_cases 两块语料，
+// 用 TestClient.websocket_connect 驱动）：
 //
-//   - **缺少 WebSocket 与事件总线**。参照实现用 EventBus 向 `/ws/events` 推送
-//     metrics_snapshot / client_count / config_change；前端改为轮询，本任务明确
-//     不含 WebSocket，因此 app.py:64-66 的指标广播任务**不启动**，
-//     app.py:355 的 `_metrics_dirty.set()` 也没有对应动作。接缝留在
-//     metrics.Store.SetOnRecord（写后回调）上：将来接上广播循环时在这里注册即可。
+//   - **WebSocket 已接线，但升级判定读的是请求头**。参照实现由 ASGI 协议层分流
+//     （`scope["type"]`），而 Go 的 net/http 没有这一层，因此 websocket.go 的
+//     isWebSocketUpgrade 复刻 uvicorn 的 `_get_upgrade`：`upgrade: websocket` 且
+//     `connection` 含 `upgrade`。真实 uvicorn 上两者一致（实测带这两个头的
+//     `GET /v1/does-not-exist` 返回 101）；**TestClient 只能发 HTTP scope**，所以
+//     「用 TestClient 发带升级头的普通 HTTP 请求」会落进 Python 的 HTTP 路由，语料
+//     因此不收录这类用例（详见 websocket.go 的说明）。
+//   - **异常冒泡的落点不同**。首帧是合法 JSON 但不是对象时，参照实现抛
+//     AttributeError 冒到 ASGI 服务器（连接的异常关闭）；Go 侧在
+//     `eventbus.Authenticate` 返回 ErrUnsupportedAuthFrame 后直接关闭底层连接。
+//     客户端观测一致（零帧 + 异常终止），但没有可比的异常对象。
 //   - **运维面已接线，但有两个接缝仍是 nil**。ops_api.py 的 7 条路由由
 //     internal/api 实现，装配层只负责把 api.Server.OpsEnabled（跟配置里的
 //     ops_enabled，可由 Options.OpsEnabled 覆盖）与 Version / WebUIStatus 传进去；
@@ -46,7 +53,9 @@
 //
 //   - corpus_test.go：回放 scripts/gen_server_corpus.py 用**真实 Python 应用**
 //     产出的语料，逐字节比对状态码 / 响应体 / content-type / content-length；
+//   - websocket_corpus_test.go：回放同一份语料里的 ws_cases / ws_proxy_cases
+//     （帧文本、关闭码、上游请求），用真实 TCP 上的 coder/websocket 客户端；
 //   - *_test.go：对无法在 HTTP 层对拍的接缝做单元测试（指标字段映射、版本检查的
-//     update_available 推导、热重载、WebUI 挂载、路由不互相遮蔽）；
+//     update_available 推导、热重载、WebUI 挂载、路由不互相遮蔽、节流广播的接线）；
 //   - handlers_test.go：纯 Go 的边界补充（例如未覆盖的查询参数组合）。
 package server

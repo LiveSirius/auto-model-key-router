@@ -20,6 +20,24 @@
   「校验先于鉴权」、未知参数被忽略、500 点位上限）
 * ``/api/*`` 打到管理 API（不是被 app 面兜底吞掉）
 * ``/v1/{path}`` catch-all 打到 proxy（且**只**在 app 面没有更具体的路由时）
+* ``/ws/events`` 的**普通 HTTP** 请求（websocket 路由不匹配 http scope -> 兜底 404）
+
+除此之外还有两块 WebSocket 语料（``ws_cases`` 与 ``ws_proxy_cases``）：它们必须用
+``TestClient.websocket_connect`` 驱动，因为「真的升级」在 ASGI 上是另一个 scope，
+普通 ``client.request`` 无论如何都做不到：
+
+* ``ws_cases`` —— ``/ws/events`` 的握手：帧序（client_count / metrics_snapshot /
+  connected）、4001/4003、访客 key 被拒。驱动的是**真实的** ``create_app``。
+* ``ws_proxy_cases`` —— 升级到 ``/v1/{path}`` 的连接（``register_websocket_proxy`` +
+  app.py:374 注入的真实 proxy），记录响应帧与关闭码。
+
+一个**测试载体**的限制必须写在这里，否则后来者会以为它是缺陷：TestClient 只能发
+HTTP scope，所以「带 ``Upgrade: websocket`` 头的普通 HTTP 请求」在 Python 侧落进 HTTP
+路由（``GET /v1/does-not-exist`` -> 401），而真实 uvicorn 会把它升级成 websocket scope
+（实测 -> ``HTTP/1.1 101 Switching Protocols``，依据是 uvicorn
+``protocols/http/{h11,httptools}_impl.py`` 的 ``_get_upgrade``：``upgrade: websocket``
+且 ``connection`` 含 ``upgrade``）。Go 侧没有协议层分流，按同一组头判定，因此与**真实**
+Python 一致、与 TestClient 不一致。这类用例**刻意不入语料**。
 
 设计要点：
 
@@ -56,6 +74,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import shutil
@@ -349,6 +368,20 @@ def build_cases() -> None:
     # /v1/models 的「混合路径」语义：PUT 不归 app 面，而与 POST 一样落进通配路由。
     case("proxy_catchall_put_models", "PUT", "/v1/models")
 
+    # —— /ws/events 上的普通 HTTP 请求 —— #
+    #
+    # websocket 路由**不匹配** http scope（Starlette 的 WebSocketRoute.matches 只在
+    # scope["type"] == "websocket" 时返回匹配），因此这四条都落到 Starlette 的兜底 404。
+    # 它们钉住的是「HTTP 请求不会被 WebSocket 路由吞掉」，以及 Go 侧
+    # handleWSEvents 的非升级分支必须给出同一个 404。
+    case("ws_events_http_get", "GET", "/ws/events", auth="none",
+         covers=["GET /ws/events"])
+    case("ws_events_http_post", "POST", "/ws/events", auth="none")
+    case("ws_events_http_head", "HEAD", "/ws/events", auth="none")
+    case("ws_events_http_query", "GET", "/ws/events?x=1", auth="none")
+    # "/ws/events/" 没有尾斜杠路由，也不在 "/ws/events" 的子树里。
+    case("ws_events_http_trailing_slash", "GET", "/ws/events/", auth="none")
+
 
 # —— 归一化 —— #
 
@@ -367,6 +400,15 @@ def normalize(body: str) -> str:
     return TIMESTAMP_RE.sub(
         TIMESTAMP_PLACEHOLDER, body.replace(json_escaped(BASE_DIR), DIR_PLACEHOLDER)
     )
+
+
+def compact(value: object) -> str:
+    """紧凑 JSON 文本，作为 WebSocket 语料 expect 的统一载体。
+
+    它是**数据**而不是响应体，所以用紧凑分隔符；真正要逐字节比的是其中的
+    ``frames`` 字段（那些帧文本本身已经是线上原样）。
+    """
+    return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 
 
 # —— 执行 —— #
@@ -443,12 +485,258 @@ def run_case(entry: dict) -> dict:
     }
 
 
+# —— WebSocket 语料 —— #
+#
+# 为什么不能沿用上面的 client.request：ASGI 的 websocket 与 http 是两个 scope，
+# TestClient 的 ``websocket_connect`` 才会走 Starlette 的 websocket 路由。因此这些
+# 用例单独驱动，并把「帧文本」当作逐字节契约（唯一的例外是 ws_json_null，见下）。
+
+# ws_cases：/ws/events 的握手（app.py:325-349）。
+WS_CASES: list[dict] = [
+    {
+        "name": "ws_auth_valid",
+        "send": {"kind": "text", "text": '{"type": "auth", "token": "local-key"}'},
+        "note": "合法首帧 + 完整权限：client_count / metrics_snapshot 是 authenticate() "
+                "内部的回调广播的，connected 是路由补发的（app.py:339-342）",
+        "covers": ["WS /ws/events"],
+    },
+    {
+        "name": "ws_auth_wrong_token",
+        "send": {"kind": "text", "text": '{"type": "auth", "token": "nope"}'},
+        "note": "token 不对 -> 4003 auth failed（event_bus.py:50）",
+    },
+    {
+        "name": "ws_auth_visitor_token",
+        "send": {"kind": "text", "text": '{"type": "auth", "token": "amkr-visitor"}'},
+        "note": "访客 key 能过 HTTP 的 /v1/models，但事件流只对 is_full 开放 -> 4003",
+    },
+    {
+        "name": "ws_auth_bad_json",
+        "send": {"kind": "text", "text": "{oops"},
+        "note": "坏 JSON -> 4001（与超时同一个 except 分支）",
+    },
+    {
+        "name": "ws_auth_type_mismatch",
+        "send": {"kind": "text", "text": '{"type": "hello", "token": "local-key"}'},
+        "note": "type 不是 auth -> 4003，且 verify 不会被调用（短路）",
+    },
+    {
+        "name": "ws_auth_json_null",
+        "send": {"kind": "text", "text": "null"},
+        "divergence": (
+            "首帧是合法 JSON 但不是对象：参照实现抛 AttributeError 冒泡，连接被 ASGI "
+            "服务器异常关闭（不发关闭帧）；Go 侧在 eventbus.Authenticate 返回 "
+            "ErrUnsupportedAuthFrame 后直接 CloseNow，同样不发关闭帧。客户端观测一致"
+            "（无帧 + 异常终止），但 Python 的 TestClient 会把这个异常**抛回调用线程**，"
+            "Go 侧只能观察到一个读错误，因此这一条的期望值不逐字节比对。"
+        ),
+        "note": "合法 JSON 但不是对象：AttributeError 冒泡，不关 4001/4003",
+    },
+]
+
+
+def run_ws_case(entry: dict) -> dict:
+    reset_base_dir()
+    save_config_data(CONFIG_PATH, migrate_config_data(fixture()))
+    app = create_app(RouterConfig.load(CONFIG_PATH), CONFIG_PATH)
+
+    frames: list[str] = []
+    close: dict | None = None
+    raised: dict | None = None
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect("/ws/events") as websocket:
+                send = entry["send"]
+                if send["kind"] == "text":
+                    websocket.send_text(send["text"])
+                else:
+                    websocket.send_bytes(base64.b64decode(send["b64"]))
+                while True:
+                    try:
+                        message = websocket.receive()
+                    except WebSocketDisconnect as error:
+                        close = {"code": error.code, "reason": error.reason}
+                        break
+                    if message["type"] == "websocket.close":
+                        close = {"code": message.get("code"),
+                                 "reason": message.get("reason")}
+                        break
+                    frames.append(message.get("text") or "")
+                    # 认证成功后服务端不会主动关闭，看到 connected 就停（同
+                    # eventbus/testdata/e2e.jsonl 的观测方式）。
+                    if json.loads(frames[-1]).get("type") == "connected":
+                        break
+    except BaseException as error:  # noqa: BLE001
+        raised = {"exception": type(error).__name__, "message": str(error)}
+
+    # 帧文本里的 database_path/时间戳与夹具目录相关，必须归一化（与 HTTP 语料同一套）。
+    normalized = [normalize(frame) for frame in frames]
+    return {
+        "name": entry["name"],
+        "kind": "ws_auth",
+        "note": entry["note"],
+        "send": entry["send"],
+        "covers": entry.get("covers", []),
+        "divergence": entry.get("divergence", ""),
+        "expect": compact({
+            "frame_types": [json.loads(frame).get("type") for frame in normalized],
+            "frames": normalized,
+            "close": close,
+            "raised": raised,
+        }),
+    }
+
+
+def build_ws_cases() -> list[dict]:
+    return [run_ws_case(entry) for entry in WS_CASES]
+
+
+# ws_proxy_cases：升级到 /v1/{path} 的连接（websocket_proxy.py + app.py:374）。
+#
+# 上游用 httpx.MockTransport 替换掉当前代的 http_client（与 tests/test_app.py:479 同法），
+# 因此不需要真的监听端口，也不会联网。记录的是「客户端看到的帧 + 关闭码」以及
+# 「桩上游收到的请求」——后者是给 Go 侧对照用的，Go 那边用 httptest 桩上游，host:port
+# 必然不同，所以只比 method/path/query/头部/body。
+WS_PROXY_CASES: list[dict] = [
+    {
+        "name": "ws_proxy_json_ok",
+        "url": "/v1/chat/completions?trace=1",
+        "headers": {"Authorization": "Bearer local-key"},
+        "send": {"kind": "text", "text": '{"model": "model-a", "messages": []}'},
+        "upstream_status": 200,
+        "upstream_body": '{"id": "ok"}',
+        "note": "升级请求里的查询串会带到上游（websocket_proxy.py:51-67 复制整个 scope），"
+                "非流式响应一帧文本 + 1000",
+        "covers": ["WS /v1/{path}"],
+    },
+    {
+        "name": "ws_proxy_auth_failure",
+        "url": "/v1/chat/completions",
+        "headers": {},
+        "send": {"kind": "text", "text": '{"model": "model-a", "messages": []}'},
+        "upstream_status": None,
+        "upstream_body": None,
+        "note": "没有凭据：proxy 回 401，帧里是错误信封，关闭码 1008（4xx -> 1008），"
+                "且一次上游请求都不发",
+    },
+]
+
+
+def run_ws_proxy_case(entry: dict) -> dict:
+    import httpx
+
+    reset_base_dir()
+    save_config_data(CONFIG_PATH, migrate_config_data(fixture()))
+    app = create_app(RouterConfig.load(CONFIG_PATH), CONFIG_PATH)
+
+    upstream: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raw_body = request.content.decode("utf-8", "replace")
+        # 注意 request 是 **httpx** 的 Request（不是 Starlette 的），它的 url.query 是
+        # bytes 而不是 str——gen_websocket_corpus.py 那边用的是 Starlette Request，
+        # 所以那里可以直接入 JSON，这里必须先解码。
+        query = request.url.query
+        if isinstance(query, bytes):
+            query = query.decode("utf-8", "replace")
+        try:
+            # 对象的**键序**在两条实现里可能不同（各自按自己的写入顺序序列化），而它
+            # 不是契约；值才是。因此这里按 sort_keys=True 存，Go 侧用
+            # canonical.Dumps（紧凑 + 键排序）对照。
+            body = json.dumps(json.loads(raw_body), ensure_ascii=False,
+                              sort_keys=True, separators=(",", ":"))
+        except ValueError:
+            body = raw_body
+        upstream.append({
+            "method": request.method,
+            "path": request.url.path,
+            "query": query,
+            "authorization": request.headers.get("authorization"),
+            "content_type": request.headers.get("content-type"),
+            # 六个握手头必须被剔除（websocket_proxy.py:13-22）；记成 null 便于 Go 侧
+            # 对照「上游收不到它们」。
+            "upgrade": request.headers.get("upgrade"),
+            "sec_websocket_key": request.headers.get("sec-websocket-key"),
+            "body": body,
+        })
+        return httpx.Response(
+            entry["upstream_status"],
+            headers={"content-type": "application/json"},
+            content=entry["upstream_body"].encode("utf-8"),
+        )
+
+    if entry["upstream_status"] is not None:
+        app.state.runtime_manager.current.http_client = httpx.AsyncClient(
+            transport=httpx.MockTransport(handler)
+        )
+
+    frames: list[str] = []
+    close: dict | None = None
+    raised: dict | None = None
+    try:
+        with TestClient(app) as client:
+            with client.websocket_connect(entry["url"], headers=entry["headers"]) as websocket:
+                send = entry["send"]
+                if send["kind"] == "text":
+                    websocket.send_text(send["text"])
+                else:
+                    websocket.send_bytes(base64.b64decode(send["b64"]))
+                while True:
+                    try:
+                        message = websocket.receive()
+                    except WebSocketDisconnect as error:
+                        close = {"code": error.code, "reason": error.reason}
+                        break
+                    if message["type"] == "websocket.close":
+                        close = {"code": message.get("code"),
+                                 "reason": message.get("reason")}
+                        break
+                    frames.append(message.get("text") or "")
+    except BaseException as error:  # noqa: BLE001
+        raised = {"exception": type(error).__name__, "message": str(error)}
+
+    return {
+        "name": entry["name"],
+        "kind": "ws_proxy",
+        "note": entry["note"],
+        "url": entry["url"],
+        "headers": entry["headers"],
+        "send": entry["send"],
+        "covers": entry.get("covers", []),
+        "divergence": entry.get("divergence", ""),
+        # 桩上游的回应也记进语料：Go 侧的 httptest 桩必须回同一个东西，否则两边比
+        # 的就不是同一个场景。httpx 的 json= 用 json.dumps 的默认分隔符，所以
+        # body 里会带空格（`{"id": "ok"}`），Go 侧要照抄。
+        "upstream_response": {
+            "status": entry["upstream_status"],
+            "content_type": "application/json" if entry["upstream_status"] is not None else None,
+            "body": entry["upstream_body"],
+        },
+        "expect": compact({
+            "frames": [normalize(frame) for frame in frames],
+            "close": close,
+            "raised": raised,
+            "upstream": upstream,
+        }),
+    }
+
+
+def build_ws_proxy_cases() -> list[dict]:
+    return [run_ws_proxy_case(entry) for entry in WS_PROXY_CASES]
+
+
 def build_corpus() -> dict:
     # 全局钉死时钟：语料里的每一个时间都来自 NOW_BEIJING，不再随运行时刻漂移。
     pin_clock()
     build_cases()
     results = [run_case(entry) for entry in CASES]
-    covered = {pattern for result in results for pattern in result["covers"]}
+    ws_cases = build_ws_cases()
+    ws_proxy_cases = build_ws_proxy_cases()
+    covered = {
+        pattern
+        for result in results + ws_cases + ws_proxy_cases
+        for pattern in result.get("covers", [])
+    }
     missing = sorted(set(ROUTE_PATTERNS) - covered)
     if missing:
         raise SystemExit(f"语料未覆盖以下路由: {missing}")
@@ -461,6 +749,8 @@ def build_corpus() -> dict:
             "body_text 已把时间戳与夹具目录替换成 <TIMESTAMP> / <FIXTURE_DIR>，"
             "body_normalized 标记该用例是否被归一化过。"
             "fixture_dir 是生成时的固定临时目录，Go 侧回放时应替换成自己的临时目录。"
+            "ws_cases / ws_proxy_cases 是 WebSocket 语料（用 websocket_connect 驱动），"
+            "同样已归一化；Go 侧用 coder/websocket 客户端回放。"
         ),
         "now_beijing": NOW_BEIJING.isoformat(),
         "fixture_dir": str(BASE_DIR),
@@ -468,10 +758,14 @@ def build_corpus() -> dict:
         "empty_fixture": empty_fixture(),
         "case_count": len(results),
         "cases": results,
+        "ws_cases": ws_cases,
+        "ws_proxy_cases": ws_proxy_cases,
     }
 
 
 # app 面路由清单（与 internal/server/routes.go 的注册一一对应）；用于断言语料覆盖面。
+# 后三条是 WebSocket 路由：它们的语料在 ws_cases / ws_proxy_cases 里（HTTP 请求永远
+# 匹配不到它们，只能靠 websocket_connect 驱动）。
 ROUTE_PATTERNS = [
     "HEAD /",
     "GET /",
@@ -483,6 +777,9 @@ ROUTE_PATTERNS = [
     "GET /metrics/series",
     "GET /v1/{path}",
     "GET /api/providers",
+    "GET /ws/events",
+    "WS /ws/events",
+    "WS /v1/{path}",
 ]
 
 

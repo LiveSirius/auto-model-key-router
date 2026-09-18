@@ -15,6 +15,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/auth"
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
+	"github.com/Sparrived/auto-model-key-router/internal/eventbus"
 	"github.com/Sparrived/auto-model-key-router/internal/health"
 	"github.com/Sparrived/auto-model-key-router/internal/keypool"
 	"github.com/Sparrived/auto-model-key-router/internal/metrics"
@@ -22,6 +23,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/runtime"
 	"github.com/Sparrived/auto-model-key-router/internal/upstream"
 	"github.com/Sparrived/auto-model-key-router/internal/webui"
+	"github.com/Sparrived/auto-model-key-router/internal/wsproxy"
 )
 
 // Options 是装配一个服务所需的全部输入。
@@ -83,6 +85,24 @@ type App struct {
 	manager *runtime.RuntimeManager
 	api     *api.Server
 	handler http.Handler
+	// wsProxy 处理升级到 /v1/{path} 的连接（app.py:374）。它是**无状态**的转发器，
+	// 每条连接的生命周期都在它内部，因此整个 App 共用一个实例。
+	wsProxy *wsproxy.Handler
+	// eventBus 是 /ws/events 的订阅者集合（app.py:99）。
+	eventBus *eventbus.Bus
+	// broadcaster 把 dirty 信号、节流状态机与快照构建接起来（throttle.go:145）。
+	broadcaster *eventbus.Broadcaster
+	// broadcastStart 是节流虚拟时钟的原点（throttle.go 的 Loop 文档要求它对齐循环
+	// 启动时刻）。这里取在 New 里，比循环真正启动略早——方向是安全的，理由见
+	// startMetricsBroadcast：早一点只会让第一次超时判定更容易成立。
+	broadcastStart time.Time
+	// metricsDirty 是「有写入」的电平信号，容量 1、非阻塞发送，见 markMetricsDirty。
+	metricsDirty chan time.Duration
+	// broadcastCtx/Cancel/Done 管理广播 goroutine 的生命周期，对应 lifespan 里
+	// `_metrics_broadcast_task` 的创建与 cancel（app.py:64-77）。
+	broadcastCtx    context.Context
+	broadcastCancel context.CancelFunc
+	broadcastDone   chan struct{}
 
 	// configPath 是**绝对化之后**的配置路径，对应 app.state.config_path
 	// （app.py:85-87 的 `str(Path(config_path).resolve())`）。
@@ -135,6 +155,21 @@ func New(options Options) (*App, error) {
 		return nil, err
 	}
 	adapter := newMetricsAdapter(store)
+	// 事件总线与「写指标后唤醒广播」的回调（app.py:99、:134）。store 在这里先挂上
+	// 回调，新库在 reload 里同样要挂（app.py:468，见 bindMetricsDirty）。
+	app.eventBus = eventbus.New()
+	app.eventBus.Logger = options.Logger
+	app.broadcaster = &eventbus.Broadcaster{
+		Bus:      app.eventBus,
+		Snapshot: app.broadcastMetricsSnapshot,
+		Logger:   options.Logger,
+	}
+	// dirty 通道与虚拟时钟原点必须在**注册回调之前**就位：回调可能在任意 goroutine
+	// 上触发（metrics.Store.Record），先建后挂才没有并发窗口。原点的取法见
+	// startMetricsBroadcast 的说明（取早不取晚）。
+	app.metricsDirty = make(chan time.Duration, 1)
+	app.broadcastStart = time.Now()
+	app.bindMetricsDirty(store)
 	client := newUpstreamClient(options.Config)
 	app.manager = runtime.NewRuntimeManager(
 		runtime.NewRuntimeResources(options.Config, keyPool, adapter, client),
@@ -155,6 +190,9 @@ func New(options Options) (*App, error) {
 		}
 	}
 	app.proxy = proxy.New(app.manager, &switchableSink{app: app}, proxyOptions)
+	// WS /v1/{path}：注入点直接绑定 proxy.Handle，签名逐字相同，不需要适配层
+	// （app.py:374 的 register_websocket_proxy(app, proxy)）。
+	app.wsProxy = &wsproxy.Handler{Proxy: app.proxy.Handle, Logger: options.Logger}
 
 	app.api = &api.Server{
 		ConfigPath:    app.configPath,
@@ -175,6 +213,10 @@ func New(options Options) (*App, error) {
 	}
 
 	app.handler = app.buildHandler()
+	// 广播循环最后启动：它要读 app.eventBus 与 app.broadcaster，而且必须在 Handler
+	// 可用之前就绪（第一个 /ws/events 连接会立刻触发一次 metrics_snapshot 广播）。
+	// 对应 lifespan 启动时创建 _metrics_broadcast_task（app.py:64-66）。
+	app.startMetricsBroadcast()
 	return app, nil
 }
 
@@ -188,11 +230,12 @@ func (a *App) Manager() *runtime.RuntimeManager { return a.manager }
 // 连接池与指标库。
 //
 // 对应 lifespan 的 finally（app.py:69-78）：先取消指标广播任务，再
-// `await runtime_manager.close()`。广播任务未启动（见包文档），因此这里只剩
-// manager.Close()。顺序不可交换的理由见 runtime.RuntimeManager.Close 的说明。
+// `await runtime_manager.close()`。顺序不可交换的理由见 runtime.RuntimeManager.Close
+// 与 stopMetricsBroadcast 的说明。
 func (a *App) Close() error {
 	var err error
 	a.closeOnce.Do(func() {
+		a.stopMetricsBroadcast()
 		err = a.manager.Close()
 	})
 	return err

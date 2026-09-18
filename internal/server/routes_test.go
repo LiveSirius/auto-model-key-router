@@ -1,10 +1,13 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/coder/websocket"
 )
 
 // 本文件从**装配后的 Handler** 出发逐条发请求，证明 app 面、管理面与运维面的 URL
@@ -197,15 +200,22 @@ func TestCatchAllOnlyMatchesV1(t *testing.T) {
 	}
 }
 
-// TestStaticAndWebSocketAbsentWhenDisabled 断言「未启用/未实现的东西不注册任何路由」。
+// TestStaticAbsentWhenDisabled 断言「未启用的静态资源不注册任何路由」。
 //
-//   - WebUI：资产为 nil（或配置关闭）时 /ui/ 必须 404，而不是 200 或 500。
-//   - WebSocket：/ws/events 与 WS 升级的 /v1/{path} 都**不在**本任务范围内（前端改
-//     为轮询），留接缝但不注册——普通 GET /ws/events 必须落进 404，而不是被 app 面
-//     的某个兜底当成普通请求处理。
-func TestStaticAndWebSocketAbsentWhenDisabled(t *testing.T) {
+// WebUI：资产为 nil（或配置关闭）时 /ui/ 必须 404，而不是 200 或 500。
+//
+// **本文原本还断言 /ws/events 与 WS 升级的 /v1/{path} 也不可达**——那是「WebSocket 未
+// 实现」时的状态。两个路由现在都已接线（见 websocket.go），因此那两条断言按语义拆成
+// 了两个更精确的测试：
+//
+//   - TestWSEventsHTTPRequestIs404：普通 HTTP 请求仍然 404，但那**不是**因为路由缺席，
+//     而是因为 Starlette 的 WebSocketRoute 不匹配 http scope（语料的
+//     ws_events_http_get 逐字节钉住了这一点）；
+//   - TestWebSocketUpgradeAccepted：真的握手必须被接受（101），这才是「路由已注册」的
+//     判据——404 本身区分不了「没注册」与「注册了但只认 websocket」。
+func TestStaticAbsentWhenDisabled(t *testing.T) {
 	app := newTestApp(t, t.TempDir(), nil)
-	for _, path := range []string{"/ui/", "/ui/index.html", "/ws/events"} {
+	for _, path := range []string{"/ui/", "/ui/index.html"} {
 		recorder := serve(app, http.MethodGet, path, "")
 		if recorder.Code != http.StatusNotFound {
 			t.Errorf("GET %s 状态码 = %d，期望 404（未注册）", path, recorder.Code)
@@ -214,15 +224,77 @@ func TestStaticAndWebSocketAbsentWhenDisabled(t *testing.T) {
 			t.Errorf("GET %s 响应体 = %s，期望 %s", path, recorder.Body.String(), notFoundBody)
 		}
 	}
-	// 升级请求（WebSocket 握手）同样不被接受：没有路由会回 101。
-	upgrade := httptest.NewRequest(http.MethodGet, "/v1/anything", nil)
-	upgrade.Header.Set("Connection", "Upgrade")
-	upgrade.Header.Set("Upgrade", "websocket")
-	recorder := httptest.NewRecorder()
-	app.Handler().ServeHTTP(recorder, upgrade)
-	if recorder.Code == http.StatusSwitchingProtocols {
-		t.Error("/v1/anything 不应接受 WebSocket 升级（本任务不含 WebSocket）")
+}
+
+// TestWSEventsHTTPRequestIs404 断言 /ws/events 上的普通 HTTP 请求是兜底 404。
+//
+// 与参照实现一致：`@app.websocket("/ws/events")` 只匹配 websocket scope，所以
+// TestClient 的 GET /ws/events 落到 Starlette 兜底 → 404 `{"detail":"Not Found"}`
+// （实测；语料 ws_events_http_get / ws_events_http_post / ws_events_http_head 逐字节
+// 锁定状态码、content-type 与 content-length）。
+//
+// 注意这条断言**证不了**路由是否注册：405 与 404 的形状在这里都可能被兜底伪装。
+// 「路由已注册」由 TestWebSocketUpgradeAccepted 用真实握手证明。
+func TestWSEventsHTTPRequestIs404(t *testing.T) {
+	app := newTestApp(t, t.TempDir(), nil)
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodOptions} {
+		recorder := serve(app, method, "/ws/events", fullAuthorization)
+		if recorder.Code != http.StatusNotFound {
+			t.Errorf("%s /ws/events 状态码 = %d，期望 404（body=%s）",
+				method, recorder.Code, recorder.Body.String())
+		}
+		if recorder.Body.String() != notFoundBody {
+			t.Errorf("%s /ws/events 响应体 = %s，期望 %s",
+				method, recorder.Body.String(), notFoundBody)
+		}
 	}
+}
+
+// TestWebSocketUpgradeAccepted 断言两个 WebSocket 路由都真的接受升级。
+//
+// 判据是**真实握手**（httptest.NewServer + coder/websocket 客户端），而不是
+// httptest.ResponseRecorder：Recorder 不支持 Hijack，Accept 必然失败，任何状态码都
+// 说明不了问题（这正是原来的断言用 Recorder 时无法区分「未注册」与「注册了」的原因）。
+//
+//	/ws/events    -> app.py:325 的事件总线（首帧未发就断开 => Authenticate 关 4001）
+//	/v1/{path}    -> app.py:374 的 wsproxy（不发帧就断开 => Serve 直接 return）
+func TestWebSocketUpgradeAccepted(t *testing.T) {
+	app := newTestApp(t, t.TempDir(), nil)
+	server := httptest.NewServer(app.Handler())
+	defer server.Close()
+
+	for _, path := range []string{"/ws/events", "/v1/does-not-exist", "/v1/models"} {
+		conn, response, err := websocket.Dial(context.Background(),
+			webSocketURL(server.URL)+path, nil)
+		if err != nil {
+			t.Errorf("升级 %s 失败（HTTP 状态 %v）: %v", path, response, err)
+			continue
+		}
+		// 不发首帧直接关：服务端两侧都会立刻收尾，不会挂在握手等待里。
+		_ = conn.Close(websocket.StatusNormalClosure, "")
+	}
+}
+
+// TestWebSocketUpgradeRejectedOnRoot 断言升级不会泄漏到别的路径上。
+//
+// "/v1" 本身不匹配 Starlette 的 "/v1/{path:path}"（该正则需要尾斜杠），而 Go 的
+// ServeMux 会把 "/v1" 交给 handleRoot。这里固定成 404，避免将来的通配改动把升级吞到
+// 别的分支上。
+func TestWebSocketUpgradeRejectedOnRoot(t *testing.T) {
+	app := newTestApp(t, t.TempDir(), nil)
+	request := httptest.NewRequest(http.MethodGet, "/v1", nil)
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+	recorder := httptest.NewRecorder()
+	app.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNotFound {
+		t.Errorf("升级 GET /v1 状态码 = %d，期望 404", recorder.Code)
+	}
+}
+
+// webSocketURL 把 httptest 服务器的 http URL 折算成 ws URL。
+func webSocketURL(serverURL string) string {
+	return "ws" + strings.TrimPrefix(serverURL, "http")
 }
 
 // TestUpdateCheckRouteWired 断言 /api/update/check 用的是注入的 CheckUpdate 接缝
