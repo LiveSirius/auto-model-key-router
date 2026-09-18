@@ -253,6 +253,70 @@ func TestActiveRequestsReflectsInflightProxyRequest(t *testing.T) {
 	}
 }
 
+// TestStreamingProxyRequestRecordsTokens 是「流式请求的 token 用量真的进库」的端到端
+// 证据，覆盖 WebUI 总览页「Token 用量」显示为 0 的那个真实故障。
+//
+// 链路：POST /v1/chat/completions(stream) → proxy 原样转发流 → 抽取上游 SSE 里的 usage
+// → metrics.Store.Record → GET /metrics 的 total.total_tokens。
+//
+// 用真实 httptest 上游（而非桩）把每一段都串起来：只有原样转发流自己解析 usage，
+// 这个数字才不会是 0。
+func TestStreamingProxyRequestRecordsTokens(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(w,
+			"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"+
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":22,"+
+				"\"total_tokens\":33}}\n\n"+
+				"data: [DONE]\n\n")
+	}))
+	defer upstream.Close()
+
+	dir := t.TempDir()
+	path := writeFixture(t, dir, true, false)
+	rewriteBaseURL(t, path, upstream.URL)
+	loaded, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("载入配置失败: %v", err)
+	}
+	app, err := New(Options{ConfigPath: path, Config: loaded, Version: testVersion})
+	if err != nil {
+		t.Fatalf("装配失败: %v", err)
+	}
+	defer func() { _ = app.Close() }()
+
+	body := `{"model":"model-a","messages":[{"role":"user","content":"hi"}],"stream":true}`
+	request := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+	request.Header.Set("Authorization", fullAuthorization)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	app.Handler().ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("代理请求状态码 = %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+
+	snapshot := serve(app, http.MethodGet, "/metrics?hours=1", fullAuthorization)
+	if snapshot.Code != http.StatusOK {
+		t.Fatalf("GET /metrics 状态码 = %d（body=%s）", snapshot.Code, snapshot.Body.String())
+	}
+	parsed, parseErr := canonical.ParseString(snapshot.Body.String())
+	if parseErr != nil {
+		t.Fatalf("解析 /metrics 失败: %v", parseErr)
+	}
+	total := parsed.Lookup("total")
+	if total == nil {
+		t.Fatalf("/metrics 缺少 total 段: %s", snapshot.Body.String())
+	}
+	want := map[string]string{
+		"requests": "1", "prompt_tokens": "11", "completion_tokens": "22", "total_tokens": "33",
+	}
+	for field, value := range want {
+		if got := total.Lookup(field).PyStr(); got != value {
+			t.Errorf("total.%s = %s，期望 %s", field, got, value)
+		}
+	}
+}
+
 // rewriteBaseURL 把配置里第一个 provider 的 base_url 换成本地测试上游。
 func rewriteBaseURL(t *testing.T, path, baseURL string) {
 	t.Helper()
