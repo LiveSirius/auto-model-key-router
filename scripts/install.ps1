@@ -18,14 +18,25 @@
 .EXAMPLE
     .\install.ps1 -InstallDir "$env:USERPROFILE\bin"
 #>
-[CmdletBinding()]
-param(
-    # 要安装的版本号，例如 5.0.0（默认取 GitHub 上最新的 release）。
-    [string]$Version = '',
-
-    # 安装目录（默认 %LOCALAPPDATA%\Programs\AutoModelKeyRouter）。
-    [string]$InstallDir = ''
-)
+# 这里**刻意不用 param()**：带 param 块（尤其 [CmdletBinding()]）的脚本无法通过
+# `irm <url> | iex` 执行——iex 把它当表达式求值，而 param() 只能出现在脚本/函数块开头，
+# 于是报 "Unexpected attribute 'CmdletBinding'"。而管道一行命令正是 README 首推的用法。
+# 因此手工解析 $args，让两种调用方式都可用：
+#   irm https://.../install.ps1 | iex
+#   .\install.ps1 -Version 5.1.0 -InstallDir <目录>
+$Version = ''
+$InstallDir = ''
+for ($index = 0; $index -lt $args.Count; $index++) {
+    switch -Regex ([string]$args[$index]) {
+        '^-{1,2}Version$'    { $Version = [string]$args[$index + 1]; $index++ }
+        '^-{1,2}InstallDir$' { $InstallDir = [string]$args[$index + 1]; $index++ }
+        '^-{1,2}(h|help|\?)$' {
+            Write-Host '用法: install.ps1 [-Version <x.y.z>] [-InstallDir <目录>]'
+            exit 0
+        }
+        default { throw "未知参数: $($args[$index])（可用: -Version、-InstallDir）" }
+    }
+}
 
 $ErrorActionPreference = 'Stop'
 
