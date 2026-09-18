@@ -69,6 +69,10 @@ func TransferableConfig(data *canonical.Value, includeVisitor bool) (*canonical.
 	if tasks := ExistingTasks(data); tasks.Obj.Len() > 0 {
 		result.SetKey("tasks", tasks.Clone())
 	}
+	// 工作空间随任务一起迁移，否则导入方只剩默认空间，命名空间的任务全丢。
+	if workspaces := lookup(data, "workspaces"); workspaces.IsObject() && workspaces.Obj.Len() > 0 {
+		result.SetKey("workspaces", workspaces.Clone())
+	}
 	return result, nil
 }
 
@@ -263,6 +267,23 @@ func MergeTransferableConfig(currentData, transferData *canonical.Value) (MergeR
 		if mergedTasks.Obj.Len() > 0 {
 			merged.SetKey("tasks", mergedTasks)
 		}
+	}
+	// 命名工作空间同样并入：同名空间的任务逐个覆盖，导入方的同空间同名任务胜出。
+	if transferWorkspaces := lookup(transferData, "workspaces"); transferWorkspaces.IsObject() {
+		for _, source := range objectItems(transferWorkspaces) {
+			if !source.Value.IsObject() {
+				continue
+			}
+			mergedTasks := WorkspaceTasks(merged, source.Key)
+			for _, task := range objectItems(lookup(source.Value, "tasks")) {
+				if task.Value.IsObject() {
+					mergedTasks.SetKey(task.Key, task.Value.Clone())
+				}
+			}
+			writeWorkspaceTasks(merged, source.Key, mergedTasks)
+		}
+	}
+	if lookup(transferData, "tasks").IsObject() || lookup(transferData, "workspaces").IsObject() {
 		if _, err := RepairTasks(merged); err != nil {
 			return MergeResult{}, err
 		}

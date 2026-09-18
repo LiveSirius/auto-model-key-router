@@ -323,3 +323,130 @@ func TestModelCorpusCoversEveryCase(t *testing.T) {
 		t.Errorf("语料条数 %d，期望 %d", len(entries), expected)
 	}
 }
+
+// workspaceConfig 是一份同时带顶层 tasks 与 workspaces 的最小可用配置。
+const workspaceConfig = `{"config_version":4,"local_api_key":"k",
+	"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+	"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]},"model-b":{"targets":[{"provider":"p","key":"k"}]}},
+	"tasks":{"shared":{"model":"model-a"}},
+	"workspaces":{"teamA":{"tasks":{"shared":{"model":"model-b"},"only-a":{"model":"model-a"}}},"empty":{}}}`
+
+// TestWorkspacesIsolateTaskNames 固化工作空间的核心语义：任务名只在空间内唯一。
+//
+// 三件事必须同时成立，缺任何一条「隔离」都是假的：
+//  1. 同名任务在两个空间里都能解析，且各自指向自己的模型；
+//  2. 顶层 tasks 归属 DefaultWorkspace（既有配置不带 workspaces 也照常工作）；
+//  3. 空工作空间被保留——否则新建空工作空间落盘后立刻消失。
+func TestWorkspacesIsolateTaskNames(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, workspaceConfig))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+
+	if len(cfg.Tasks) != 3 {
+		t.Fatalf("任务数应为 3，实际 %d: %+v", len(cfg.Tasks), cfg.Tasks)
+	}
+	defaultTask, found := cfg.TaskForWorkspace(DefaultWorkspace, "shared")
+	if !found || defaultTask.Model != "model-a" {
+		t.Errorf("默认空间的 shared 应指向 model-a，实际 %+v（found=%v）", defaultTask, found)
+	}
+	teamTask, found := cfg.TaskForWorkspace("teamA", "shared")
+	if !found || teamTask.Model != "model-b" {
+		t.Errorf("teamA 的 shared 应指向 model-b，实际 %+v（found=%v）", teamTask, found)
+	}
+	if _, found := cfg.TaskForWorkspace("teamA", "shared-only-missing"); found {
+		t.Error("不存在的工作空间任务不应被找到")
+	}
+	// 跨空间不可见：only-a 只在 teamA 里。
+	if _, found := cfg.TaskForWorkspace(DefaultWorkspace, "only-a"); found {
+		t.Error("teamA 的任务不应出现在默认空间")
+	}
+
+	want := []string{"default", "teamA", "empty"}
+	got := cfg.WorkspaceNames()
+	if len(got) != len(want) {
+		t.Fatalf("工作空间清单 %v，期望 %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("工作空间清单 %v，期望 %v", got, want)
+		}
+	}
+}
+
+// TestWorkspacesOptional 固化兼容性：没有 workspaces 段的既有配置行为不变。
+func TestWorkspacesOptional(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"t":{"model":"model-a"}}}`))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	if len(cfg.Workspaces) != 0 {
+		t.Errorf("未声明 workspaces 时应为空，实际 %v", cfg.Workspaces)
+	}
+	if names := cfg.WorkspaceNames(); len(names) != 1 || names[0] != DefaultWorkspace {
+		t.Errorf("应只有默认工作空间，实际 %v", names)
+	}
+	task, found := cfg.TaskFor("t")
+	if !found || task.Workspace != DefaultWorkspace {
+		t.Errorf("顶层任务应归属默认空间，实际 %+v（found=%v）", task, found)
+	}
+}
+
+// TestWorkspacesRejectsBadShapes 固化工作空间段的错误文本与触发条件。
+func TestWorkspacesRejectsBadShapes(t *testing.T) {
+	base := `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},"tasks":{},`
+	cases := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{"非对象", `"workspaces":[]}`, "workspaces 必须是对象"},
+		{"空间非对象", `"workspaces":{"teamA":[]}}`, "工作空间 teamA 必须是对象"},
+		{"空间名为空", `"workspaces":{"  ":{"tasks":{}}}}`, "工作空间名不能为空"},
+		{"与默认空间重名", `"workspaces":{"default":{"tasks":{}}}}`, "工作空间名重复: default"},
+		{"tasks 非对象", `"workspaces":{"teamA":{"tasks":[]}}}`, "workspaces.teamA.tasks 必须是对象"},
+		{
+			"模型未配置",
+			`"workspaces":{"teamA":{"tasks":{"t":{"model":"nope"}}}}}`,
+			"workspaces.teamA.tasks.t.model 引用了未配置的模型: nope",
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := FromDict(mustParse(t, base+testCase.payload))
+			if err == nil {
+				t.Fatalf("应当报错 %q", testCase.want)
+			}
+			var configErr *ConfigError
+			if !errors.As(err, &configErr) {
+				t.Fatalf("期望 ConfigError，实际 %T: %v", err, err)
+			}
+			if configErr.Message != testCase.want {
+				t.Errorf("错误文本不一致\n期望: %s\n实际: %s", testCase.want, configErr.Message)
+			}
+		})
+	}
+}
+
+// TestTaskNameConflictsWithModelGlobally 固化：工作空间不能用来遮蔽模型名。
+//
+// 否则「任务名解析成哪个模型」会取决于调用方是否带了工作空间头，同一个名字在
+// 不同入口指向不同东西。
+func TestTaskNameConflictsWithModelGlobally(t *testing.T) {
+	_, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"workspaces":{"teamA":{"tasks":{"model-a":{"model":"model-a"}}}}}`))
+	if err == nil {
+		t.Fatal("工作空间内的任务名撞模型名时应当报错")
+	}
+	var configErr *ConfigError
+	if !errors.As(err, &configErr) || configErr.Message != "任务名与模型名称冲突: model-a" {
+		t.Fatalf("错误文本不一致: %v", err)
+	}
+}

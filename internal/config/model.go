@@ -63,9 +63,20 @@ type RoutePlan struct {
 	Fallback *RouteTarget
 }
 
+// DefaultWorkspace 是默认工作空间的名称，对应配置顶层的 `tasks` 段。
+//
+// 它**不出现在**配置的 `workspaces` 里（那段装的是其它工作空间），只是给管理面与
+// 调用方一个统一的名字：请求不带 X-AMKR-Workspace 头时解析到的就是它。这样
+// 「工作空间」在运行时始终是一个具体名字，不必到处判断空串。
+const DefaultWorkspace = "default"
+
 // TaskConfig 是任务名路由：model 传任务名时改用这里的模型与固定参数。
 type TaskConfig struct {
-	Name          string
+	Name string
+	// Workspace 是任务所属的工作空间；顶层 tasks 的任务归属 DefaultWorkspace。
+	//
+	// 任务名只在工作空间内唯一，因此运行时的查表键是 (Workspace, Name) 两元组。
+	Workspace     string
 	Model         string
 	FallbackModel string
 	Params        *canonical.Value
@@ -114,8 +125,13 @@ type RouterConfig struct {
 	UpstreamRoutes map[string]map[string]string
 	UnifiedModel   *UnifiedModelConfig
 	Tasks          []TaskConfig
-	WebUIEnabled   bool
-	OpsEnabled     bool
+	// Workspaces 是**除默认工作空间之外**的工作空间名（按配置中的出现顺序）。
+	//
+	// 顶层 `tasks` 段就是默认工作空间 DefaultWorkspace，它不出现在这里；把两者
+	// 合并成一份名字清单的入口是 WorkspaceNames。
+	Workspaces   []string
+	WebUIEnabled bool
+	OpsEnabled   bool
 	// ReasoningEffortByModel 是 model.id -> reasoning_effort（仅非空项）。
 	ReasoningEffortByModel map[string]string
 }
@@ -228,7 +244,7 @@ func fromMigrated(raw *canonical.Value) (*RouterConfig, error) {
 	if config.UnifiedModel, err = parseUnifiedModel(raw, models); err != nil {
 		return nil, err
 	}
-	if config.Tasks, err = parseTasks(raw, models); err != nil {
+	if config.Tasks, config.Workspaces, err = parseTasks(raw, models); err != nil {
 		return nil, err
 	}
 
@@ -528,16 +544,72 @@ func parseUnifiedModel(raw *canonical.Value, models []ModelConfig) (*UnifiedMode
 	return unified, nil
 }
 
-// parseTasks 解析 tasks 段。
-func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, error) {
-	rawTasks := raw.Lookup("tasks")
+// parseTasks 解析顶层的 tasks 段（默认工作空间）与可选的 workspaces 段。
+//
+// 对齐 config.py:869 的 tasks 语义，并在其上叠加工作空间：顶层 `tasks` 就是
+// DefaultWorkspace，`workspaces.<名字>.tasks` 是其余工作空间。返回的任务是**扁平**
+// 的一份列表，每项带自己的 Workspace，方便运行时按 (工作空间, 任务名) 查表。
+func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, []string, error) {
+	idsByName := modelIDsByName(models)
+
+	tasks, err := parseTaskGroup(raw.Lookup("tasks"), DefaultWorkspace, "tasks", idsByName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rawWorkspaces := raw.Lookup("workspaces")
+	if rawWorkspaces == nil || rawWorkspaces.IsNull() {
+		return tasks, nil, nil
+	}
+	if !rawWorkspaces.IsObject() {
+		return nil, nil, errf("workspaces 必须是对象")
+	}
+
+	var names []string
+	seen := map[string]bool{DefaultWorkspace: true}
+	for _, rawName := range rawWorkspaces.Obj.Keys() {
+		name := strings.TrimSpace(rawName)
+		if name == "" {
+			return nil, nil, errf("工作空间名不能为空")
+		}
+		if seen[name] {
+			return nil, nil, errf("工作空间名重复: %s", name)
+		}
+		seen[name] = true
+		workspace := rawWorkspaces.Lookup(rawName)
+		if !workspace.IsObject() {
+			return nil, nil, errf("工作空间 %s 必须是对象", name)
+		}
+		group, err := parseTaskGroup(workspace.Lookup("tasks"), name, "workspaces."+name+".tasks", idsByName)
+		if err != nil {
+			return nil, nil, err
+		}
+		// 空工作空间也保留：它是用户显式建出来的命名空间，删掉会让「新建空工作
+		// 空间」在落盘后立刻消失。
+		names = append(names, name)
+		tasks = append(tasks, group...)
+	}
+	return tasks, names, nil
+}
+
+// parseTaskGroup 解析一段 `{任务名: {...}}`，workspace 是它归属的工作空间。
+//
+// prefix 只影响错误文本里的字段路径：默认工作空间保持 `tasks.<名字>.model` 这一
+// 既有措辞（语料逐字节锁定），命名工作空间用 `workspaces.<空间>.tasks.<名字>.model`。
+func parseTaskGroup(
+	rawTasks *canonical.Value,
+	workspace, prefix string,
+	idsByName map[string]string,
+) ([]TaskConfig, error) {
 	if rawTasks == nil || rawTasks.IsNull() {
 		return nil, nil
 	}
 	if !rawTasks.IsObject() {
-		return nil, errf("tasks 必须是对象")
+		if prefix == "tasks" {
+			return nil, errf("tasks 必须是对象")
+		}
+		return nil, errf("%s 必须是对象", prefix)
 	}
-	idsByName := modelIDsByName(models)
 
 	var tasks []TaskConfig
 	for _, rawTaskName := range rawTasks.Obj.Keys() {
@@ -558,13 +630,13 @@ func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, error
 			return modelID, nil
 		}
 
-		modelID, err := resolve(task.Lookup("model"), "tasks."+taskName+".model")
+		modelID, err := resolve(task.Lookup("model"), prefix+"."+taskName+".model")
 		if err != nil {
 			return nil, err
 		}
 		fallbackModel := ""
 		if rawFallback, present := task.LookupOK("fallback_model"); present && !rawFallback.IsNull() {
-			if fallbackModel, err = resolve(rawFallback, "tasks."+taskName+".fallback_model"); err != nil {
+			if fallbackModel, err = resolve(rawFallback, prefix+"."+taskName+".fallback_model"); err != nil {
 				return nil, err
 			}
 		}
@@ -574,6 +646,7 @@ func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, error
 		}
 		tasks = append(tasks, TaskConfig{
 			Name:          taskName,
+			Workspace:     workspace,
 			Model:         modelID,
 			FallbackModel: fallbackModel,
 			Params:        params,
@@ -682,14 +755,25 @@ func (c *RouterConfig) Validate() error {
 	}
 
 	// 任务名必须能被唯一解析：与模型 ID/别名撞名会让 resolve_route 的语义变得
-	// 取决于查表顺序，因此直接禁止。
-	taskNames := map[string]bool{}
+	// 取决于查表顺序，因此直接禁止。这条冲突检查是**全局**的——工作空间只隔离
+	// 任务之间，不能用来遮蔽模型名。
+	//
+	// 任务名本身只在**同一个工作空间内**唯一：这正是工作空间的意义所在，
+	// 两个空间各有一个 `summarize` 是合法配置。
+	taskNames := map[[2]string]bool{}
 	hidden := c.HiddenModelNames()
-	for _, task := range c.Tasks {
+	for i := range c.Tasks {
+		task := &c.Tasks[i]
 		if task.Name == "" {
 			return errf("任务名不能为空")
 		}
-		if taskNames[task.Name] {
+		// 零值 Workspace 视作默认工作空间：手工构造 RouterConfig 的调用方（测试、
+		// 内部装配）不必知道工作空间的存在。
+		if task.Workspace == "" {
+			task.Workspace = DefaultWorkspace
+		}
+		key := [2]string{task.Workspace, task.Name}
+		if taskNames[key] {
 			return errf("任务名重复: %s", task.Name)
 		}
 		if modelNames[task.Name] || hidden[task.Name] != "" {
@@ -698,7 +782,7 @@ func (c *RouterConfig) Validate() error {
 		if task.Name == UNIFIED_MODEL_ID {
 			return errf("任务名不能使用保留名称: %s", UNIFIED_MODEL_ID)
 		}
-		taskNames[task.Name] = true
+		taskNames[key] = true
 		if _, found := modelsByID[task.Model]; !found {
 			return errf("任务 %s 引用了未配置的模型: %s", task.Name, task.Model)
 		}
@@ -776,14 +860,27 @@ func (c *RouterConfig) ConfiguredModelID(modelName string) (string, bool) {
 	return "", false
 }
 
-// TaskFor 按名称查找任务。
+// TaskFor 在默认工作空间里按名称查找任务。
 func (c *RouterConfig) TaskFor(name string) (TaskConfig, bool) {
+	return c.TaskForWorkspace(DefaultWorkspace, name)
+}
+
+// TaskForWorkspace 在指定工作空间里按名称查找任务。
+func (c *RouterConfig) TaskForWorkspace(workspace, name string) (TaskConfig, bool) {
+	if workspace == "" {
+		workspace = DefaultWorkspace
+	}
 	for _, task := range c.Tasks {
-		if task.Name == name {
+		if task.Name == name && task.Workspace == workspace {
 			return task, true
 		}
 	}
 	return TaskConfig{}, false
+}
+
+// WorkspaceNames 返回全部工作空间名：默认工作空间始终在首位，其余按配置顺序。
+func (c *RouterConfig) WorkspaceNames() []string {
+	return append([]string{DefaultWorkspace}, c.Workspaces...)
 }
 
 // HiddenModelNames 返回可直接调用、但不出现在 /v1/models 中的名字 -> 本地模型 ID。
