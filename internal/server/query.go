@@ -115,8 +115,15 @@ var requestHistoryParams = []qParam{
 //
 // 注意 series **没有** all_history（app.py 的系列接口永远用 hours，全量会让
 // SQLite 扫全表并生成几十万个点位）。
+//
+// hours 的上界这里是 8760（1 年）而不是参照实现的 720（30 天）：**有意的放宽**，
+// 让「用量统计」页能画到年与全量。放宽是安全的，因为点数上限（MaxSeriesPoints）
+// 与它无关——`seriesPointLimitExceeded` 仍然独立把关，长窗口只能配粗桶
+// （1 年 = 366 个日桶，仍在 500 以内；想拿 1 年配 15 秒桶照样是 422）。
+// 这条边界不在差分语料里（语料只钉了 `hours=0`、`bucket_seconds` 越界与点数超限），
+// 因此放宽不会与参照实现的对拍结论冲突；`/metrics/requests` 仍保持 720。
 var metricsSeriesParams = []qParam{
-	{name: "hours", kind: qFloat, def: qFloatOne, gt: qFloat0, le: qFloat720},
+	{name: "hours", kind: qFloat, def: qFloatOne, gt: qFloat0, le: qFloat8760},
 	{name: "bucket_seconds", kind: qInt, def: qInt60, ge: qInt15, le: qInt86400},
 	{name: "caller_type", kind: qLiteral, literals: callerTypes},
 	filterTextParam("model_id"),
