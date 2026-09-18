@@ -362,7 +362,9 @@ func TestWorkspacesIsolateTaskNames(t *testing.T) {
 		t.Error("teamA 的任务不应出现在默认空间")
 	}
 
-	want := []string{"default", "teamA", "empty"}
+	// 工作空间清单由任务反推：默认空间在首位，其余按任务出现顺序；`empty` 是个
+	// 空分组（里面没有任务），因此**不出现**——没有任务的分组既不可观测也没有意义。
+	want := []string{"default", "teamA"}
 	got := cfg.WorkspaceNames()
 	if len(got) != len(want) {
 		t.Fatalf("工作空间清单 %v，期望 %v", got, want)
@@ -382,9 +384,6 @@ func TestWorkspacesOptional(t *testing.T) {
 		"tasks":{"t":{"model":"model-a"}}}`))
 	if err != nil {
 		t.Fatalf("解析失败: %v", err)
-	}
-	if len(cfg.Workspaces) != 0 {
-		t.Errorf("未声明 workspaces 时应为空，实际 %v", cfg.Workspaces)
 	}
 	if names := cfg.WorkspaceNames(); len(names) != 1 || names[0] != DefaultWorkspace {
 		t.Errorf("应只有默认工作空间，实际 %v", names)

@@ -99,12 +99,13 @@ func TestUpdateAndDeleteTaskInWorkspace(t *testing.T) {
 		t.Errorf("越空间访问应报 404 ConfigOperationError，实际 %v", err)
 	}
 
-	// 删掉命名空间里唯一的任务后，空间本身保留（它是显式建出来的容器）。
+	// 删掉命名空间里唯一的任务后，这个空分组也一并消失（工作空间只是任务的
+	// 分组，没有成员时既不可观测也没有意义）。
 	if err := DeleteTaskIn(data, "teamA", "shared"); err != nil {
 		t.Fatalf("删除 teamA 任务失败: %v", err)
 	}
-	if !lookup(lookup(data, "workspaces"), "teamA").IsObject() {
-		t.Error("命名工作空间删空后应保留")
+	if entry, ok := lookup(data, "workspaces").LookupOK("teamA"); ok && entry.IsObject() {
+		t.Error("删空的命名工作空间应一并移除")
 	}
 	if _, err := RequireTaskIn(data, "teamA", "shared"); err == nil {
 		t.Error("删掉的任务不应还能读到")
@@ -112,6 +113,10 @@ func TestUpdateAndDeleteTaskInWorkspace(t *testing.T) {
 	// 默认空间的 shared 仍在。
 	if _, err := RequireTask(data, "shared"); err != nil {
 		t.Errorf("默认空间的 shared 不应被删除: %v", err)
+	}
+	// 删空后配置必须仍然可解析、且不含空 workspaces 段。
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("删除后的配置应可解析: %v", err)
 	}
 }
 
@@ -169,6 +174,39 @@ func TestRepairTasksDropsMalformedWorkspaces(t *testing.T) {
 		if _, err := config.FromDict(data); err != nil {
 			t.Errorf("丢掉坏 workspaces 后应可解析（%s）: %v", payload, err)
 		}
+	}
+}
+
+// TestRepairTasksKeepsValidSiblingWorkspace 固化：丢弃非法空间不影响合法兄弟。
+//
+// 整段丢掉是「只能整段丢」时的退路；一个坏成员不该连累旁边的好成员——那会把用户
+// 完好的任务路由一起抹掉。
+func TestRepairTasksKeepsValidSiblingWorkspace(t *testing.T) {
+	data := mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{},
+		"workspaces":{"broken":[],"teamA":{"tasks":{"kept":{"model":"model-a"}}}}}`)
+
+	removed, err := RepairTasks(data)
+	if err != nil {
+		t.Fatalf("修复失败: %v", err)
+	}
+	if len(removed) != 1 || removed[0] != "broken/" {
+		t.Errorf("被清理项 %v，期望 [broken/]", removed)
+	}
+	if task, ok := WorkspaceTasks(data, "teamA").LookupOK("kept"); !ok || !task.IsObject() {
+		t.Error("合法兄弟工作空间的任务不应被连累")
+	}
+	if entry, ok := lookup(data, "workspaces").LookupOK("broken"); ok && entry.IsObject() {
+		t.Error("非法工作空间应被丢弃")
+	}
+	// 默认空间空掉后 tasks 键也应消失（既有语义，不能因为多了 workspaces 而变）。
+	if lookup(data, "tasks").IsObject() {
+		t.Errorf("空掉的默认空间不应留下 tasks 键，实际 %s", canonical.Dumps(data))
+	}
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("修复后的配置应可解析: %v", err)
 	}
 }
 

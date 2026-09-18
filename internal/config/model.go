@@ -142,12 +142,9 @@ type RouterConfig struct {
 	// 详见 internal/config/doc.go 的说明。
 	UpstreamRoutes map[string]map[string]string
 	UnifiedModel   *UnifiedModelConfig
-	Tasks          []TaskConfig
-	// Workspaces 是**除默认工作空间之外**的工作空间名（按配置中的出现顺序）。
-	//
-	// 顶层 `tasks` 段就是默认工作空间 DefaultWorkspace，它不出现在这里；把两者
-	// 合并成一份名字清单的入口是 WorkspaceNames。
-	Workspaces   []string
+	// Tasks 是**扁平**的全部任务，每项带自己的 Workspace（顶层 `tasks` 段的任务
+	// 归属 DefaultWorkspace）。工作空间名从这份列表反推，见 WorkspaceNames。
+	Tasks        []TaskConfig
 	WebUIEnabled bool
 	OpsEnabled   bool
 	// ReasoningEffortByModel 是 model.id -> reasoning_effort（仅非空项）。
@@ -262,7 +259,7 @@ func fromMigrated(raw *canonical.Value) (*RouterConfig, error) {
 	if config.UnifiedModel, err = parseUnifiedModel(raw, models); err != nil {
 		return nil, err
 	}
-	if config.Tasks, config.Workspaces, err = parseTasks(raw, models); err != nil {
+	if config.Tasks, err = parseTasks(raw, models); err != nil {
 		return nil, err
 	}
 
@@ -567,47 +564,43 @@ func parseUnifiedModel(raw *canonical.Value, models []ModelConfig) (*UnifiedMode
 // 对齐 config.py:869 的 tasks 语义，并在其上叠加工作空间：顶层 `tasks` 就是
 // DefaultWorkspace，`workspaces.<名字>.tasks` 是其余工作空间。返回的任务是**扁平**
 // 的一份列表，每项带自己的 Workspace，方便运行时按 (工作空间, 任务名) 查表。
-func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, []string, error) {
+func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, error) {
 	idsByName := modelIDsByName(models)
 
 	tasks, err := parseTaskGroup(raw.Lookup("tasks"), DefaultWorkspace, "tasks", idsByName)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	rawWorkspaces := raw.Lookup("workspaces")
 	if rawWorkspaces == nil || rawWorkspaces.IsNull() {
-		return tasks, nil, nil
+		return tasks, nil
 	}
 	if !rawWorkspaces.IsObject() {
-		return nil, nil, errf("workspaces 必须是对象")
+		return nil, errf("workspaces 必须是对象")
 	}
 
-	var names []string
 	seen := map[string]bool{DefaultWorkspace: true}
 	for _, rawName := range rawWorkspaces.Obj.Keys() {
 		name := strings.TrimSpace(rawName)
 		if name == "" {
-			return nil, nil, errf("工作空间名不能为空")
+			return nil, errf("工作空间名不能为空")
 		}
 		if seen[name] {
-			return nil, nil, errf("工作空间名重复: %s", name)
+			return nil, errf("工作空间名重复: %s", name)
 		}
 		seen[name] = true
 		workspace := rawWorkspaces.Lookup(rawName)
 		if !workspace.IsObject() {
-			return nil, nil, errf("工作空间 %s 必须是对象", name)
+			return nil, errf("工作空间 %s 必须是对象", name)
 		}
 		group, err := parseTaskGroup(workspace.Lookup("tasks"), name, "workspaces."+name+".tasks", idsByName)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
-		// 空工作空间也保留：它是用户显式建出来的命名空间，删掉会让「新建空工作
-		// 空间」在落盘后立刻消失。
-		names = append(names, name)
 		tasks = append(tasks, group...)
 	}
-	return tasks, names, nil
+	return tasks, nil
 }
 
 // parseTaskGroup 解析一段 `{任务名: {...}}`，workspace 是它归属的工作空间。
@@ -896,9 +889,28 @@ func (c *RouterConfig) TaskForWorkspace(workspace, name string) (TaskConfig, boo
 	return TaskConfig{}, false
 }
 
-// WorkspaceNames 返回全部工作空间名：默认工作空间始终在首位，其余按配置顺序。
+// WorkspaceNames 返回全部**有任务**的工作空间名：默认工作空间始终在首位，其余按
+// 配置中出现顺序。
+//
+// 刻意由任务反推而不是直接回放配置里的 `workspaces` 键：一个没有任何任务的分组既
+// 不可观测也没有意义（调用方按名字取不到任何东西）。手写的空分组因此不会出现在
+// 这里，与 configops 写回时「删空即删分组」的语义一致——两边口径必须相同，否则
+// 界面上会列出一个删不掉的幽灵分组。
 func (c *RouterConfig) WorkspaceNames() []string {
-	return append([]string{DefaultWorkspace}, c.Workspaces...)
+	names := []string{DefaultWorkspace}
+	seen := map[string]bool{DefaultWorkspace: true}
+	for _, task := range c.Tasks {
+		workspace := task.Workspace
+		if workspace == "" {
+			workspace = DefaultWorkspace
+		}
+		if seen[workspace] {
+			continue
+		}
+		seen[workspace] = true
+		names = append(names, workspace)
+	}
+	return names
 }
 
 // HiddenModelNames 返回可直接调用、但不出现在 /v1/models 中的名字 -> 本地模型 ID。

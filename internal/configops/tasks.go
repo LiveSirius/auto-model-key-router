@@ -37,11 +37,22 @@ func WorkspaceTasks(data *canonical.Value, workspace string) *canonical.Value {
 // writeWorkspaceTasks 把任务映射写回它所属的位置。
 //
 // 与 WorkspaceTasks 互为逆操作。默认工作空间直接落在 data["tasks"]；命名工作空间
-// 逐层建出 `workspaces` 与 `workspaces.<名字>`，**即使任务为空也保留该工作空间**：
-// 空工作空间是用户显式建出来的命名空间，删掉它等于让「新建空工作空间」无法保存。
+// 逐层建出 `workspaces` 与 `workspaces.<名字>`。
+//
+// 传入空任务映射时会把这个工作空间**整个删掉**：工作空间只是「一组任务」的分组，
+// 组里没有成员时它既不可观测也没有意义。这样 `workspaces` 段始终只包含非空分组，
+// 管理面也就无须发明一套「新建/删除空工作空间」的接口。
 func writeWorkspaceTasks(data *canonical.Value, workspace string, tasks *canonical.Value) {
 	if workspace == "" || workspace == config.DefaultWorkspace {
+		if !tasks.IsObject() || tasks.Obj.Len() == 0 {
+			data.DeleteKey("tasks")
+			return
+		}
 		data.SetKey("tasks", tasks)
+		return
+	}
+	if !tasks.IsObject() || tasks.Obj.Len() == 0 {
+		deleteWorkspace(data, workspace)
 		return
 	}
 	workspaces := lookup(data, "workspaces")
@@ -54,6 +65,20 @@ func writeWorkspaceTasks(data *canonical.Value, workspace string, tasks *canonic
 	}
 	entry.SetKey("tasks", tasks)
 	workspaces.SetKey(workspace, entry)
+	data.SetKey("workspaces", workspaces)
+}
+
+// deleteWorkspace 删掉一个命名工作空间；它是最后一个时连 workspaces 段一起清掉。
+func deleteWorkspace(data *canonical.Value, workspace string) {
+	workspaces := lookup(data, "workspaces")
+	if !workspaces.IsObject() {
+		return
+	}
+	workspaces.DeleteKey(workspace)
+	if workspaces.Obj.Len() == 0 {
+		data.DeleteKey("workspaces")
+		return
+	}
 	data.SetKey("workspaces", workspaces)
 }
 
@@ -264,25 +289,15 @@ func DeleteTask(data *canonical.Value, taskName string) error {
 
 // DeleteTaskIn 删除指定工作空间里的任务。
 //
-// 与默认工作空间不同：命名工作空间即使删空了也**保留**（只剩一个空 tasks 或干脆
-// 没有 tasks 键），因为工作空间本身是用户显式建出来的容器。
+// 删掉空间里最后一个任务时，这个命名工作空间也一并消失（空分组没有意义）；
+// 默认工作空间则是清掉 tasks 键。
 func DeleteTaskIn(data *canonical.Value, workspace, taskName string) error {
 	if _, err := RequireTaskIn(data, workspace, taskName); err != nil {
 		return err
 	}
 	remaining := WorkspaceTasks(data, workspace)
 	remaining.DeleteKey(taskName)
-	if workspace == "" || workspace == config.DefaultWorkspace {
-		if remaining.Obj.Len() > 0 {
-			data.SetKey("tasks", remaining)
-		} else {
-			data.DeleteKey("tasks")
-		}
-		return nil
-	}
-	if remaining.Obj.Len() > 0 {
-		writeWorkspaceTasks(data, workspace, remaining)
-	}
+	writeWorkspaceTasks(data, workspace, remaining)
 	return nil
 }
 
@@ -313,7 +328,7 @@ func RepairTasks(data *canonical.Value) ([]string, error) {
 	}
 
 	removed := map[string]bool{}
-	repairTaskGroup(data, "", config.DefaultWorkspace, aliasToID, removed)
+	repairTaskGroup(data, config.DefaultWorkspace, aliasToID, removed)
 
 	rawWorkspaces := lookup(data, "workspaces")
 	if rawWorkspaces != nil && !rawWorkspaces.IsObject() {
@@ -322,34 +337,31 @@ func RepairTasks(data *canonical.Value) ([]string, error) {
 		data.DeleteKey("workspaces")
 		rawWorkspaces = nil
 	}
+	// rawWorkspaces 就是 data 里的那个对象（writeWorkspaceTasks 也只做原地改写），
+	// 因此删掉非法成员会直接反映到配置上。
 	for _, workspace := range objectKeys(rawWorkspaces) {
-		entry := lookup(rawWorkspaces, workspace)
-		if !entry.IsObject() {
+		if !lookup(rawWorkspaces, workspace).IsObject() {
 			// 形状非法的空间整个丢掉：留着它会让后续每次 FromDict 都失败，
 			// 配置再也写不回去。
 			rawWorkspaces.DeleteKey(workspace)
 			removed[workspace+"/"] = true
 			continue
 		}
-		repairTaskGroup(data, workspace, workspace, aliasToID, removed)
+		repairTaskGroup(data, workspace, aliasToID, removed)
 	}
-	if rawWorkspaces.IsObject() && rawWorkspaces.Obj.Len() == 0 {
+	if current := lookup(data, "workspaces"); current.IsObject() && current.Obj.Len() == 0 {
 		data.DeleteKey("workspaces")
-	}
-
-	// 默认空间全部清空后连 tasks 键一起移除，避免配置里留个空对象影响版本号与导出。
-	if current := lookup(data, "tasks"); current.IsObject() && current.Obj.Len() == 0 {
-		data.DeleteKey("tasks")
 	}
 	return sortedSet(removed), nil
 }
 
 // repairTaskGroup 修复一个工作空间内的任务，把被删掉的任务名记进 removed。
 //
-// qualify 为真时用 `空间/任务名` 记录，避免跨空间的同名任务互相覆盖。
+// 命名空间里的任务用 `空间/任务名` 记录：两个空间可能有同名任务，不限定就无法区分。
+// 默认空间保持原名——那批名字由对拍语料锁定。
 func repairTaskGroup(
 	data *canonical.Value,
-	workspace, removeKeyPrefix string,
+	workspace string,
 	aliasToID map[string]string,
 	removed map[string]bool,
 ) {
@@ -358,7 +370,7 @@ func repairTaskGroup(
 	for _, name := range objectKeys(current) {
 		removeKey := name
 		if qualify {
-			removeKey = removeKeyPrefix + "/" + name
+			removeKey = workspace + "/" + name
 		}
 		task := lookup(current, name)
 		if !task.IsObject() {
@@ -388,15 +400,8 @@ func repairTaskGroup(
 			removed[removeKey] = true
 		}
 	}
-	if qualify {
-		// 命名空间即使被清空也保留：它是用户显式建出来的容器。
-		return
-	}
-	if current.Obj.Len() > 0 {
-		data.SetKey("tasks", current)
-	} else {
-		data.DeleteKey("tasks")
-	}
+	// 写回时顺带完成清理：空分组（含默认空间清空后的 tasks 键）都会被移除。
+	writeWorkspaceTasks(data, workspace, current)
 }
 
 // normalizeWorkspace 归一化工作空间名，与运行时用同一套规则（空名落到默认空间）。
