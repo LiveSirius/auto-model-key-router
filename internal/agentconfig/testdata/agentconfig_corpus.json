@@ -603,7 +603,7 @@
   },
   {
    "name": "path_backup_default",
-   "want": "<root>/cache/AutoModelKeyRouter/agent-config-backups/claude-code.json"
+   "want": "<cache>agent-config-backups/claude-code.json"
   },
   {
    "name": "path_backup_dir",

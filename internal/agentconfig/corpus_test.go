@@ -19,6 +19,12 @@ import (
 //
 // 语料里的绝对路径统一写成 "<root>/..." 且剩余部分用 "/" 分隔；测试把 <root>
 // 换成自己的 t.TempDir()，并对 Go 侧产出的文本做同样的换算再比对。
+//
+// 备份目录来自 config.DefaultCacheDir()，它的目录名与拼写是**平台相关**的
+// （Windows 是 LOCALAPPDATA\AutoModelKeyRouter，Linux 是
+// XDG_CACHE_HOME/auto-model-key-router，macOS 是 ~/Library/Caches/AutoModelKeyRouter），
+// 因此语料里的这类路径写成 "<cache>" 占位符：它代表「平台缓存目录 + 目录分隔符」，
+// 其余后缀统一用 "/" 分隔，由测试在回放时按本平台解析。
 
 const corpusFile = "testdata/agentconfig_corpus.json"
 
@@ -196,6 +202,35 @@ func portablePath(root, value string) string {
 		return value
 	}
 	return "<root>" + strings.ReplaceAll(value[len(root):], `\`, "/")
+}
+
+// cachePlaceholder 是语料里「平台缓存目录 + 目录分隔符」的占位符。
+const cachePlaceholder = "<cache>"
+
+// cacheDirForCorpus 返回本平台解析出的缓存目录。
+//
+// 必须在 pinBaseEnv 之后调用：那条路径取决于 HOME / LOCALAPPDATA / XDG_CACHE_HOME，
+// 语料用例正是靠 pinBaseEnv 把这些变量钉进 root 的。
+func cacheDirForCorpus(t *testing.T) string {
+	t.Helper()
+	cacheDir, err := config.DefaultCacheDir()
+	if err != nil {
+		t.Fatalf("解析平台缓存目录失败: %v", err)
+	}
+	return cacheDir
+}
+
+// portableCorpusPath 把路径换算成语料里的可移植形式。
+//
+// 缓存目录下的路径换算成 "<cache>" + 后缀（后缀统一用 "/" 分隔）；其余路径仍走
+// portablePath 换算成 "<root>" + 后缀。
+func portableCorpusPath(root, cacheDir, value string) string {
+	if cacheDir != "" {
+		if prefix := cacheDir + string(filepath.Separator); strings.HasPrefix(value, prefix) {
+			return cachePlaceholder + strings.ReplaceAll(value[len(prefix):], `\`, "/")
+		}
+	}
+	return portablePath(root, value)
 }
 
 // portableText 是生成器里 portable_text 的 Go 版本，用于同时比对备份 JSON 的
@@ -418,6 +453,7 @@ func TestCorpusPaths(t *testing.T) {
 		t.Run(c.Name, func(t *testing.T) {
 			root := t.TempDir()
 			pinBaseEnv(t, root)
+			cacheDir := cacheDirForCorpus(t)
 			for key, value := range c.Env {
 				t.Setenv(key, corpusPath(root, value))
 			}
@@ -426,8 +462,8 @@ func TestCorpusPaths(t *testing.T) {
 				if err != nil {
 					t.Fatalf("resolvePath 失败: %v", err)
 				}
-				if portablePath(root, got) != *c.Want {
-					t.Errorf("解析结果期望 %q，实际 %q", *c.Want, portablePath(root, got))
+				if portableCorpusPath(root, cacheDir, got) != *c.Want {
+					t.Errorf("解析结果期望 %q，实际 %q", *c.Want, portableCorpusPath(root, cacheDir, got))
 				}
 				return
 			}
@@ -459,8 +495,8 @@ func TestCorpusPaths(t *testing.T) {
 			if err != nil {
 				t.Fatalf("路径推导失败: %v", err)
 			}
-			if portablePath(root, got) != *c.Want {
-				t.Errorf("路径期望 %q，实际 %q", *c.Want, portablePath(root, got))
+			if portableCorpusPath(root, cacheDir, got) != *c.Want {
+				t.Errorf("路径期望 %q，实际 %q", *c.Want, portableCorpusPath(root, cacheDir, got))
 			}
 		})
 	}
