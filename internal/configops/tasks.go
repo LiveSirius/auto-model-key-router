@@ -1,8 +1,6 @@
 package configops
 
 import (
-	"strings"
-
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
@@ -401,15 +399,12 @@ func repairTaskGroup(
 	}
 }
 
-// normalizeWorkspace 归一化工作空间名：去空白，空名落到默认工作空间。
+// normalizeWorkspace 归一化工作空间名，与运行时用同一套规则（空名落到默认空间）。
 //
 // 存在的空间与待建的空间都接受——命名空间由「在它里面建任务」隐式产生，与
 // 「工作空间只是任务的分组」这一定位一致，也省掉一步必须先建空间的仪式。
 func normalizeWorkspace(workspace string) string {
-	if name := strings.TrimSpace(workspace); name != "" {
-		return name
-	}
-	return config.DefaultWorkspace
+	return config.NormalizeWorkspace(workspace)
 }
 
 // mergeTaskObject 复刻 `{**existing, name: task}`：浅拷贝现有任务映射再覆盖一项。

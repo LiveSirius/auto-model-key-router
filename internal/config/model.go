@@ -70,6 +70,24 @@ type RoutePlan struct {
 // 「工作空间」在运行时始终是一个具体名字，不必到处判断空串。
 const DefaultWorkspace = "default"
 
+// WorkspaceHeader 是调用方选择工作空间的请求头。
+//
+// 用请求头而不是「模型名前缀」或「URL 路径」：任务名是 model 字段的值，加前缀会
+// 让它与真实模型名混在一个命名空间里（那样还得处理前缀与模型名的冲突）；路径则与
+// 参照实现固定的 /v1/... 形状冲突。请求头是唯一既不动 body 也不动路径的位置。
+const WorkspaceHeader = "X-AMKR-Workspace"
+
+// NormalizeWorkspace 归一化工作空间名：去空白，空名落到默认工作空间。
+//
+// 运行时的规范化只做这一件事——不校验名字是否存在。不存在的空间自然查不到任何
+// 任务，随后按普通模型名解析，与「不带这个头」的失败方式完全一致。
+func NormalizeWorkspace(workspace string) string {
+	if name := strings.TrimSpace(workspace); name != "" {
+		return name
+	}
+	return DefaultWorkspace
+}
+
 // TaskConfig 是任务名路由：model 传任务名时改用这里的模型与固定参数。
 type TaskConfig struct {
 	Name string
