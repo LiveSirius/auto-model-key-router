@@ -71,8 +71,11 @@ func (h *Handler) writeUnifiedFallback(w http.ResponseWriter, prepared *RequestC
 }
 
 // writeTaskFallback 在任务首选失败后切到任务的备选模型。
+//
+// 用请求自己的工作空间查表：备选必须是同一个空间里那个任务的备选，不能串到别的
+// 空间同名任务的备选上去。
 func (h *Handler) writeTaskFallback(w http.ResponseWriter, prepared *RequestContext, result attempt) {
-	plan, found := prepared.pool().TaskPlan(*prepared.TaskName)
+	plan, found := prepared.pool().TaskPlanIn(prepared.Workspace, *prepared.TaskName)
 	if !found || plan.Fallback == nil {
 		result.writeTo(w)
 		return
@@ -190,16 +193,21 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 	// 任务名路由：模型与采样参数都由任务固定，调用方只能传任务名。必须在
 	// resolve_route 之前判断，否则任务的 key=None 会把调用方指定的 Key 冲掉。
 	// （proxy_handler.py:228）
+	//
+	// 工作空间来自 X-AMKR-Workspace 头，缺省即默认工作空间；任务名只在所选空间
+	// 内查表。访客仍然不能使用任务（`!visitorOnly`），工作空间头也不例外——
+	// 访客无权访问任何任务，多一个维度只会扩大面。
+	workspace := config.NormalizeWorkspace(request.Header.Get(config.WorkspaceHeader))
 	var taskParams *canonical.Value
 	var taskName *string
 	if !visitorOnly {
-		if _, isTask := pool.TaskPlan(requestedModelName); isTask {
+		if _, isTask := pool.TaskPlanIn(workspace, requestedModelName); isTask {
 			if requestedKey != nil {
 				writeJSON(w, http.StatusBadRequest, jsonErrorResponse(
 					"任务 "+requestedModelName+" 的参数由 AMKR 固定，不能指定 Key"))
 				return nil
 			}
-			taskParams = pool.TaskParams(requestedModelName)
+			taskParams = pool.TaskParamsIn(workspace, requestedModelName)
 			name := requestedModelName
 			taskName = &name
 			if conflicts := proxysupport.TaskParamConflicts(payload, taskParams); len(conflicts) > 0 {
@@ -221,9 +229,9 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		}
 		modelID = resolved
 	} else {
-		resolved, key, err := pool.ResolveRoute(requestedModelName, requestedKey, path)
+		resolved, key, err := pool.ResolveRouteIn(workspace, requestedModelName, requestedKey, path)
 		if err != nil {
-			h.writeRouteError(w, path, requestedModelID, requestedModelName, err)
+			h.writeRouteError(w, path, requestedModelID, workspace, err)
 			return nil
 		}
 		modelID = resolved
@@ -241,7 +249,7 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		keyCount = pool.VisitorKeyCount(modelID)
 	}
 	if configuredKeyCount == 0 {
-		h.logModelNotConfigured(path, requestedModelID, modelID, "no_configured_keys")
+		h.logModelNotConfigured(path, requestedModelID, modelID, workspace, "no_configured_keys")
 		if taskParams != nil {
 			writeJSON(w, http.StatusNotFound, jsonErrorResponse(
 				"任务 "+requestedModelName+" 指向的模型 "+modelID+
@@ -289,6 +297,7 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		Attempts:           attempts,
 		CacheAffinityKey:   affinity,
 		UseNative:          useNative,
+		Workspace:          workspace,
 		TaskName:           taskName,
 		TaskParams:         taskParams,
 		FlatPayload:        flat,
@@ -320,8 +329,8 @@ func (h *Handler) authorize(request *http.Request, cfg *config.RouterConfig) *Au
 // 「模型 unified-model 未配置；请先在 AMKR 的模型设置中配置该模型」比看到 500
 // 有用得多，因此这里**刻意分叉**为 404 + 该文案；对拍语料覆盖的路径不受影响
 // （那种配置不会出现在语料里）。
-func (h *Handler) writeRouteError(w http.ResponseWriter, path, requestedModelID, _ string, _ error) {
-	h.logModelNotConfigured(path, requestedModelID, "", "key_selection_failed")
+func (h *Handler) writeRouteError(w http.ResponseWriter, path, requestedModelID, workspace string, _ error) {
+	h.logModelNotConfigured(path, requestedModelID, "", workspace, "key_selection_failed")
 	writeJSON(w, http.StatusNotFound, jsonErrorResponse(
 		"模型 "+requestedModelID+" 未配置；请先在 AMKR 的模型设置中配置该模型"))
 }
@@ -329,11 +338,16 @@ func (h *Handler) writeRouteError(w http.ResponseWriter, path, requestedModelID,
 // logModelNotConfigured 记录模型路由被拒的原因。
 //
 // 文案与参照实现逐字一致（proxy_support.py:45），因为它是运维排查的主要线索。
-func (h *Handler) logModelNotConfigured(path, requestedModelID, modelID, reason string) {
+//
+// workspace 是**有意增补**的字段：两个工作空间可以有同名任务，不带上空间名就
+// 分不清是哪一个被拒了。默认工作空间也照常记录，字段恒定存在比「有时有有时没有」
+// 更好查。
+func (h *Handler) logModelNotConfigured(path, requestedModelID, modelID, workspace, reason string) {
 	h.logger.Warn("model routing rejected",
 		"path", "/v1/"+path,
 		"requested_model", requestedModelID,
 		"resolved_model", modelID,
+		"workspace", workspace,
 		"reason", reason)
 }
 

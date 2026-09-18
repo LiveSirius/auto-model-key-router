@@ -85,10 +85,15 @@ func IsRetryableStatus(statusCode int) bool { return RetryableStatusCodes[status
 // 本包不与 keypool 的存储细节耦合。
 type KeyPool interface {
 	ResolveRoute(modelID string, keyName *string, path string) (string, string, error)
+	// ResolveRouteIn 在指定工作空间里解析路由；任务名只在该空间内查表。
+	ResolveRouteIn(workspace, modelID string, keyName *string, path string) (string, string, error)
 	ResolveUnifiedPlan(routeKind string, keyName *string) (config.RoutePlan, error)
 	ResolveVisitorModelID(publicModelID string) (string, bool)
 	TaskPlan(taskName string) (config.RoutePlan, bool)
+	// TaskPlanIn / TaskParamsIn 按 (工作空间, 任务名) 查表。
+	TaskPlanIn(workspace, taskName string) (config.RoutePlan, bool)
 	TaskParams(taskName string) *canonical.Value
+	TaskParamsIn(workspace, taskName string) *canonical.Value
 	KeyCount(modelID string) int
 	VisitorKeyCount(modelID string) int
 	RoutingMode(modelID string) string

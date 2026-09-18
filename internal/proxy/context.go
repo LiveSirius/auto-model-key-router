@@ -47,8 +47,12 @@ type RequestContext struct {
 
 	CacheAffinityKey *string
 	UseNative        bool
-	TaskName         *string
-	TaskParams       *canonical.Value
+	// Workspace 是本请求使用的工作空间（来自 X-AMKR-Workspace 头）。
+	//
+	// 归一化后总是具体名字：不带请求头时是 config.DefaultWorkspace。
+	Workspace  string
+	TaskName   *string
+	TaskParams *canonical.Value
 
 	// FallbackTarget 非空表示这是个备选 context（仅用于日志区分）。
 	FallbackTarget string

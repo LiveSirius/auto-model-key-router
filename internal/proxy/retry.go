@@ -451,7 +451,7 @@ func (h *Handler) selectKey(context *RequestContext, excluded map[string]bool) (
 func (h *Handler) keySelectionFailure(context *RequestContext, err error) attempt {
 	if errors.Is(err, keypool.ErrUnknownModel) || errors.Is(err, keypool.ErrNoUnifiedModel) {
 		h.logModelNotConfigured(context.Path, context.RequestedModelID, context.ModelID,
-			"key_selection_failed")
+			context.Workspace, "key_selection_failed")
 		return jsonResult(http.StatusNotFound, jsonErrorResponse(
 			"模型 "+context.RequestedModelID+" 未配置；请先在 AMKR 的模型设置中配置该模型"))
 	}
