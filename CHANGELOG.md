@@ -4,6 +4,40 @@
 
 （暂无）
 
+## [5.1.0] - 2026-09-18
+
+### 修复
+
+- **流式请求的 token 用量恒为 0**：原样转发流（`/v1/chat/completions` 的流式响应走这一条）
+  虽然不改写下游字节，但**必须**顺带抽取 `usage`——少了这一步，所有 chat 流式请求的 token
+  用量都会记成 0，指标页看起来像"没有消耗"。非流式、以及会重建流的 messages / responses
+  两条路径不受影响，所以这个 bug 只在流式 chat 上表现，容易漏掉。
+- **WebUI 概览页二次进入会先白屏再出内容**：改为同步首绘，消除空白等待。
+
+### 新增
+
+- **`amkr` 不带参数现在直接进入 WebUI**：启动服务并在就绪后用系统默认浏览器打开 `/ui`；
+  若服务已在运行，则只打开 WebUI 并退出（不再因端口被占而报错）。`--no-open` 可关闭自动打开。
+  `--serve-foreground`（服务注册调用）永不打开浏览器。
+- **新建配置默认启用 WebUI**（`webui_enabled: true`）。此前默认是关闭的，而终端界面已随 Python
+  版退役——也就是说全新安装敲 `amkr` 会打开一个 404 页面。破坏性变更：显式设置了
+  `webui_enabled: false` 的配置不受影响，`--no-webui` 仍可关闭。
+- **一行安装脚本**：`scripts/install.sh`（Linux / macOS）与 `scripts/install.ps1`（Windows）。
+  自动识别系统与架构、从 Releases 下载、**校验 sha256**、装到合适位置并自检版本。
+  Windows 无需管理员；目标文件被占用时会给出可执行的提示而不是失败堆栈。
+
+### 工程
+
+- **新增发布流水线**（`.github/workflows/release.yml`）：打 `v*` tag 即走
+  「门禁（gofmt / vet / go test / WebUI 探针）→ 六平台交叉编译（CGO_ENABLED=0）→
+  sha256 校验和 → GitHub Release」。此前发布是本地手工构建再上传，既容易漏平台，也没有
+  门禁前置。另有 `workflow_dispatch` 供演练（只构建、不建 Release）。
+- **测试套件现在真正跨平台**：此前有 5 个包的断言里写死了 Windows 平台特征
+  （语料内嵌生成机的绝对路径、缓存目录布局、路径分隔符、`shlex` 引号规则），
+  在 Windows 上全绿、在 Linux CI 上全红。已改为「语料占位符 + 回放时按平台替换」，
+  断言强度不变（篡改期望值仍会失败）。
+- README 按当前实现重写。
+
 ## [5.0.0] - 2026-09-18
 
 ### 重大变更：实现语言从 Python 迁移到 Go
