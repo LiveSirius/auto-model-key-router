@@ -10,8 +10,9 @@
 // 本文件只补充执行层的差异：
 //
 //   - **--check-update 的可手动更新命令**。参照实现给的是 pip/uv 命令（update.py），
-//     Go 版按决策 8 由 `go install` 分发，因此给的是 go install 命令。渲染函数把命令
-//     作为参数，语料用参照实现的命令文本喂进去逐行对拍（见 versionCheckLines）。
+//     Go 版按决策 8 给的是本平台的安装脚本一行命令（Windows 是 install.ps1，其余是
+//     install.sh）。渲染函数把命令作为参数，语料用参照实现的命令文本喂进去逐行对拍
+//     （见 versionCheckLines 与 defaultManualUpdateCommand）。
 //   - **--show-config 不含 quick_metrics_items**（要直查 metrics.db 的原始 SQL，
 //     internal/metrics 没有等价接口），见 cli.go 的说明。
 //
@@ -32,6 +33,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -171,8 +173,18 @@ func waitForHealth(cfg *config.RouterConfig, timeout time.Duration) bool {
 	return false
 }
 
-// defaultManualUpdateCommand 是 Go 版分发方式下的手动更新命令（决策 8）。
-const defaultManualUpdateCommand = "go install github.com/Sparrived/auto-model-key-router/cmd/amkr@latest"
+// defaultManualUpdateCommand 返回当前平台推荐的手动更新命令（决策 8）。
+//
+// 参照实现给的是 pip/uv 命令；Go 版从 v5.0.0 起的分发方式是「预编译二进制 + 安装
+// 脚本」，因此这里让用户重跑安装脚本（脚本自己会取最新 release 并校验 sha256），
+// 与 README 的安装一节一致。仍然用 `go install` 的源码用户可以直接照做，只是不再
+// 由面板提示——让大多数二进制安装的用户看到一条不需要 Go 工具链的命令更重要。
+func defaultManualUpdateCommand() string {
+	if runtime.GOOS == "windows" {
+		return "irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 | iex"
+	}
+	return "curl -fsSL https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.sh | sh"
+}
 
 func main() {
 	os.Exit(runCLI(os.Args, os.Stdout, os.Stderr, nil))
@@ -212,7 +224,7 @@ func runCLI(argv []string, stdout, stderr io.Writer, overrides *cliEnv) int {
 		}
 	}
 	if ctx.manualUpdateCommand == "" {
-		ctx.manualUpdateCommand = defaultManualUpdateCommand
+		ctx.manualUpdateCommand = defaultManualUpdateCommand()
 	}
 	if ctx.switchUnified == nil {
 		ctx.switchUnified = switchUnified
