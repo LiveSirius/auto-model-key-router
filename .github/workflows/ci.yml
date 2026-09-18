@@ -58,6 +58,8 @@ jobs:
         run: node webui/probes/webui_tip_probe.mjs
 
       - name: 鉴权探针
+        # 不传场景名 = 逐个场景各起一个子进程跑全量（模块级 state 不能跨场景复用）。
+        # 传错场景名会以退出码 2 失败，不会静默空转。
         run: node webui/probes/webui_auth_probe.mjs
 
   go:

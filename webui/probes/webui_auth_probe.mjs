@@ -228,8 +228,36 @@ const setup = {
       },
     ];
   },
+  // 任务路由页「新建」：空列表下点新建必须画出编辑器。taskEditor(null) 走的是
+  // 与编辑不同的分支，任何一处对 task 直接取属性都会抛错，表现为点了没反应。
+  tasks_new_task_opens_editor: () => {
+    global.location.hash = "#/tasks";
+    storage.set("amkr.apiKey", "good-key");
+    server.tasks = [];
+  },
 };
-setup[scenario]?.();
+// 没给场景名时，把自己按场景逐个重跑一遍。两个理由：
+//   1) 各页面模块的 state 是模块级缓存，同进程连跑多个场景会互相污染，必须一场景一进程；
+//   2) 不传场景名时 setup 不会命中，一个断言都不跑、failed 为空，进程照样退出 0。
+//      CI 与 README 都是裸调这条探针的，于是它成了永远绿灯的空转——"点新建没反应"
+//      这类只在某个分支上出现的 bug，正好从这种空子里漏过去。默认跑全部才不漏。
+const scenarioNames = Object.keys(setup);
+if (scenario === undefined) {
+  const { spawnSync } = await import("node:child_process");
+  let failedRuns = 0;
+  for (const name of scenarioNames) {
+    process.stdout.write(`--- ${name}\n`);
+    const result = spawnSync(process.execPath, [process.argv[1], name], { stdio: "inherit" });
+    if (result.status !== 0) failedRuns += 1;
+  }
+  process.exit(failedRuns ? 1 : 0);
+}
+// 场景名打错同样会静默空转，必须响亮地失败而不是"什么都没检查却通过"。
+if (!scenarioNames.includes(scenario)) {
+  console.error(`未知场景：${scenario}\n可用场景：\n  ${scenarioNames.join("\n  ")}`);
+  process.exit(2);
+}
+setup[scenario]();
 
 await boot();
 // 页面首屏的读取是异步的，且可能会渲染不止一次；这里把在途的微任务排空，让断言
@@ -373,6 +401,37 @@ if (scenario === "stale_key_prompts_login") {
   checks.writeOmitsBlankParams = write !== undefined && !("top_p" in (write.params || {}));
   // 保存成功后编辑器关闭，表单不再锁着。
   checks.editorClosedAfterSave = !buttons().some((node) => node.textContent.trim() === "保存任务");
+} else if (scenario === "tasks_new_task_opens_editor") {
+  checks.authorized = store.authorized === true;
+  checks.onTasksPage = store.page === "tasks";
+  // 空列表时要给出空态，并且空态自带一个新建入口。
+  checks.showsEmptyState = text().includes("尚未配置任务路由");
+
+  // 点「新建任务」必须真的画出编辑器：这里若抛错，draw() 中断，界面停在原样，
+  // 用户看到的就是"点了没反应"。
+  await clickButton("新建任务");
+  checks.editorOpened = text().includes("固定采样参数");
+  checks.hasSaveButton = buttons().some((node) => node.textContent.trim() === "保存任务");
+
+  // 新建时任务名可填（编辑既有任务时才只读）。
+  const nameInput = inputs().find((node) => node.attrs.placeholder === "TASK_000001");
+  checks.hasNameField = Boolean(nameInput) && nameInput.disabled !== true;
+  // 6 个数值参数 + stop，全部为空且可编辑。
+  checks.hasAllParamFields = inputs().filter((node) => node.attrs.placeholder === "留空表示不固定").length === 6;
+  checks.hasStopField = inputs().some((node) => node.attrs.placeholder === "逗号分隔，留空表示不固定");
+
+  // 填名字后保存：新建走 POST，任务名放在 body 里。
+  if (nameInput) nameInput.value = "TASK_000002";
+  await clickButton("保存任务");
+  await settle();
+
+  const write = server.writes.at(-1);
+  checks.wroteCreate = Boolean(write);
+  checks.wroteCreateUrl = server.requests.some((r) => r.url === "/api/tasks");
+  checks.writeHasName = write?.name === "TASK_000002";
+  checks.writeHasModel = write?.model === "model-a";
+  // 没填的参数不该被写进配置。
+  checks.writeOmitsBlankParams = write !== undefined && !("temperature" in (write.params || {}));
 }
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
