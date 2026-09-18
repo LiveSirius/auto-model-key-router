@@ -126,6 +126,13 @@ export const api = {
     request("/api/settings/local-api-key", { method: "POST", body: { config_revision: revision } }),
   checkUpdate: () => request("/api/update/check", { method: "POST" }),
 
+  // 自更新：与 pricing 一样挂在 /ui/ 前缀下（不占用被语料锁定的 47+7 条 /api 路由）。
+  // 但**必须鉴权**——替换可执行文件是本服务最特权的操作，服务端要求完整权限，访客 key
+  // 会被拒。status 是公开的（只回答"这个构建有没有自更新能力"），且不鉴权才能在任何
+  // 情况下都正确决定按钮是否显示。
+  updateStatus: () => request("/ui/update/status", { auth: false }),
+  applyUpdate: () => request("/ui/update/apply", { method: "POST" }),
+
   exportConfig: () => request("/api/config/export", { method: "POST" }),
   importConfig: (revision, config) =>
     request("/api/config/import", { method: "POST", body: { config_revision: revision, config } }),

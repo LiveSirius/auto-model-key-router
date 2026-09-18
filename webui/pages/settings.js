@@ -36,6 +36,7 @@ const state = {
   revision: null,
   tool: null,
   update: null,
+  selfUpdate: null,
   loading: true,
   error: null,
   action: null,
@@ -272,6 +273,24 @@ function transferCard() {
   );
 }
 
+// applyUpdate 执行自更新。
+//
+// 成功之后服务会自己关停并由收尾助手拉起新版本，因此**不能**假设还能继续正常通讯：
+// 请求本身会正常返回（服务端是先把响应写出去再关停），但紧接着的连接都会失败。
+// 这里给出明确的等待提示，而不是让用户面对一串看不懂的报错。
+async function applyUpdate() {
+  toast("正在下载并校验新版本…");
+  try {
+    const result = await api.applyUpdate();
+    toast(result?.message || "更新完成，服务正在重启。");
+    state.update = null;
+    draw();
+  } catch (error) {
+    // 401/403 是权限问题（访客 key），503/501 是构建不带自更新能力——都如实回显。
+    toast(errorText(error), "error");
+  }
+}
+
 function toolCard() {
   if (!state.tool) return card(cardHead("AMKR 版本"), loading("正在检测…"));
   const enabled = !!state.tool.webui_enabled;
@@ -296,6 +315,22 @@ function toolCard() {
           } catch (error) { toast(errorText(error), "error"); }
         },
       }),
+      // 「立即更新」只在两件事同时成立时出现：服务端具备自更新能力，且确实有新版本。
+      // 前者由 /ui/update/status 回答（旧构建没有这个能力），后者由检查更新的结果回答。
+      // 不做成常驻按钮：它换掉的是正在运行的可执行文件并重启服务，随手可点不合适。
+      state.update?.update_available && state.selfUpdate?.available
+        ? buttonNode("立即更新", {
+            variant: "danger", small: true,
+            onClick: () => confirmDialog({
+              title: "立即更新",
+              message: `将下载并安装 ${state.update.latest_version}，然后自动重启服务。`
+                + "更新期间界面会短暂断开，请稍后刷新。",
+              confirmLabel: "更新并重启",
+              danger: true,
+              onConfirm: () => { void applyUpdate(); },
+            }),
+          })
+        : null,
       toggle(enabled ? "WebUI 已启用" : "WebUI 已关闭", enabled, async () => {
         try {
           const result = await api.setWebui(!enabled);
@@ -326,6 +361,8 @@ export function renderSettings(context) {
         state.error = errorText(error);
       }
       state.tool = await api.tool().catch(() => null);
+      // 自更新能力是公开信息（不鉴权），拿不到就当"不支持"——旧构建正是如此。
+      state.selfUpdate = await api.updateStatus().catch(() => null);
       state.loading = false;
       draw();
     })();
