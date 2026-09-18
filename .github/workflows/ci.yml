@@ -57,6 +57,14 @@ jobs:
       - name: 提示框探针
         run: node webui/probes/webui_tip_probe.mjs
 
+      - name: 图表首帧宽度探针
+        # 锁住"图表往中间挤一下又复原"的内缩闪烁：页面都是先建节点、后挂载，若构造时就
+        # 按兜底宽度画了首帧，挂载后 <svg> 被 CSS 拉满容器、viewBox 却仍是旧宽度，
+        # preserveAspectRatio 会把整幅图居中等比缩到中间，下一帧才弹回满宽。
+        # 这个探针必须自带 DOM 垫片（脱文档节点量不到宽度 + RO 异步回调），
+        # 上面两个探针都覆盖不到这条路径。
+        run: node webui/probes/webui_chart_sizing_probe.mjs
+
       - name: 鉴权探针
         # 不传场景名 = 逐个场景各起一个子进程跑全量（模块级 state 不能跨场景复用）。
         # 传错场景名会以退出码 2 失败，不会静默空转。

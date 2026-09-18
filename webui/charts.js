@@ -31,24 +31,26 @@ const TONE_VAR = {
 const AXIS_TEXT = { "font-size": "10" };
 
 function sizing(host, draw) {
-  // 用 ResizeObserver 跟随容器宽度重绘；探针环境没有它就直接按测量值画一次。
   const render = () => {
     const width = Math.max(240, Math.round(host.clientWidth || host.parentElement?.clientWidth || 720));
     host.replaceChildren(draw(width));
   };
-  render();
-  if (typeof ResizeObserver === "undefined") return host;
-  let frame = 0;
+  // 探针环境没有 ResizeObserver：按测量值同步画一次，随后无处可等。
+  if (typeof ResizeObserver === "undefined") {
+    render();
+    return host;
+  }
+  // 有 ResizeObserver 时**不在这里**画首帧。此刻 host 还没被挂进文档（页面都是先建
+  // 节点、后 mount），clientWidth 为 0，只能落到 720 的兜底宽度；而挂载后 CSS 会把
+  // <svg> 拉满容器宽度，viewBox 却还是 720 宽，preserveAspectRatio 于是把整幅图等比
+  // 居中缩到中间 —— 下一帧按真实宽度重画才「啪」地弹回满宽。每 10 秒一次轮询重绘都会
+  // 重演，这就是肉眼看到的"图表往中间挤一下又复原"。
+  // 首绘交给 RO 回调：它在布局之后、绘制之前触发，一帧都不会画错。
   const observer = new ResizeObserver(() => {
     // 页面轮询会整块替换图表节点。观察已脱离文档的节点既能防止泄漏，
-    // 也能顺手放掉 rAF，所以先判 isConnected 再排队重绘。
+    // 也不会再为空节点做无用的重绘。
     if (!host.isConnected) { observer.disconnect(); return; }
-    if (frame) return;
-    frame = requestAnimationFrame(() => {
-      frame = 0;
-      if (!host.isConnected) { observer.disconnect(); return; }
-      render();
-    });
+    render();
   });
   observer.observe(host);
   return host;
