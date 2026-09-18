@@ -24,10 +24,11 @@ import {
 } from "../chart-math.js";
 
 // 热力图固定看 7 天：它的价值就在于"周内节律"（工作日 vs 周末、白天 vs 夜间），
-// 跟着页头的 1h/6h 窗口走就没有可比性了。桶宽固定 1 小时，正好一格一个桶。
-export const HEATMAP_HOURS = 168;
-export const HEATMAP_BUCKET_SECONDS = 3600;
-// 最新一格的数是整点聚合值，一分钟内不会变，没必要跟着 10 秒轮询重算 169 个桶。
+// 跟着页头的 1h/6h 窗口走就没有可比性了。桶宽固定半小时，正好一格一个桶
+// （7 × 48 = 336 格，仍在后端 500 点上限内：168*3600/1800 + 1 = 337）。
+export const HEATMAP_WINDOW_HOURS = 168;
+export const HEATMAP_BUCKET_SECONDS = 1800;
+// 尾桶是半小时聚合值，半分钟内不会变，没必要跟着 10 秒轮询重算 337 个桶。
 const HEATMAP_TTL_MS = 60000;
 
 // 页面级状态：时间范围与主图指标是用户选择，需在轮询重绘间保持。
@@ -92,7 +93,7 @@ async function loadHeatmap(force = false) {
   if (!force && state.heatAt && Date.now() - Date.parse(state.heatAt) < HEATMAP_TTL_MS) return;
   const token = ++state.heatToken;
   const series = await api
-    .series(HEATMAP_HOURS, HEATMAP_BUCKET_SECONDS)
+    .series(HEATMAP_WINDOW_HOURS, HEATMAP_BUCKET_SECONDS)
     .catch((error) => ({ __error: errorText(error) }));
   if (token !== state.heatToken) return; // 已有更新的请求在途，丢弃过期响应
   state.heatError = series.__error || null;
@@ -392,7 +393,7 @@ function runtimeCard() {
 }
 
 // —— 热力图：一周的用量节律 ——
-// 与页头窗口无关（见 HEATMAP_HOURS 的说明），所以徽标自己写死"7 天"，
+// 与页头窗口无关（见 HEATMAP_WINDOW_HOURS 的说明），所以徽标自己写死"7 天"，
 // 不跟 rangeLabel() 走 —— 否则切到 1h 时图上写着"最近 1 小时"、矩阵却是整周。
 function heatmapCard() {
   const metric = HEATMAP_METRICS.find((item) => item.id === state.heatMetric) || HEATMAP_METRICS[0];
@@ -404,13 +405,13 @@ function heatmapCard() {
       : heatmap({
           points,
           metric,
-          ariaLabel: `最近 7 天的${metric.label}热力图，按周内与小时分布`,
+          ariaLabel: `最近 7 天的${metric.label}热力图，按周内与半小时分布`,
         });
 
   return card(
     cardHead("用量热力图",
       badge("最近 7 天", "muted"),
-      badge("1 小时/格", "muted"),
+      badge("30 分钟/格", "muted"),
       h("div.head-tools", {},
         segmented(HEATMAP_METRICS.map((item) => ({ id: item.id, label: item.label })),
           state.heatMetric,
@@ -434,7 +435,7 @@ export function renderOverview(context) {
   loadHeatmap();
   // 指标轮询时刷新本页窗口数据（快照 + 序列一起，保持同屏口径一致）。
   // 热力图有自己的 60 秒 TTL，force 会绕过它 —— 但那时桶内容其实没变，
-  // 所以只在窗口数据真正变化时顺带刷新，避免每 10 秒重画 169 个格子。
+  // 所以只在窗口数据真正变化时顺带刷新，避免每 10 秒重画 336 个格子。
   context.onTick?.(() => { loadWindow(true); loadHeatmap(); });
   draw();
   return host;

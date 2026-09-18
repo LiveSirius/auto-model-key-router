@@ -163,20 +163,28 @@ check("compact_small_int", m.formatCompactNumber(42) === "42");
 check("duration_seconds", m.formatDurationValue(2500) === "2.50s", m.formatDurationValue(2500));
 check("duration_ms", m.formatDurationValue(240) === "240ms");
 
-// —— 热力图：星期 × 小时的落格 ——
+// —— 热力图：星期 × 半小时的落格 ——
 // 最容易错的是"星期几/几点"取自哪里：后端时间戳带 +08:00，若读 Date 的
 // getDay/getHours，浏览器时区一变整张矩阵就平移。这里锁死按 Asia/Shanghai 取。
-// 2026-01-01 是周四，01-04 是周日。
-check("slot_beijing_thursday_10", JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")) === JSON.stringify({ weekday: 3, hour: 10 }),
+// 2026-01-01 是周四，01-04 是周日。一格 30 分钟 ⇒ slot = 小时*2 + 半小时位。
+check("slot_beijing_thursday_10", JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")) === JSON.stringify({ weekday: 3, slot: 20 }),
   JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")));
-check("slot_sunday_23", JSON.stringify(m.beijingSlot("2026-01-04T23:30:00+08:00")) === JSON.stringify({ weekday: 6, hour: 23 }),
+check("slot_sunday_23", JSON.stringify(m.beijingSlot("2026-01-04T23:30:00+08:00")) === JSON.stringify({ weekday: 6, slot: 47 }),
   JSON.stringify(m.beijingSlot("2026-01-04T23:30:00+08:00")));
 // 同一时刻换成 UTC 写法，格子必须完全一致。
 check("slot_same_for_utc_form",
   JSON.stringify(m.beijingSlot("2026-01-01T10:00:00+08:00")) === JSON.stringify(m.beijingSlot("2026-01-01T02:00:00Z")));
-// 00:30 属于 0 点那一格，不能被四舍五入到 1 点。
-check("slot_hour_zero_not_rounded", m.beijingSlot("2026-01-01T00:30:00+08:00").hour === 0);
+// 00:30 属于第 1 格（00:30–01:00），不能被四舍五入回 0 点那一格。
+check("slot_hour_zero_not_rounded", m.beijingSlot("2026-01-01T00:30:00+08:00").slot === 1);
+// 半小时粒度是这次改动的全部意义：10:00 与 10:30 必须落在不同格子，
+// 否则等于没细化，读数还是整点口径。
+check("slot_half_hour_is_distinct",
+  m.beijingSlot("2026-01-01T10:30:00+08:00").slot === 21 &&
+  m.beijingSlot("2026-01-01T10:59:00+08:00").slot === 21);
 check("slot_bad_input_is_null", m.beijingSlot("not-a-date") === null);
+check("slot_label_formats_half_hour", m.slotLabel(21) === "10:30" && m.slotLabel(0) === "00:00",
+  `${m.slotLabel(21)} / ${m.slotLabel(0)}`);
+check("slot_count_is_48", m.HEATMAP_SLOTS === 48, String(m.HEATMAP_SLOTS));
 
 const heatPoints = [
   { started_at: "2026-01-01T10:00:00+08:00", requests: 5, total_tokens: 500, complete: true },
@@ -185,16 +193,23 @@ const heatPoints = [
   { started_at: "2026-01-04T23:00:00+08:00", requests: 100, total_tokens: 9000, complete: true },
 ];
 const cells = m.heatmapCells(heatPoints, { value: (p) => p.requests });
-check("heat_cells_shape", cells.length === 7 && cells.every((row) => row.length === 24));
-check("heat_sums_same_slot", cells[3][10].value === 15, String(cells[3][10].value));
-check("heat_counts_buckets", cells[3][10].buckets === 3, String(cells[3][10].buckets));
-check("heat_marks_partial", cells[3][10].partial === true);
-check("heat_other_cell_untouched", cells[6][23].value === 100 && cells[6][23].buckets === 1);
+check("heat_cells_shape", cells.length === 7 && cells.every((row) => row.length === 48));
+check("heat_sums_same_slot", cells[3][20].value === 15, String(cells[3][20].value));
+check("heat_counts_buckets", cells[3][20].buckets === 3, String(cells[3][20].buckets));
+check("heat_marks_partial", cells[3][20].partial === true);
+check("heat_other_cell_untouched", cells[6][46].value === 100 && cells[6][46].buckets === 1);
 // 没数据 ≠ 值为 0：buckets 为 0 才是"窗口未覆盖"，这一条决定了格子画斜纹还是纯色。
 check("heat_coverless_has_zero_buckets", cells[0][0].buckets === 0 && cells[0][0].value === 0);
-check("heat_cell_has_data_is_not_coverless", cells[3][10].buckets > 0);
+check("heat_cell_has_data_is_not_coverless", cells[3][20].buckets > 0);
 check("heat_undefined_point_ignored", m.heatmapCells([undefined, {}])[0][0].buckets === 0);
-check("heat_tokens_metric", m.heatmapCells(heatPoints, { value: m.HEATMAP_METRIC_MAP.tokens.pick })[3][10].value === 1500);
+check("heat_tokens_metric", m.heatmapCells(heatPoints, { value: m.HEATMAP_METRIC_MAP.tokens.pick })[3][20].value === 1500);
+// 相邻半小时不能互相污染：这是 30 分钟粒度下最容易犯的错（把两个桶并进一格）。
+const neighbour = m.heatmapCells([
+  { started_at: "2026-01-01T10:00:00+08:00", requests: 5, complete: true },
+  { started_at: "2026-01-01T10:30:00+08:00", requests: 9, complete: true },
+], { value: (p) => p.requests });
+check("heat_half_hour_not_merged", neighbour[3][20].value === 5 && neighbour[3][21].value === 9,
+  `${neighbour[3][20].value} / ${neighbour[3][21].value}`);
 
 // 色阶上限只看有数据的格子：空窗口不能因为"未覆盖"就给出非零上限。
 check("heat_scale_uses_data_max", m.heatmapScale(cells) === 100, String(m.heatmapScale(cells)));

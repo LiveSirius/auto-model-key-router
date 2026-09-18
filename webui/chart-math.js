@@ -296,19 +296,22 @@ export function statusGroups(statusCodes) {
   return groups;
 }
 
-// —— 热力图：星期 × 小时的用量矩阵 ——
-// 数据来自 /metrics/series?hours=168&bucket_seconds=3600：一小时一个桶，每个桶的
-// started_at 本身就直接落在某个 (星期, 小时) 格子里，所以不需要客户端二次聚合，
+// —— 热力图：星期 × 半小时的用量矩阵 ——
+// 数据来自 /metrics/series?hours=168&bucket_seconds=1800：半小时一个桶，每个桶的
+// started_at 本身就直接落在某个 (星期, 时段) 格子里，所以不需要客户端二次聚合，
 // 把桶放进格子求和即可。这也是唯一不需要改后端的做法。
 
 export const WEEKDAY_LABELS = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
 export const HEATMAP_DAYS = 7;
-export const HEATMAP_HOURS = 24;
+// 一格半小时：7 × 48 = 336 格。整点桶会把"10:00 起的峰"和"10:30 起的峰"摊进同一格，
+// 半小时粒度才分得开（后端 bucket_seconds 下限 15 秒，1800 完全在范围内）。
+export const HEATMAP_SLOT_MINUTES = 30;
+export const HEATMAP_SLOTS = (24 * 60) / HEATMAP_SLOT_MINUTES;
 // 4 档 + 0 档。档数再多，浅色系里相邻两档的肉眼差异就没了。
 export const HEAT_LEVELS = 4;
 
 // 热力图的两个口径：直接取桶内原始计数，不做速率换算 —— 热力图回答的是
-// "这一小时发生了多少"，换算成每分钟只会把 24 格读数全除以 60。
+// "这半小时发生了多少"，换算成每分钟只会把 336 格读数全除以 30。
 export const HEATMAP_METRICS = [
   {
     id: "requests",
@@ -327,12 +330,12 @@ export const HEATMAP_METRICS = [
 export const HEATMAP_METRIC_MAP = Object.fromEntries(
   HEATMAP_METRICS.map((metric) => [metric.id, metric]));
 
-// 按 Asia/Shanghai 取"星期几 + 几点"。不能读 Date 的 getDay/getHours：后端时间戳
-// 都带 +08:00，但浏览器时区可能不同，本地字段会把整张矩阵平移。
+// 按 Asia/Shanghai 取"星期几 + 第几个半小时"。不能读 Date 的 getDay/getHours：后端
+// 时间戳都带 +08:00，但浏览器时区可能不同，本地字段会把整张矩阵平移。
 const BEIJING_PARTS = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
   year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", hourCycle: "h23",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 
 export function beijingSlot(value) {
@@ -344,25 +347,35 @@ export function beijingSlot(value) {
   const month = Number(parts.month);
   const day = Number(parts.day);
   const hour = Number(parts.hour);
-  if (![year, month, day, hour].every(Number.isFinite)) return null;
+  const minute = Number(parts.minute);
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null;
   // 用 UTC 构造"北京那一天的零点"再取 UTC 星期，绕开浏览器本地时区对 Date 的影响；
   // getUTCDay() 的 0 是周日，映射成 0=周一。
   const weekday = (new Date(Date.UTC(year, month - 1, day)).getUTCDay() + 6) % 7;
-  return { weekday, hour };
+  // 向下取整到半小时：10:30 属于第 21 格，不能被并进 10:00 那一格。
+  const slot = Math.floor((hour * 60 + minute) / HEATMAP_SLOT_MINUTES);
+  return { weekday, slot };
+}
+
+// 时段标签（"09:30"）：表头与读数气泡共用一份格式，免得两处各写一遍补零。
+export function slotLabel(slot) {
+  const minutes = slot * HEATMAP_SLOT_MINUTES;
+  const hour = String(Math.floor(minutes / 60)).padStart(2, "0");
+  return `${hour}:${String(minutes % 60).padStart(2, "0")}`;
 }
 
 // 每格记 { value, buckets, partial }：buckets 用来区分"没数据"与"确实是 0"，
-// 前者是窗口没覆盖到、后者是这一小时真的没有流量，画成同一种灰会谎报。
+// 前者是窗口没覆盖到、后者是这半小时真的没有流量，画成同一种灰会谎报。
 export function heatmapCells(points, { value = (point) => number(point.requests) } = {}) {
   const cells = Array.from({ length: HEATMAP_DAYS }, () =>
-    Array.from({ length: HEATMAP_HOURS }, () => ({ value: 0, buckets: 0, partial: false })));
+    Array.from({ length: HEATMAP_SLOTS }, () => ({ value: 0, buckets: 0, partial: false })));
   for (const point of points || []) {
     const slot = beijingSlot(point?.started_at);
     if (!slot) continue;
-    const cell = cells[slot.weekday][slot.hour];
+    const cell = cells[slot.weekday][slot.slot];
     cell.value += value(point);
     cell.buckets += 1;
-    // 累加中的整点桶天然偏低，格子要标出来，否则最新一小时会被读成"突然没流量"。
+    // 累加中的尾桶天然偏低，格子要标出来，否则最新一格会被读成"突然没流量"。
     if (point.complete === false) cell.partial = true;
   }
   return cells;

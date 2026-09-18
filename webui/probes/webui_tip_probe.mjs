@@ -151,7 +151,7 @@ if (barTip && bars.length) {
 }
 
 // —— 热力图 ——
-// 168 个格子必须与 (星期, 小时) 一一对应，且"窗口未覆盖"要与"这一小时是 0"
+// 336 个格子必须与 (星期, 半小时) 一一对应，且"窗口未覆盖"要与"这一格是 0"
 // 区分开 —— 两者画成同一格就等于谎报。这里同时锁住落格顺序与格子档位。
 const heatMetric = {
   id: "requests",
@@ -171,13 +171,14 @@ const heatGrid = findAll(heatHost, (n) => hasClass(n, "heatmap"))[0];
 const gridCells = heatGrid ? findAll(heatGrid, (n) => hasClass(n, "heat-cell")) : [];
 const heatTip = findAll(heatHost, (n) => hasClass(n, "chart-tip"))[0];
 check("heat_grid_present", Boolean(heatGrid));
-check("heat_cell_count", gridCells.length === 168, String(gridCells.length));
+check("heat_cell_count", gridCells.length === 336, String(gridCells.length));
 check("heat_tip_present", Boolean(heatTip));
 
-if (gridCells.length === 168 && heatTip) {
-  // 2026-01-01 是周四 ⇒ weekday 3；10 时 ⇒ 索引 3*24+10。
-  const thursday10 = gridCells[3 * 24 + 10];
-  const sunday23 = gridCells[6 * 24 + 23];
+if (gridCells.length === 336 && heatTip) {
+  // 2026-01-01 是周四 ⇒ weekday 3；10:00 ⇒ 半小时索引 20（3*48+20）。
+  const thursday10 = gridCells[3 * 48 + 20];
+  // 23:00 ⇒ 半小时索引 46（6*48+46）。
+  const sunday23 = gridCells[6 * 48 + 46];
   const coverless = gridCells[0];
   check("heat_thursday10_level1", hasClass(thursday10, "level-1"), thursday10.className);
   check("heat_sunday23_is_max_level", hasClass(sunday23, "level-4"), sunday23.className);

@@ -9,7 +9,8 @@
 import { h, svg, mount, formatClock, formatClockSeconds, formatDateTime, clamp } from "./dom.js";
 import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
-  heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_HOURS, HEAT_LEVELS,
+  heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_SLOTS, HEAT_LEVELS,
+  slotLabel,
   formatNumber, formatCompactNumber, formatPercentValue, formatDurationValue,
 } from "./chart-math.js";
 
@@ -389,9 +390,9 @@ export function barList(rows, { format = (row) => formatNumber(row.value, 0), to
   return list;
 }
 
-// —— 热力图：星期 × 小时 ——
-// 用 CSS 栅格而不是 SVG：矩阵是 7×24 的规则格子，栅格天然处理"每格等宽"，
-// 而 SVG 得自己算 168 个矩形的坐标，宽度变化还要重算一遍。
+// —— 热力图：星期 × 半小时 ——
+// 用 CSS 栅格而不是 SVG：矩阵是 7×48 的规则格子，栅格天然处理"每格等宽"，
+// 而 SVG 得自己算 336 个矩形的坐标，宽度变化还要重算一遍。
 // 行容器设 display:contents，让行列的子元素直接落进同一个栅格：
 // 这样表头、星期标签与格子共享同一套列宽，不需要手算 span。
 export function heatmap({ points, metric, ariaLabel = "用量热力图" }) {
@@ -399,19 +400,19 @@ export function heatmap({ points, metric, ariaLabel = "用量热力图" }) {
   const max = heatmapScale(cells);
   const grid = h("div.heatmap", { role: "img", "aria-label": ariaLabel });
 
-  // 表头每 3 小时标一个：24 个标签在窄屏会糊成一片。
+  // 表头每 2 小时标一个（半小时粒度下是每 4 格）：48 个标签在窄屏会糊成一片。
   const head = h("div.heat-row", {}, h("span.heat-corner"));
-  for (let hour = 0; hour < HEATMAP_HOURS; hour += 1) {
-    head.append(h("span.heat-hour", {}, hour % 3 === 0 ? `${hour}:00` : ""));
+  for (let slot = 0; slot < HEATMAP_SLOTS; slot += 1) {
+    head.append(h("span.heat-hour", {}, slot % 4 === 0 ? slotLabel(slot) : ""));
   }
   grid.append(head);
 
   const tip = h("div.chart-tip", { role: "status" });
   const frame = h("div.heat-frame", {}, grid, tip);
-  const show = (cell, weekday, hour) => {
+  const show = (cell, weekday, slot) => {
     mount(tip,
-      h("span.tip-time", `${WEEKDAY_LABELS[weekday]} ${String(hour).padStart(2, "0")}:00`),
-      // "窗口未覆盖"与"这一小时确实是 0"必须分开说：前者是没数据，后者是没流量。
+      h("span.tip-time", `${WEEKDAY_LABELS[weekday]} ${slotLabel(slot)}`),
+      // "窗口未覆盖"与"这一格确实是 0"必须分开说：前者是没数据，后者是没流量。
       h("span.tip-value", cell.buckets ? metric.format(cell.value) : "窗口未覆盖"),
       cell.partial ? h("span.tip-flag", "累加中") : null,
     );
@@ -426,14 +427,14 @@ export function heatmap({ points, metric, ariaLabel = "用量热力图" }) {
 
   cells.forEach((row, weekday) => {
     const line = h("div.heat-row", {}, h("span.heat-day", WEEKDAY_LABELS[weekday]));
-    row.forEach((cell, hour) => {
+    row.forEach((cell, slot) => {
       cell.node = h("span.heat-cell", {
         class: heatCellClass(cell, max),
-        // 格子本身不进无障碍树：整块矩阵有一个 aria-label，168 个无标签格子
+        // 格子本身不进无障碍树：整块矩阵有一个 aria-label，336 个无标签格子
         // 只会把读屏淹没。
         "aria-hidden": "true",
       });
-      cell.node.addEventListener("pointerenter", () => show(cell, weekday, hour));
+      cell.node.addEventListener("pointerenter", () => show(cell, weekday, slot));
       line.append(cell.node);
     });
     grid.append(line);

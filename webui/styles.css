@@ -470,14 +470,17 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .donut-center span { font-size: 11px; color: var(--md-on-surface-variant); }
 .donut-caption { margin-top: 10px; font-size: 12px; color: var(--md-on-surface-variant); text-align: center; }
 
-/* ══ 热力图（星期 × 小时） ══ */
-/* 行列容器用 display:contents：表头、星期标签与 168 个格子共享同一套列轨道，
+/* ══ 热力图（星期 × 半小时） ══ */
+/* 行列容器用 display:contents：表头、星期标签与 336 个格子共享同一套列轨道，
  * 不需要给每个元素手写 grid-column，宽度变化时也不会错位。 */
 .heat-frame { position: relative; }
+/* 列数从 24 加到 48 是"格子变小"的全部来源：格子仍用 1fr 铺满卡片宽度（GitHub
+ * 贡献图也是铺满，不缩成一小块），但同样宽度分给两倍的列，每格从 ~55px 掉到
+ * ~25px，7 行叠起来的高度也就从近 400px 降到约 200px。 */
 .heatmap {
   display: grid;
-  grid-template-columns: 40px repeat(24, minmax(0, 1fr));
-  gap: 2px;
+  grid-template-columns: 34px repeat(48, minmax(0, 1fr));
+  gap: 3px;
 }
 .heat-row { display: contents; }
 .heat-corner, .heat-hour, .heat-day {
@@ -486,7 +489,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   line-height: 1.6;
   white-space: nowrap;
 }
-/* 只每 3 格有文字，两侧是空列，所以溢出可见也不会撞上相邻标签；
+/* 只每 4 格有文字（即每 2 小时），两侧是空列，所以溢出可见也不会撞上相邻标签；
  * 若改成 hidden，窄屏下 "12:00" 会被自己的那一列裁掉。 */
 .heat-hour { text-align: center; overflow: visible; }
 .heat-day { display: flex; align-items: center; font-size: 11px; overflow: hidden; }
@@ -505,12 +508,12 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .heat-cell.level-2 { background: #b18ff7; }
 .heat-cell.level-3 { background: #8a5cf0; }
 .heat-cell.level-4 { background: var(--md-primary); }
-/* 窗口没覆盖到的格子：斜纹而不是浅色。浅色会和"这一小时确实是 0"撞在一起，
+/* 窗口没覆盖到的格子：斜纹而不是浅色。浅色会和"这一格确实是 0"撞在一起，
  * 而两者含义完全不同 —— 前者是没数据，后者是没流量。 */
 .heat-cell.is-coverless {
   background: repeating-linear-gradient(135deg, #f0f0f0 0 3px, #e0e0e0 3px 6px);
 }
-/* 累加中的整点桶天然偏低：给它一个描边，不要让它看起来是"流量掉下来了"。 */
+/* 累加中的尾桶天然偏低：给它一个描边，不要让它看起来是"流量掉下来了"。 */
 .heat-cell.is-partial { outline: 1.5px dashed var(--md-on-surface-variant); outline-offset: -1px; }
 .heat-cell:hover { outline: 2px solid var(--md-on-surface); outline-offset: -1px; }
 .heat-legend {
