@@ -39,8 +39,17 @@
 //     Go 侧是 `[自身可执行文件, --config, ..., --serve-foreground]`（divergence_test.go
 //     的 TestBackgroundExecutableDivergesFromPython 具名锁定）。
 //  2. **没有 uvicorn 日志配置**。service.py:682 的 uvicorn_log_config 是 uvicorn 专用
-//     的 logging dictConfig，Go 侧由 server 包自己写日志；后台启动只负责把子进程的
-//     stdout/stderr 追加进同一个日志文件（与 Python 的 file handler 落点一致）。
+//     的 logging dictConfig，Go 侧没有 logging，因此改由 internal/logfiles 的
+//     slog.Handler 承担同一件事：按 `%(asctime)s %(levelname)s %(name)s %(message)s`
+//     的行格式把日志追加进同一个 log_file_path（另见 logfiles 对「不提升非成功响应
+//     等级」等差异的说明）。**落点是同一个文件**，所以运维接口 /api/logs 读到的内容
+//     与参照实现同源。
+//     本包（后台启动）在此之外仍把子进程的 stdout/stderr 追加进同一个日志文件——这
+//     是 Python `subprocess.Popen(stdout=log_file, stderr=log_file)` 的对应物，负责
+//     兜住「进程在日志文件打开之前就崩溃」这类服务端日志覆盖不到的输出。
+//     注意 Windows 计划任务与 systemd 路径**没有**这层重定向（TaskActionCommandLine
+//     与 UnitText 都不设），因此这两条路径下的日志完全由服务进程自己写入——这正是
+//     迁移时漏掉 file handler 会让 server.log 恒为空的原因。
 //  3. **rich 渲染降级为等价纯文本**。面板统一由 internal/tui 渲染（宽度 100、
 //     safe_box=False，与 gen_tui_corpus.py（已随 Python 退役移除） 同一套设置），因此语料可以逐字节
 //     对拍；唯一例外是系统服务状态表——Go 用固定列宽（tui.Table 已声明的差异），

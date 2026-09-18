@@ -268,7 +268,7 @@ amkr --config router-config.json --update
 
 | 参数 | 说明 |
 | --- | --- |
-| `--serve-foreground` | 在当前进程中运行 Uvicorn 服务 |
+| `--serve-foreground` | 在当前进程中运行服务（日志追加写入 `log_file_path`） |
 | `--restart-service-after-update` | 更新完成后按现有注册状态恢复服务 |
 
 ## 多操作参数优先级
