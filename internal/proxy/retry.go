@@ -709,6 +709,8 @@ func (h *Handler) recordMetric(context *RequestContext, key config.KeyConfig, re
 	record.PoolName = nil
 	upstreamModel := upstreamModelOr(context.ModelID, key.UpstreamModel)
 	record.UpstreamModelID = &upstreamModel
+	// 工作空间已在读请求头时归一化（handler.go），这里直接沿用，不再判空。
+	record.Workspace = context.Workspace
 	_ = h.metrics.Record(contextOf(context.Request), record)
 }
 

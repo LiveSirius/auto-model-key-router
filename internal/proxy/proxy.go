@@ -143,6 +143,9 @@ type MetricsSink interface {
 // 用指针表达 Python 的可选参数：StatusCode 为 nil 表示参照实现传了 None（上游
 // 请求直接失败，没有响应），而不是「状态码 0」；ProviderID / PoolName /
 // UpstreamModelID 为 nil 表示相应字段缺失。
+//
+// Workspace 是**有意增补**：参照实现没有工作空间概念。它不进入 request_metrics
+// 的列，而是单独落到 request_workspace 旁挂表（见 internal/metrics/schema.go）。
 type MetricRecord struct {
 	ModelID          string
 	KeyName          string
@@ -157,6 +160,7 @@ type MetricRecord struct {
 	ProviderID       *string
 	PoolName         *string
 	UpstreamModelID  *string
+	Workspace        string
 }
 
 // Options 是 Handler 的可选配置。零值即「按产品决策的默认档」。
