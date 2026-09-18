@@ -88,6 +88,11 @@ func recordParams(record proxy.MetricRecord) metrics.RecordParams {
 		ProviderID:       record.ProviderID,
 		PoolName:         record.PoolName,
 		UpstreamModelID:  record.UpstreamModelID,
+		// Workspace 原样传递（有意增补，见 metrics.RecordParams）：
+		// **不能**走 optionalText——那是给 request_metrics 的列准备的，那里的空串与
+		// None 落库等价。工作空间不落 request_metrics，空串在这里有独立含义：
+		// 「这次请求没有归属」，落库时表现为不写旁挂表。
+		Workspace: record.Workspace,
 	}
 }
 

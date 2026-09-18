@@ -67,9 +67,9 @@ func (a *App) buildHandler() http.Handler {
 		// 47+7 条 /api 路由。
 		mux.HandleFunc(path+updateStatusPath, a.handleUpdateStatus)
 		mux.HandleFunc(path+updateApplyPath, a.handleUpdateApply)
-		// 工作空间目录（理由见 workspaces.go）：任务列表是按空间过滤的，前端推不出
-		// 「还有哪些空间」，因此需要一个目录读数。同样挂在 /ui/ 之外的所有冻结清单。
-		mux.HandleFunc(path+workspacesPath, a.handleWorkspaces)
+		// 工作空间用量读数（理由见 workspace_usage.go）：这是本项目自己的响应形状，
+		// 不能混进被逐字节语料锁定的 /metrics 系列，因此同样挂在 /ui/ 之下。
+		mux.HandleFunc(path+workspaceUsagePath, a.handleWorkspaceUsage)
 		a.webuiMounted = true
 	}
 

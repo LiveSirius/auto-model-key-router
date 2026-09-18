@@ -90,6 +90,16 @@ var metricsSnapshotParams = []qParam{
 	{name: "all_history", kind: qBool, def: qBoolFalse},
 }
 
+// workspaceUsageParams 是 GET /ui/workspace-usage.json 的签名。
+//
+// 与 /metrics 用同一对参数（hours + all_history），让界面上的时间选择器对两个
+// 读数语义一致。**有意增补**的读数：参照实现没有工作空间，因此没有对应签名可比对，
+// 这里的取值方式只是复用既有解析器，不构成兼容性声明。
+var workspaceUsageParams = []qParam{
+	{name: "hours", kind: qFloat, def: qFloat24, gt: qFloat0, le: qFloat8760},
+	{name: "all_history", kind: qBool, def: qBoolFalse},
+}
+
 // requestHistoryParams 对应 app.py:235-251 的 GET /metrics/requests 签名。
 //
 // 声明顺序与 app.py 一致：hours、all_history、caller_type、六个字符串过滤、
