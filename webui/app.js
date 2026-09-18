@@ -11,6 +11,7 @@ import { icon } from "./icons.js";
 
 import { renderOverview } from "./pages/overview.js";
 import { renderActivity } from "./pages/activity.js";
+import { renderWorkspaces } from "./pages/workspaces.js";
 import { renderLogs } from "./pages/logs.js";
 import { renderCost } from "./pages/cost.js";
 import { renderProviders } from "./pages/providers.js";
@@ -24,6 +25,7 @@ export const PAGES = [
   { group: "监控", items: [
     { id: "overview", label: "概览", icon: "overview", render: renderOverview },
     { id: "activity", label: "用量统计", icon: "activity", render: renderActivity },
+    { id: "workspaces", label: "工作空间", icon: "layers", render: renderWorkspaces },
     { id: "logs", label: "服务日志", icon: "logs", render: renderLogs },
     { id: "cost", label: "成本", icon: "cost", render: renderCost },
   ]},
@@ -38,7 +40,9 @@ export const PAGES = [
 ];
 
 // 指标轮询节奏（毫秒）：概览/用量统计要看趋势，日志页自己管轮询，其余放慢。
-const METRICS_INTERVAL = { overview: 10000, activity: 15000, default: 30000 };
+const METRICS_INTERVAL = { overview: 10000, activity: 15000, workspaces: 20000, default: 30000 };
+// 订阅了 onTick、需要被主动通知重新取数的页面。不在这里的页面只在强制刷新时整块重绘。
+const TICK_PAGES = new Set(["overview", "activity", "workspaces"]);
 const HEALTH_INTERVAL = 5000;
 
 export const store = {
@@ -155,7 +159,7 @@ async function loadHealth() {
   // 重绘不会丢已粘贴一半的 Key 与焦点。
   if (requiresKey() && before !== store.connectionError) renderShell();  // 健康轮询只更新应用栏，不动页面内容。
   renderBar();
-  if (store.page === "overview" || store.page === "activity") notifyTicks();
+  if (TICK_PAGES.has(store.page)) notifyTicks();
 }
 
 // localStorage 里有 Key 不代表 Key 可用（可能已被重置或来自旧版本），必须实际请求一次。
@@ -198,7 +202,7 @@ async function loadMetrics(force = false) {
   }
   store.metricsTicking = false;
   // 页面自己决定怎么用新数据；只有还没渲染出内容的页面才需要整块重绘。
-  if (store.page === "overview" || store.page === "activity") notifyTicks();
+  if (TICK_PAGES.has(store.page)) notifyTicks();
   else if (force) renderContent(true);
 }
 

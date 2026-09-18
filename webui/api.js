@@ -106,6 +106,13 @@ export const api = {
   },
   logs: () => request("/api/logs"),
 
+  // 工作空间用量读数：挂在 /ui/ 下（不占用被语料锁定的 /api 路由），但要完整鉴权
+  // ——内容会暴露各空间的用量与模型流向。
+  workspaceUsage: ({ hours = 24, allHistory = false } = {}) =>
+    request(allHistory
+      ? "/ui/workspace-usage.json?all_history=true"
+      : `/ui/workspace-usage.json?hours=${hours}`),
+
   // 价格目录（models.dev）：由服务端缓存并定期刷新，挂在 WebUI 前缀下。
   // **不鉴权**——内容是 models.dev 的公开数据，静态资源本身也是公开的。
   // 服务端还没取到目录时回 503，由 webui/pricing.js 吞掉并降级成"无定价"。

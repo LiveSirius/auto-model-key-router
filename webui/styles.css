@@ -397,6 +397,24 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .chart .bar { transition: opacity var(--dur) var(--ease); }
 .chart .bar:hover { opacity: 0.78; }
 
+/* —— 桑基流向图 —— */
+/* 流带半透明：交叠处能看出层次，而不是后画的整片盖住先画的。
+   pointer-events 用 visiblePainted：细流带只靠填充很难悬停，但这里不加透明描边，
+   因为描边会把流带边缘画粗、改变"粗细即流量"的读数。 */
+.chart.sankey .sankey-ribbon {
+  opacity: 0.42;
+  stroke: none;
+  pointer-events: visiblePainted;
+  transition: opacity var(--dur) var(--ease);
+}
+.chart.sankey .sankey-ribbon:hover { opacity: 0.72; }
+.chart.sankey .sankey-node { transition: opacity var(--dur) var(--ease); }
+.chart.sankey .sankey-label {
+  fill: var(--md-on-surface);
+  font-family: var(--font);
+}
+.chart.sankey .sankey-column-label { fill: var(--md-on-surface-variant); }
+
 .chart-tip {
   position: absolute;
   z-index: 5;

@@ -11,7 +11,7 @@ import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
   heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_SLOTS, HEAT_LEVELS,
   slotLabel,
-  readable, gapBridges,
+  readable, gapBridges, sankeyLayout, sankeyLinkPath,
   formatNumber, formatCompactNumber, formatPercentValue, formatDurationValue,
 } from "./chart-math.js";
 
@@ -525,6 +525,102 @@ function heatCellClass(cell, max) {
     cell.buckets ? "" : "is-coverless",
     cell.partial ? "is-partial" : "",
   ].filter(Boolean).join(" ");
+}
+
+// —— 桑基流向图：请求在各层之间怎么流动 ——
+//
+// 与其它图表的差别：这里没有时间轴，纵轴也不是刻度，而是**量的堆叠**。每层节点
+// 的高度与该节点承载的请求数成正比，流带的粗细同样，因此"哪条流最粗"就是"哪条
+// 流向承载最多请求"，一眼可读。
+//
+// 只画 SVG 不做交互式下钻：流带本身已经带 title（悬停能看到精确数值），而真正的
+// 下钻要跳到明细页、带上五层过滤条件，那不是这张图该承担的职责。
+export function sankey({ links, layers, metricLabel, height = 420, formatValue: format = formatCompactNumber, ariaLabel = "请求流向桑基图" }) {
+  const host = h("div.chart-host", { style: { height: `${height}px` } });
+
+  sizing(host, (width) => {
+    const layout = sankeyLayout(links, { width: Math.max(320, width - 2), height: height - 34 });
+    const node = svg("svg", {
+      width, height, viewBox: `0 0 ${width} ${height}`,
+      class: "chart sankey", role: "img", "aria-label": ariaLabel,
+    });
+
+    if (!layout.edges.length) {
+      node.append(svg("text", {
+        class: "axis-label", x: width / 2, y: height / 2, "text-anchor": "middle", ...AXIS_TEXT,
+      }, "该时间窗内没有可归因到工作空间的请求"));
+      return node;
+    }
+
+    // 流带先画，节点后画：节点盖在流带端点上，接缝更干净。
+    const ribbonLayer = svg("g", { class: "sankey-ribbons" });
+    const nodeLayer = svg("g", { class: "sankey-nodes" });
+    node.append(ribbonLayer, nodeLayer);
+
+    // 颜色按**起点节点名**分配：同一个工作空间/模型的流出保持同色，方便顺着
+    // 一条流看下去。色板只用 styles.css 里真实定义的变量——写一个不存在的
+    // var() 会让 fill 变成 none（流带整片消失），而不是回退到某个默认色。
+    const palette = ["var(--md-primary)", "var(--md-secondary-variant)", "var(--md-error)", "var(--md-on-surface-variant)", "var(--md-primary-variant)"];
+    const colorOf = new Map();
+    const colorFor = (name) => {
+      if (!colorOf.has(name)) colorOf.set(name, palette[colorOf.size % palette.length]);
+      return colorOf.get(name);
+    };
+
+    for (const edge of layout.edges) {
+      const ribbon = svg("path", {
+        class: "sankey-ribbon",
+        d: sankeyLinkPath(edge),
+        fill: colorFor(edge.sourceName),
+      });
+      // 悬停提示：精确数值 + 两端名字。title 必须是 path 的**子节点**，写成兄弟
+      // 节点会被浏览器丢掉、悬停什么都不显示。
+      ribbon.append(svg("title", {}, `${edge.sourceName} → ${edge.targetName}：${format(edge.value)} ${metricLabel}`));
+      ribbonLayer.append(ribbon);
+    }
+
+    layout.columns.forEach((column, layerIndex) => {
+      for (const item of column.nodes) {
+        const rect = svg("rect", {
+          class: "sankey-node",
+          x: column.x, y: item.y, width: column.width, height: Math.max(1, item.height),
+          rx: 2, fill: colorFor(item.name),
+        });
+        rect.append(svg("title", {}, `${item.name}：${format(item.value)} ${metricLabel}`));
+        nodeLayer.append(rect);
+        // 标签：首层放左边（外面），其余层放右边，避免压到上一层的流带。
+        const anchor = layerIndex === 0 ? "end" : "start";
+        const dx = layerIndex === 0 ? -6 : column.width + 6;
+        nodeLayer.append(svg("text", {
+          class: "sankey-label",
+          x: column.x + dx, y: item.y + item.height / 2 + 3.5,
+          "text-anchor": anchor, ...AXIS_TEXT,
+        }, clampLabel(item.name)));
+      }
+    });
+
+    // 层标题：说明每一列是什么，否则读者不知道第 3 列为什么是 provider。
+    if (layers && layers.length) {
+      const labels = { workspace: "工作空间", requested_model_id: "请求模型", model_id: "实际模型", provider_id: "供应商", upstream_model_id: "上游模型" };
+      layout.columns.forEach((column, index) => {
+        const key = layers[index];
+        node.append(svg("text", {
+          class: "axis-label sankey-column-label",
+          x: column.x, y: 12, "text-anchor": index === 0 ? "start" : "middle", ...AXIS_TEXT,
+        }, labels[key] || key || ""));
+      });
+    }
+
+    return node;
+  });
+
+  return host;
+}
+
+// 标签过长会盖住流带：截断而不是换行（SVG 里换行要手算 tspan，不值得）。
+function clampLabel(name) {
+  const text = String(name ?? "");
+  return text.length > 18 ? `${text.slice(0, 17)}…` : text;
 }
 
 // —— 图例 ——

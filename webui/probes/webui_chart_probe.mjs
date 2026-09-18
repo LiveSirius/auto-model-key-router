@@ -345,6 +345,68 @@ check("split_compare_too_short_is_null",
   m.splitCompare(m.series([{ started_at: "2026-01-01T00:00:00+08:00", requests: 1, complete: true }],
     m.METRIC_MAP.requests, 900)) === null);
 
+// —— 桑基布局：节点与流带的厚度必须一致 ——
+// 这是整张图唯一会"看起来对但读数是错"的地方：如果层与层各自缩放，流带会比
+// 它所属的节点更粗，读者就会以为某条流向比实际更大。
+const FLOW = [
+  { source_layer: 0, target_layer: 1, source: "teamA", target: "TASK_000001", requests: 3, total_tokens: 30 },
+  { source_layer: 0, target_layer: 1, source: "teamA", target: "TASK_000002", requests: 1, total_tokens: 10 },
+  { source_layer: 1, target_layer: 2, source: "TASK_000001", target: "gpt-4o", requests: 3, total_tokens: 30 },
+  { source_layer: 1, target_layer: 2, source: "TASK_000002", target: "gpt-4o", requests: 1, total_tokens: 10 },
+];
+const layout = m.sankeyLayout(FLOW, { width: 900, height: 400 });
+check("sankey_layer_count", layout.columns.length === 3, String(layout.columns.length));
+check("sankey_edge_count", layout.edges.length === 4, String(layout.edges.length));
+// 节点高度 = 该节点流出合计（3+1=4）而不是单条最大值（3）：否则第二条流带会溢出。
+const task1 = layout.columns[1].nodes.find((node) => node.name === "TASK_000001");
+const teamA = layout.columns[0].nodes.find((node) => node.name === "teamA");
+check("sankey_node_height_is_sum_of_out", task1.height > 0 && teamA.height > task1.height,
+  `teamA=${teamA.height} task1=${task1.height}`);
+
+// 每条流带的两端都必须落在各自节点的纵向区间内（允许浮点误差）。
+let spill = 0;
+for (const edge of layout.edges) {
+  for (const [layer, name, y] of [
+    [edge.sourceLayer, edge.sourceName, edge.source.y],
+    [edge.targetLayer, edge.targetName, edge.target.y],
+  ]) {
+    const node = layout.columns[layer].nodes.find((item) => item.name === name);
+    if (!node || y < node.y - 1e-6 || y + edge.thickness > node.y + node.height + 1e-6) spill += 1;
+  }
+}
+check("sankey_ribbons_stay_inside_nodes", spill === 0, `${spill} 条溢出`);
+
+// 厚度与请求数严格成正比：比例相等才是"粗细即流量"。
+const thickOf = (name) => layout.edges.find((edge) => edge.sourceName === name).thickness;
+check("sankey_thickness_proportional",
+  near(thickOf("TASK_000001") / thickOf("TASK_000002"), 3, 1e-6),
+  `${thickOf("TASK_000001")} / ${thickOf("TASK_000002")}`);
+
+// 同一节点的多条出边依次排开，不重叠。
+const outs = layout.edges.filter((edge) => edge.sourceName === "teamA");
+check("sankey_out_edges_do_not_overlap",
+  outs.length === 2 && near(outs[0].source.y + outs[0].thickness, outs[1].source.y, 1e-6),
+  outs.map((edge) => `${edge.source.y}+${edge.thickness}`).join(" "));
+
+// 路径是合法的闭合 SVG 路径。
+const flowPath = m.sankeyLinkPath(layout.edges[0]);
+check("sankey_path_is_closed",
+  typeof flowPath === "string" && flowPath.startsWith("M ") && flowPath.endsWith("Z"),
+  String(flowPath).slice(0, 24));
+
+// 退化输入不能抛异常。
+check("sankey_empty_is_empty", m.sankeyLayout([], {}).edges.length === 0);
+check("sankey_layers_empty", m.sankeyLayers([]).length === 0);
+check("sankey_zero_value_is_zero_thickness",
+  m.sankeyLayout([{ source_layer: 0, target_layer: 1, source: "a", target: "b", requests: 0 }], {})
+    .edges[0].thickness === 0);
+// 零值节点不能被算成 NaN 高度（除零会让整张图消失）。
+const zeroLayout = m.sankeyLayout(
+  [{ source_layer: 0, target_layer: 1, source: "a", target: "b", requests: 0 }], { height: 200 });
+check("sankey_zero_value_no_nan",
+  Number.isFinite(zeroLayout.columns[0].nodes[0].height),
+  String(zeroLayout.columns[0].nodes[0].height));
+
 const failed = Object.entries(checks).filter(([, value]) => value !== true);
 console.log(JSON.stringify({ failed: failed.map(([name, detail]) => `${name} (${detail})`), total: Object.keys(checks).length }));
 process.exit(failed.length ? 1 : 0);

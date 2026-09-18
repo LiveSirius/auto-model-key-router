@@ -572,8 +572,145 @@ export function hourlyProfile(points, { value = (point) => number(point.requests
   return hours;
 }
 
-// 累计曲线：把每桶读数累加，用于"总量涨到多少"的历史读数。
-// 缺失桶（null）不参与累加也不重置 —— 它只是没采样，不是总量归零。
+// —— 桑基流向布局 ——
+//
+// 与服务端 /ui/workspace-usage.json 的 links 对应：每条连边给定
+// { source_layer, target_layer, source, target, requests, total_tokens }。
+// 这里只做"算"，"画"在 charts.js，方便单测。
+//
+// 布局算法是分层的：每层节点按流入/流出的总量分配高度，再按顺序堆叠；
+// 连边的纵向位置由"该层已用掉的量"决定，因此同一节点的多条出边依次排开、
+// 不会重叠。不做迭代优化（真正的桑基图会用松弛法减少交叉）——层数固定为 5、
+// 节点数在几十个量级，顺序堆叠已经可读，而迭代会让渲染变得不确定、也无法单测。
+
+// sankeyLayers 从连边里归纳出每层的节点与各自的总量。
+//
+// 节点的量取 **max(流出合计, 流入合计)**，不是"所有连边里的最大值"：一个节点
+// 的多条出边要依次排在它身上，量必须是这些出边之和，否则连边会溢出节点（例如
+// 3+1 的流出配上一个 3 的节点高度，第二条流带就会画到节点外面）。末层只有流入、
+// 首层只有流出，取 max 让中间层两侧都够用。
+export function sankeyLayers(links) {
+  const layers = [];
+  const ensure = (index) => {
+    while (layers.length <= index) layers.push(new Map());
+    return layers[index];
+  };
+  const bump = (map, name, field, value) => {
+    const entry = map.get(name) || { in: 0, out: 0 };
+    entry[field] += value;
+    map.set(name, entry);
+  };
+  for (const link of links || []) {
+    const value = number(link.requests);
+    bump(ensure(number(link.source_layer)), link.source, "out", value);
+    bump(ensure(number(link.target_layer)), link.target, "in", value);
+  }
+  return layers.map((nodes) => {
+    const items = [...nodes.entries()].map(([name, flow]) => ({
+      name,
+      value: Math.max(flow.in, flow.out),
+    }));
+    // 同层内按量降序：大的节点在上方，读起来更稳，也让"主要流向"落在视线高度。
+    // 同量时按名字排序，保证同样的数据每次渲染顺序一致（顺序变了图就跳）。
+    items.sort((a, b) => (b.value - a.value) || a.name.localeCompare(b.name, "zh-CN"));
+    return items;
+  });
+}
+
+// sankeyLayout 把连边排成可直接绘制的坐标。
+//
+// 返回：
+//   columns: [{ x, width, nodes: [{name, value, y, height, offset}] }]
+//   edges:   [{ 路径用的 source/target 锚点, value, thickness, link }]
+//
+// **纵向只用一把尺子**（全局 scale），这是关键：若每层各自缩放到满高，同一节点的
+// 入边按来源层的比例算、出边按本层比例算，两者会得到不同厚度，流带就会溢出节点。
+// 用同一个 scale 后，节点高度与连边厚度都是"绝对请求数 × scale"，两端天然吻合。
+//
+// 代价是层与层之间总量不等时（例如 provider_id 为空的请求在中间断掉），层不会
+// 占满高度——这正是想要的：那段留白就是"在此处丢失的流量"。层内做垂直居中，
+// 让留白分在上下两侧而不是全堆在底部。
+export function sankeyLayout(links, { width = 900, height = 420, nodeWidth = 14, gap = 12 } = {}) {
+  const columns = sankeyLayers(links);
+  const count = columns.length;
+  if (!count) return { columns: [], edges: [] };
+
+  const totals = columns.map((nodes) => nodes.reduce((sum, node) => sum + node.value, 0));
+  const maxTotal = Math.max(...totals, 0);
+  // 最大层决定纵向尺度：它必须连同自身间隙一起装进可用高度。
+  const maxGaps = Math.max(0, Math.max(...columns.map((nodes) => nodes.length)) - 1);
+  const scale = maxTotal > 0 ? Math.max(0, height - gap * maxGaps) / maxTotal : 0;
+
+  const span = Math.max(1, width - nodeWidth);
+  const step = count > 1 ? span / (count - 1) : 0;
+
+  const placed = columns.map((nodes, index) => {
+    const columnHeight = totals[index] * scale + gap * Math.max(0, nodes.length - 1);
+    // 垂直居中：留白平分到上下，而不是全压在底部。
+    let cursor = Math.max(0, (height - columnHeight) / 2);
+    return {
+      x: index * step,
+      width: nodeWidth,
+      nodes: nodes.map((node) => {
+        const nodeHeight = node.value * scale;
+        const entry = { ...node, y: cursor, height: nodeHeight, offset: 0, outOffset: 0 };
+        cursor += nodeHeight + gap;
+        return entry;
+      }),
+    };
+  });
+
+  // 建立 name -> 节点 的索引。**只在层内唯一**：同一个名字（例如 gpt-4o 既是
+  // 请求模型又是实际模型）会出现在不同层，因此键必须带上层号。
+  const index = new Map();
+  placed.forEach((column, layer) => {
+    for (const node of column.nodes) index.set(`${layer}:${node.name}`, node);
+  });
+
+  const edges = [];
+  for (const link of links || []) {
+    const sourceLayer = number(link.source_layer);
+    const targetLayer = number(link.target_layer);
+    const source = index.get(`${sourceLayer}:${link.source}`);
+    const target = index.get(`${targetLayer}:${link.target}`);
+    if (!source || !target) continue;
+    const value = number(link.requests);
+    // 与节点同一个 scale：两端厚度因此必然与各自节点的高度体系一致。
+    const thickness = value * scale;
+
+    const edge = {
+      link,
+      value,
+      thickness,
+      source: { x: source.x + nodeWidth, y: source.y + source.outOffset },
+      target: { x: target.x, y: target.y + target.offset },
+      sourceName: link.source,
+      targetName: link.target,
+      sourceLayer,
+      targetLayer,
+    };
+    source.outOffset += thickness;
+    target.offset += thickness;
+    edges.push(edge);
+  }
+
+  return { columns: placed, edges, width, height, nodeWidth, scale };
+}
+
+// sankeyLinkPath 生成一条连边的闭合路径（流带）。
+//
+// 上下两边各是一条三次贝塞尔，控制点取水平跨度的 40%：这是桑基图的惯例，让流带
+// 在中段自然收束；用直线会让密集的图看起来像一团交叉的线段。
+//
+// 返回字符串而不是对象：调用方只用到路径本身。
+export function sankeyLinkPath(edge) {
+  const { source, target } = edge;
+  const control = (target.x - source.x) * 0.4;
+  const top = `M ${source.x} ${source.y} C ${source.x + control} ${source.y}, ${target.x - control} ${target.y}, ${target.x} ${target.y}`;
+  const back = `L ${target.x} ${target.y + edge.thickness} C ${target.x - control} ${target.y + edge.thickness}, ${source.x + control} ${source.y + edge.thickness}, ${source.x} ${source.y + edge.thickness} Z`;
+  return `${top} ${back}`;
+}
+
 export function cumulativeSeries(seriesPoints) {
   let running = 0;
   return (seriesPoints || []).map((point) => {
