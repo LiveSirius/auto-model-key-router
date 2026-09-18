@@ -437,12 +437,20 @@ export function renderOverview(context) {
   // 热力图有自己的 60 秒 TTL，force 会绕过它 —— 但那时桶内容其实没变，
   // 所以只在窗口数据真正变化时顺带刷新，避免每 10 秒重画 336 个格子。
   context.onTick?.(() => { loadWindow(true); loadHeatmap(); });
-  draw();
+  // 同步首绘必须绕过"已挂载"守卫：app.js 是**先**拿本函数返回的节点、**后**mount 进
+  // 文档的（renderContent 里 page.render(ctx()) 在前，mount 在后），此刻 host 还不在
+  // 文档里，isConnected 恒为 false。而下面的 loadWindow/loadHeatmap 在缓存命中时会直接
+  // 返回、不会回调 draw —— 于是重新进入本页时整页空白，一直等到下一次轮询（健康轮询
+  // 5 秒）触发 onTick 里的 loadWindow(true) 才补画。
+  draw(true);
   return host;
 }
 
-function draw() {
-  if (!host || !host.isConnected) return;
+// firstPaint 为真时表示"本轮是 renderOverview 里的同步首绘"，节点尚未挂载；
+// 其余调用（轮询回调）仍要求节点在文档里，避免离开页面后继续白画。
+function draw(firstPaint = false) {
+  if (!host) return;
+  if (!firstPaint && !host.isConnected) return;
   const { store } = xtxRef;
   const metrics = state.snapshot;
   const points = state.series || [];

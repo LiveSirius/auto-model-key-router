@@ -40,6 +40,12 @@ class FakeNode {
   }
   querySelector() { return null; }
   focus() {}
+  // 忠实还原 isConnected：沿 parent 走到文档根才算已挂载。页面（概览/活动）用它
+  // 跳过"离开后仍在途的重绘"，垫片若恒为 true/false 都会把这个判断测成另一回事。
+  get isConnected() {
+    for (let node = this; node; node = node.parent) if (node.documentRoot) return true;
+    return false;
+  }
   get textContent() {
     return this.children.map((c) => (c.textContent === undefined ? String(c) : c.textContent)).join(" ");
   }
@@ -51,6 +57,7 @@ class FakeText extends FakeNode {
 
 const root = new FakeNode("div");
 root.attrs.id = "root";
+root.documentRoot = true;
 
 // Node 24 已内置只读的 navigator/location 全局，只能用 defineProperty 覆盖。
 const define = (name, value) =>
@@ -132,6 +139,31 @@ global.fetch = async (url, options = {}) => {
   if (server.authEnabled && !server.accepted.has(bearer)) {
     return respond(401, { detail: "本地 API key 验证失败" });
   }
+  if (path.startsWith("/metrics")) {
+    // 概览页的两条读取：窗口快照与时间序列。给最小但结构完整的载荷，
+    // 让首页能真正画出 KPI 瓦片与两张图（否则测的就不是"重绘"而是"空态"）。
+    if (path.startsWith("/metrics/series")) {
+      return respond(200, {
+        bucket_seconds: 15,
+        points: [{ started_at: "2026-01-01T10:00:00+08:00", ended_at: "2026-01-01T10:00:15+08:00", complete: true, requests: 3, successes: 3, failures: 0, retries: 0, prompt_tokens: 30, completion_tokens: 10, total_tokens: 40, cached_tokens: 0, total_duration_ms: 300, total_first_token_ms: 100 }],
+      });
+    }
+    return respond(200, {
+      count_semantics: "attempts",
+      window: { from: null, to: "2026-01-01T10:00:00+08:00", hours: 1 },
+      rate_window_seconds: 60,
+      current_rpm: 3,
+      current_tpm: 40,
+      router_status: "green",
+      active_requests: 0,
+      total: { requests: 3, successes: 3, failures: 0, retries: 0, prompt_tokens: 30, completion_tokens: 10, total_tokens: 40, cached_tokens: 0 },
+      caller_types: {},
+      models: {},
+      providers: {},
+      upstream_models: {},
+      unattributed: {},
+    });
+  }
   if (path.startsWith("/api/settings")) {
     return respond(200, {
       config_revision: "rev-1",
@@ -163,7 +195,7 @@ global.fetch = async (url, options = {}) => {
 };
 
 // —— 驱动 ——
-const { boot, store, renderShell } = await import(pathToFileURL(path.join(WEBUI, "app.js")).href);
+const { boot, store, renderShell, navigate } = await import(pathToFileURL(path.join(WEBUI, "app.js")).href);
 const { api } = await import(pathToFileURL(path.join(WEBUI, "api.js")).href);
 
 function findAll(node, predicate, out = []) {
@@ -234,6 +266,15 @@ const setup = {
     global.location.hash = "#/tasks";
     storage.set("amkr.apiKey", "good-key");
     server.tasks = [];
+  },
+  // 概览页二次进入：模块级 state 已有缓存时，进入必须**同步**画出内容。
+  // 曾经的缺陷：renderOverview 先建好尚未挂载的 host 再调 draw()，而 draw() 用
+  // isConnected 守卫挡住了这次同步首绘；同时 loadWindow/loadHeatmap 命中缓存后
+  // 直接返回、不会再回调 draw —— 于是切回概览整页空白，一直等到下一次轮询
+  // （健康轮询 5 秒）才补画，用户看到的就是"进入会卡顿一段时间"。
+  overview_reentry_paints_immediately: () => {
+    global.location.hash = "#/overview";
+    storage.set("amkr.apiKey", "good-key");
   },
 };
 // 没给场景名时，把自己按场景逐个重跑一遍。两个理由：
@@ -432,6 +473,24 @@ if (scenario === "stale_key_prompts_login") {
   checks.writeHasModel = write?.model === "model-a";
   // 没填的参数不该被写进配置。
   checks.writeOmitsBlankParams = write !== undefined && !("temperature" in (write.params || {}));
+} else if (scenario === "overview_reentry_paints_immediately") {
+  // 首次进入：等异步数据落地，确认首页确实画出了 KPI 瓦片。
+  await settle();
+  checks.firstEntryHasContent = byClass("stat-grid").length === 1;
+
+  // 切走再切回：这一次 state 里的快照/序列/热力图都还在缓存里，两条 load* 都会
+  // 提前 return（不产生任何回调），所以内容只能靠 renderOverview 里的同步首绘。
+  navigate("settings");
+  await settle();
+  checks.leftOverview = store.page === "settings" && byClass("stat-grid").length === 0;
+
+  navigate("overview");
+  // 刻意**不**排空微任务：切回后必须当场就有内容，而不是等下一次轮询。
+  checks.reentryPaintsSynchronously = byClass("stat-grid").length === 1;
+  checks.reentryHasHeatmap = byClass("heat-cell").length > 0;
+  // 用 .chart-host（折线 + 堆叠柱各一）而不是数 <svg>：导航图标也是 svg，
+  // 数 svg 在"页面空白只剩余壳"时照样为真，那种断言等于没测。
+  checks.reentryHasCharts = byClass("chart-host").length === 2;
 }
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);
