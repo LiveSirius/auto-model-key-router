@@ -9,8 +9,10 @@
 # 与本迁移无关的巨大 diff。
 internal/agentconfig/testdata/** -text
 internal/canonical/testdata/** -text
+cmd/amkr/testdata/** -text
 internal/clipboard/testdata/** -text
 internal/config/testdata/** -text
+internal/configeditor/testdata/** -text
 internal/configops/testdata/** -text
 internal/eventbus/testdata/** -text
 internal/formatting/testdata/** -text
@@ -21,6 +23,7 @@ internal/metrics/testdata/** -text
 internal/proxysupport/testdata/** -text
 internal/proxy/testdata/** -text
 internal/server/testdata/** -text
+internal/service/testdata/** -text
 internal/servicestatus/testdata/** -text
 internal/tui/testdata/** -text
 internal/updatecheck/testdata/** -text
