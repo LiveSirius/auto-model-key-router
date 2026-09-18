@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     AMKR 安装脚本（Windows）。
 
