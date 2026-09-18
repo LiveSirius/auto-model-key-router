@@ -77,6 +77,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/config/export`、`/api/config/import` | 仅本地 | 导出或导入可迁移配置 |
 | `GET` | `/ui/` | 无 | 内置 WebUI（需 `webui_enabled`，未启用或资产缺失时返回 `404`） |
 | `GET` | `/ui/pricing.json` | 无 | models.dev 价格目录快照，用于 WebUI 估算成本（需 `webui_enabled`） |
+| `GET` | `/ui/workspace-usage.json` | 仅本地 | 按工作空间拆分的用量读数与请求流向，供 WebUI 的「工作空间」页（需 `webui_enabled`） |
 | `GET` | `/ui/update/status` | 无 | 报告本构建是否具备自更新能力及当前版本，供 WebUI 决定是否显示「立即更新」 |
 | `POST` | `/ui/update/apply` | 仅本地 | 执行自更新：下载并校验新版、就地替换、启动收尾助手重启服务 |
 | `GET` | `/api/logs` | 仅本地 | 读取日志文件尾部（默认最后 64 KiB） |
@@ -939,6 +940,47 @@ http://127.0.0.1:8000/ui/
 ```json
 {"workspaces": [{"name": "default", "task_count": 2}, {"name": "teamA", "task_count": 1}]}
 ```
+
+### `GET /ui/workspace-usage.json`
+
+按工作空间拆分的用量读数与请求流向，供 WebUI 的「工作空间」页使用。**需要鉴权**（内容反映各空间的用量与模型流向，不是公开数据）。
+
+| 参数 | 类型 | 默认 | 约束 | 说明 |
+| --- | --- | --- | --- | --- |
+| `hours` | number | `24` | `> 0` 且 `<= 8760` | 统计窗口 |
+| `all_history` | boolean | `false` | — | 为真时忽略 `hours`，统计全部历史（此时 `window.from` 为 `null`） |
+
+参数校验与 `/metrics` 同序：**先校验参数、后校验凭据**，因此 `hours=0` 不带凭据返回 `422` 而不是 `401`。
+
+响应（`Content-Type: application/json`）：
+
+```json
+{
+  "count_semantics": "upstream_attempt",
+  "window": {"from": "2026-01-01T00:00:00+08:00", "to": "2026-01-02T00:00:00+08:00", "hours": 24},
+  "workspaces": [
+    {"name": "teamA", "stats": {"requests": 12, "successes": 12, "total_tokens": 3400, "...": "..."}}
+  ],
+  "unattributed": {"requests": 3, "total_tokens": 800, "...": "..."},
+  "layers": ["workspace", "requested_model_id", "model_id", "provider_id", "upstream_model_id"],
+  "links": [
+    {"source_layer": 0, "target_layer": 1, "source": "teamA", "target": "TASK_000001", "requests": 12, "total_tokens": 3400}
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `workspaces[].stats` | 与 `/metrics` 的 `total` 同形（同一套聚合口径） |
+| `unattributed` | **没有**工作空间归属的请求（升级前的历史行、以及不走代理的写入路径） |
+| `layers` | 流向图的层顺序，与 `links` 的 `source_layer` / `target_layer` 对应 |
+| `links[].source` / `target` | 相邻两层之间的连边；`requests` 与 `total_tokens` 都给出，供前端切换宽度口径 |
+
+关于 `unattributed`：**不会**被并进 `default`。把它算到默认工作空间头上会凭空造出一段并不存在的用量。工作空间归属从记录该字段的版本起才开始写入，升级前的历史行永远落在这里，不会追溯回填。
+
+关于 `links`：某一端为空的请求（`provider_id` / `upstream_model_id` 可空）**不成边**，在图上留出缺口，而不是补一个占位节点——否则无法区分哪条是数据、哪条是兜底。
+
+> 该端点挂在 `/ui/` 之下而非新增 `/api/metrics/*`：它是本项目自有的响应形状（参照实现没有工作空间，没有可比对的 oracle），不混进被逐字节语料锁定的 `/metrics` 系列。
 
 ### `GET /ui/pricing.json`
 

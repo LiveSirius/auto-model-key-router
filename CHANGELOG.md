@@ -24,6 +24,35 @@
 
 ### 新增
 
+- **工作空间的用量统计与请求流向图**。WebUI 新增「工作空间」页：各空间的用量读数、
+  请求排行与空间明细表，以及一张表达请求流向的**桑基图**（工作空间 → 请求模型 → 实际
+  模型 → 供应商 → 上游模型），流带粗细即承载量，可在请求数与 Token 之间切换。对应读数
+  也可通过 `GET /ui/workspace-usage.json` 取（需鉴权，`hours` / `all_history` 与 `/metrics`
+  同口径）。
+
+  归属是**写入时落库**的，不能查询期反推：同一个任务名可以合法地同时存在于多个工作空间
+  （`router-config.example.json` 里 `TASK_000001` 就在顶层与 `workspaces.teamA` 各有一份），
+  而历史指标只记了调用方传的模型名，无从判断当时带的是哪个 `X-AMKR-Workspace`。
+
+  存储用**旁挂表** `request_workspace`（`request_id INTEGER PRIMARY KEY` + `workspace`），
+  而不是给 `request_metrics` 加列：后者的建表原文被 `schema.jsonl` 逐字节锁定，而
+  `ALTER TABLE ADD COLUMN` 实测会重写 `sqlite_master.sql`，加列必然打破那份语料——生成器
+  已随 Python 退役，无法重生成。旁挂表让 `request_metrics` 逐字节不变，差异面缩小到
+  「多一张表」；该差异以显式白名单（`extraMasterEntries`）列在 schema 差分测试里，再加
+  第二个库对象会立刻失败。旁挂表用 rowid 别名表达一对一，因此**不新增索引条目**。
+
+  没有归属的行（升级前的历史）单独统计为 `unattributed`，**不兜底成 default**——那会把
+  旧账算到默认工作空间头上，凭空造出一段并不存在的用量。流向图里某一端为空的请求同样
+  留缺口而不补占位节点，否则分不清哪条是数据、哪条是兜底。
+
+  桑基布局只用**一把纵向尺子**（全局 scale），不让每层各自缩放到满高：后者会让同一节点的
+  入边与出边拿到不同厚度，流带溢出节点、读数失真。节点量取 `max(流入合计, 流出合计)`。
+
+  验证：`internal/metrics/workspace_test.go`（分组计数、Token 汇总、未归属隔离、五层相邻
+  连边、窗口裁剪、参数校验）、`internal/server/workspace_usage_test.go`（形状与分组、访客
+  拒绝、非 GET 405、参数校验先于鉴权、`all_history` 的 `window.from` 为 null）、
+  `webui_chart_probe.mjs` 新增 11 条桑基断言（层数、厚度与请求数成正比、流带不溢出节点、
+  同节点出边不重叠、退化输入不产生 NaN），全套 162 条通过。
 - **供应商页的 Key 行只列出该 Key 正在服务的模型**。Key 名称下方原来显示的是探测结果
   （上游 `/v1/models` 广告出来的全部模型），动辄几百个，既读不完，也不代表这个 Key 真的
   对外提供它们——每个模型要显式绑定到 Key 才生效。现在这行改为从模型 `targets[]` 反查

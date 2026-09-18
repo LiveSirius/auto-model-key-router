@@ -49,8 +49,12 @@
   撞名。否则 `resolve_route` 的语义会取决于查表顺序——那是全局唯一的判断，工作空间
   不能用来遮蔽模型名。
 - 供应商、Key、unified_model、设置项都**没有**工作空间维度。
-- 因此工作空间不是「多租户」：它不隔离凭据、用量统计或配额。它只是任务集合的
-  命名空间。
+- 因此工作空间不是「多租户」：它不隔离凭据、不隔离配额，任何人带上这个头就能用任
+  何空间的任务。它只是任务集合的命名空间。
+
+用量**可以**按工作空间分开看（见第 8 节），但那只是**观测**，不是**隔离**：归属被
+记录下来用于统计与图表，却不用来拒绝任何请求。两者的区别很关键——把统计误当成配额
+会得出「工作空间 A 用超了会影响 B」这种并不存在的结论。
 
 ## 4. 空工作空间不存在
 
@@ -137,12 +141,99 @@
 | 阻止该头外泄 | `internal/proxysupport/support.go` |
 | 管理端点感知空间 | `internal/api/handlers_meta.go` |
 | 工作空间目录 `/ui/workspaces.json` | `internal/server/workspaces.go` |
+| 归属落库（`RecordParams.Workspace`、`request_workspace` 旁挂表） | `internal/metrics/store.go`、`internal/metrics/schema.go` |
+| 归属贯穿（`MetricRecord.Workspace` ← `RequestContext.Workspace`） | `internal/proxy/retry.go`、`internal/server/metricsadapter.go` |
+| 空间用量与流向查询（`WorkspaceUsage`） | `internal/metrics/workspace.go` |
+| 读数端点（`/ui/workspace-usage.json`） | `internal/server/workspace_usage.go` |
+| 流向图基元与页面 | `webui/charts.js`、`webui/chart-math.js`、`webui/pages/workspaces.js` |
 | 界面切换 | `webui/pages/tasks.js`、`webui/api.js` |
 
 `WorkspaceNames()` 由任务反推，默认空间固定排首位——界面上的下拉顺序因此与配置文件
 里的书写顺序无关，且默认空间永远可直接选中。
 
-## 8. 改动时的检查清单
+## 8. 用量统计与流向图
+
+每个请求在工作空间维度上的归属会被记下来，用于出「各空间用量」与「请求流向」两张
+读数（WebUI 的**工作空间**页）。这一节说明存储形状与**为什么不能事后反推**。
+
+### 为什么必须落库：工作空间反推不出来
+
+一个自然的想法是「反正指标里已经存了请求模型名（`requested_model_id`），查的时候
+拿它回配置里查一下不就是工作空间了」。这条路走不通：
+
+同一个任务名**可以合法地同时存在于多个工作空间**（这正是工作空间要解决的问题，
+见第 1 节）。`router-config.example.json` 里 `TASK_000001` 就同时出现在顶层 `tasks`
+与 `workspaces.teamA.tasks` 下。历史指标只记了「调用方传的模型名是 `TASK_000001`」，
+单凭它无从判断当时那个 `X-AMKR-Workspace` 头写的是什么。**归属只在请求处理时就近
+可得**，因此必须在写入指标时一并记下。
+
+### 存储：旁挂表而不是新列
+
+归属存在 `request_workspace` 旁挂表里，**不是** `request_metrics` 的新列：
+
+```sql
+CREATE TABLE IF NOT EXISTS request_workspace (
+    request_id INTEGER PRIMARY KEY,   -- 就是 request_metrics.id
+    workspace  TEXT NOT NULL
+)
+```
+
+两个理由，第二个是决定性的：
+
+1. `request_id` 是 `INTEGER PRIMARY KEY`，即 rowid 别名。一对一约束与 JOIN 索引
+   同时到手，且**不会**在 `sqlite_master` 里多出一条索引条目。
+2. `request_metrics` 的建表原文、列序与索引定义被 `internal/metrics/testdata/schema.jsonl`
+   **逐字节锁定**（`TestSchemaMatchesPython`），那是整条兼容链的根。而
+   `ALTER TABLE ... ADD COLUMN` **会重写 `sqlite_master.sql`**（实测：即便在全新库
+   上也会把新列以追加形式写进原文），加列必然打破那份语料——**而语料生成器已随
+   Python 退役，无法重生成**。旁挂表让 `request_metrics` 自身逐字节不变，差异面从
+   「表定义被改写」缩小到「多了一张表」。
+
+因此 `TestSchemaMatchesPython` / `TestLegacyDatabaseUpgrade` 里有一份显式白名单
+（`extraMasterEntries`）：测试的职责从「完全一致」变成「除白名单外完全一致」。往库里
+再加第二个对象会让它立刻失败——兼容分歧必须是白名单式的、被逐条审视的。
+
+> 旧二进制打开新库时只是看不到这张表，仍能正常读写指标。加列则会遇到它不认识的列序
+> （`SELECT *` 与 `table_info` 的输出都会变）。
+
+### 没有归属的行：`unattributed`，不兜底成 default
+
+`workspace` 为空时不写旁挂表。查询端用 `NOT EXISTS` 把这类行单独统计成
+`unattributed`（未归属），**不会**并进 `default`：
+
+升级前写入的历史行都在这里。把它们算到默认工作空间头上会凭空造出一段并不存在的
+用量，而且看起来像真的。界面因此把未归属提示放在流向图**之前**——否则用户先看到一张
+少了一块的图，往下才知道原因。
+
+同理，流向图里某一端为空的请求（`provider_id` / `upstream_model_id` 可空）**不补占位
+节点**，而是在那个位置留出缺口。补一个占位符会让它与真实取值混在一起，看图的人分不出
+哪条是数据、哪条是兜底。
+
+### 流向图的五层
+
+```
+工作空间 → 请求模型 → 实际模型 → 供应商 → 上游模型
+```
+
+粒度选在这里是因为它恰好是请求在系统里的完整流转，且每一层都已存在于指标里
+（`requested_model_id` / `model_id` / `provider_id` / `upstream_model_id`），无需额外
+埋点。宽度可切请求数或 Token：前者看调用次数，后者看实际消耗。
+
+布局上有一条容易写错、写错了却"看起来对"的地方：**纵向必须只用一把尺子**（全局
+scale），不能让每层各自缩放到满高。后者会让同一节点的入边与出边拿到不同厚度，流带
+溢出节点、读数失真。代价是层总量不齐时留白，而那段留白本身就是"在此处丢失的流量"。
+节点自身的量取 `max(流入合计, 流出合计)`——取单条最大边会让多条出边依次排开时溢出。
+
+### 边界
+
+- **统计不是配额**：归属只用于观测，不用来拒绝任何请求（见第 3 节）。
+- **归属从本版本才开始记录**：升级前的历史行永远是 `unattributed`，不会追溯回填
+  （回填需要当时的工作空间名，而它没有被记下来）。
+- 该读数挂在 `/ui/workspace-usage.json`：它是本项目自有的响应形状，没有可比对的
+  oracle，因此不混进被逐字节语料锁定的 `/metrics` 系列（理由与 `/ui/` 的选择一致，
+  见第 6 节）。
+
+## 9. 改动时的检查清单
 
 - [ ] 新代码是否让「不带 `X-AMKR-Workspace` 头」的行为发生了变化？语料会立刻发现。
 - [ ] 是否给被语料锁定的响应体新增了字段？（`tasks/list` 等）
@@ -150,4 +241,8 @@
 - [ ] 冲突检查是否被意外地收窄到空间内？模型名冲突必须保持**全局**。
 - [ ] 空分组的两处口径是否仍然一致？（`configops.writeWorkspaceTasks` 与
       `RouterConfig.WorkspaceNames`）
-- [ ] `go test ./...` 与 `node webui/probes/webui_auth_probe.mjs` 是否全绿？
+- [ ] 是否往指标库里加了**第二个**新对象？`extraMasterEntries` 白名单会拦住——兼容
+      分歧必须逐条列出来，不能无声增长。
+- [ ] 归属是否仍只在写入时确定？（查询期反推不成立，见第 8 节）
+- [ ] `go test ./...`、`node webui/probes/webui_auth_probe.mjs` 与
+      `node webui/probes/webui_chart_probe.mjs` 是否全绿？
