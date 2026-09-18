@@ -15,7 +15,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// 本文件回放 scripts/gen_management_api_corpus.py 生成的语料。
+// 本文件回放 gen_management_api_corpus.py（已随 Python 退役移除） 生成的语料。
 //
 // 语料由真实 Python FastAPI 应用产出，断言「状态码 + 响应体字节 + content-type /
 // content-length + 变异请求后的配置文件」四件事。任何一处与 Go 实现不一致都算失败，

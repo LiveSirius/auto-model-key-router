@@ -16,7 +16,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
 
-// 本文件回放 scripts/gen_amkr_cli_corpus.py 产出的语料。
+// 本文件回放 gen_amkr_cli_corpus.py（已随 Python 退役移除） 产出的语料。
 //
 // 语料来自**真实 Python**：生成脚本调用 ``main.main()``，只把全部副作用换成记录桩，
 // 因此每条记录都是参照实现真实做出的**分支决策**（选了哪条 if/elif、拿到的配置、

@@ -24,7 +24,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/runtime"
 )
 
-// corpusCase 是 scripts/gen_proxy_handler_corpus.py 产出的一条对拍用例。
+// corpusCase 是 gen_proxy_handler_corpus.py（已随 Python 退役移除） 产出的一条对拍用例。
 type corpusCase struct {
 	Name          string                    `json:"name"`
 	Note          string                    `json:"note"`

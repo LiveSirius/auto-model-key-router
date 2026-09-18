@@ -51,7 +51,7 @@
 //
 // 本包的测试分三层：
 //
-//   - corpus_test.go：回放 scripts/gen_server_corpus.py 用**真实 Python 应用**
+//   - corpus_test.go：回放 gen_server_corpus.py（已随 Python 退役移除） 用**真实 Python 应用**
 //     产出的语料，逐字节比对状态码 / 响应体 / content-type / content-length；
 //   - websocket_corpus_test.go：回放同一份语料里的 ws_cases / ws_proxy_cases
 //     （帧文本、关闭码、上游请求），用真实 TCP 上的 coder/websocket 客户端；

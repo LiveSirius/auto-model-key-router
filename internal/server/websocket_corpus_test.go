@@ -11,7 +11,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/eventbus"
 )
 
-// 本文件回放语料里的两块 WebSocket 用例（由 scripts/gen_server_corpus.py 用
+// 本文件回放语料里的两块 WebSocket 用例（由 gen_server_corpus.py（已随 Python 退役移除） 用
 // TestClient.websocket_connect 驱动真实 Python 应用生成）。
 //
 // 为什么要单独一块语料：ASGI 的 websocket 与 http 是两个 scope，普通 client.request

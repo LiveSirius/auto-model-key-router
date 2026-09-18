@@ -12,7 +12,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// corpusFile 是 scripts/gen_configops_corpus.py 产出的对拍语料。
+// corpusFile 是 gen_configops_corpus.py（已随 Python 退役移除） 产出的对拍语料。
 type corpusFile struct {
 	Version int          `json:"version"`
 	Cases   []corpusCase `json:"cases"`
@@ -54,7 +54,7 @@ func loadConfigOpsCorpus(t *testing.T) []corpusCase {
 	path := filepath.Join("testdata", "configops_corpus.json")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("读取语料失败（先运行 python scripts/gen_configops_corpus.py）: %v", err)
+		t.Fatalf("读取语料失败（语料已冻结并随仓库提交，生成器已随 Python 退役移除）: %v", err)
 	}
 	var corpus corpusFile
 	if err := json.Unmarshal(raw, &corpus); err != nil {

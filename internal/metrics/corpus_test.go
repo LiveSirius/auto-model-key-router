@@ -12,7 +12,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
 
-// testdataDir 是差分语料所在目录；语料由 scripts/gen_metrics_corpus.py 用**真实
+// testdataDir 是差分语料所在目录；语料由 gen_metrics_corpus.py（已随 Python 退役移除） 用**真实
 // 的 Python 参照实现**生成。这些测试的价值全部来自这一点：期望值不是手写的，
 // 而是参照实现的真实输出，因此任何偏差都会被捕获。
 const testdataDir = "testdata"

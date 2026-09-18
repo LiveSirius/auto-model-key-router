@@ -1,6 +1,6 @@
 package tui
 
-// 本文件重放 scripts/gen_tui_corpus.py 产出的对拍语料。
+// 本文件重放 gen_tui_corpus.py（已随 Python 退役移除） 产出的对拍语料。
 //
 // 语料的每一条都是真实 Python（auto_model_key_router/tui.py + rich）在同一台
 // 机器上跑出来的**纯文本行**（渲染后剥掉 ANSI），Go 侧用同样的输入重放并逐字比较。

@@ -42,7 +42,7 @@
 //     的 logging dictConfig，Go 侧由 server 包自己写日志；后台启动只负责把子进程的
 //     stdout/stderr 追加进同一个日志文件（与 Python 的 file handler 落点一致）。
 //  3. **rich 渲染降级为等价纯文本**。面板统一由 internal/tui 渲染（宽度 100、
-//     safe_box=False，与 scripts/gen_tui_corpus.py 同一套设置），因此语料可以逐字节
+//     safe_box=False，与 gen_tui_corpus.py（已随 Python 退役移除） 同一套设置），因此语料可以逐字节
 //     对拍；唯一例外是系统服务状态表——Go 用固定列宽（tui.Table 已声明的差异），
 //     语料只对拍**行数据**，不对拍表格版式。
 package service

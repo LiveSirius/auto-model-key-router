@@ -13,7 +13,7 @@ import (
 // TestPythonWrittenConfigRoundTripsByteIdentical 是「完全兼容」承诺的核心证据。
 //
 // 夹具 testdata/python_written_config.json 由参照实现的 save_config_data **真实
-// 写出**（见 scripts/gen_config_model_corpus.py 的 persist_fixture_text），因此它
+// 写出**（见 gen_config_model_corpus.py（已随 Python 退役移除） 的 persist_fixture_text），因此它
 // 包含了 Python 侧的全部落盘细节：indent=2、键序不排序、嵌套缩进、末尾换行、
 // 非 ASCII 原样保留、以及 45.5 这类浮点保持 "45.5"。
 //
@@ -26,7 +26,7 @@ func TestPythonWrittenConfigRoundTripsByteIdentical(t *testing.T) {
 	fixturePath := filepath.Join("testdata", "python_written_config.json")
 	original, err := os.ReadFile(fixturePath)
 	if err != nil {
-		t.Fatalf("读取夹具失败（先运行 python scripts/gen_config_model_corpus.py）: %v", err)
+		t.Fatalf("读取夹具失败（语料已冻结并随仓库提交，生成器已随 Python 退役移除）: %v", err)
 	}
 
 	// 1 & 2：Go 读得懂，且能解析成有效配置。

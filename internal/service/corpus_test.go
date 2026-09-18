@@ -16,7 +16,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/tui"
 )
 
-// 本文件回放 scripts/gen_service_corpus.py 产出的语料。
+// 本文件回放 gen_service_corpus.py（已随 Python 退役移除） 产出的语料。
 //
 // 语料来自**真实 Python**：service.py 的全部外部依赖（subprocess / urlopen / time /
 // platform / Path.home / Path.cwd / os.getlogin / archive_current_log）在生成时被换成

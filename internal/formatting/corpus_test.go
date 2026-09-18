@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// corpusFile 是 scripts/gen_formatting_corpus.py 产出的对拍语料。
+// corpusFile 是 gen_formatting_corpus.py（已随 Python 退役移除） 产出的对拍语料。
 //
 // 期望值全部来自真实的 Python 模块，Go 测试只读语料、不需要 Python 解释器。
 type corpusFile struct {

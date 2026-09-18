@@ -17,7 +17,7 @@ type utf8ReplaceCase struct {
 
 // TestDecodeUTF8ReplacingMatchesPython 用穷举语料对齐宽容解码。
 //
-// 语料由 scripts/gen_proxysupport_corpus.py 从**真实 Python** 生成，覆盖：
+// 语料由 gen_proxysupport_corpus.py（已随 Python 退役移除） 从**真实 Python** 生成，覆盖：
 // 全部 256 个单字节、0xC0-0xFF 的双字节组合、E0/ED/EF 与 F0/F4/F5 的边界三/四字节
 // 组合，以及截断、过量长、代理对、超 U+10FFFF 等病态序列。共 1476 条。
 //

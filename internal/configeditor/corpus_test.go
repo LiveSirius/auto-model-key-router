@@ -1,6 +1,6 @@
 package configeditor
 
-// 本文件是**对拍测试**：回放 scripts/gen_config_editor_corpus.py 用真实 Python
+// 本文件是**对拍测试**：回放 gen_config_editor_corpus.py（已随 Python 退役移除） 用真实 Python
 // 实现生成的语料（internal/configeditor/testdata/config_editor_corpus.json），
 // 逐条比对请求构造与返回值。语料里没有任何 Go 侧写下的期望值。
 //

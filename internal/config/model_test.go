@@ -9,7 +9,7 @@ import (
 
 // TestFromDictMatchesPython 是 RouterConfig 解析与校验的核心对拍断言。
 //
-// 语料由 scripts/gen_config_model_corpus.py 生成，输入是原始配置 JSON 文本
+// 语料由 gen_config_model_corpus.py（已随 Python 退役移除） 生成，输入是原始配置 JSON 文本
 // （保留键的插入顺序），输出是参照实现序列化后的稳定结构。
 func TestFromDictMatchesPython(t *testing.T) {
 	for _, entry := range loadCorpus(t, "model.jsonl") {
@@ -44,7 +44,7 @@ func TestFromDictMatchesPython(t *testing.T) {
 
 // serializeConfig 把 RouterConfig 摊平成与语料一致的结构。
 //
-// 这是**测试契约**：字段名与嵌套形状必须与 scripts/gen_config_model_corpus.py 的
+// 这是**测试契约**：字段名与嵌套形状必须与 gen_config_model_corpus.py（已随 Python 退役移除） 的
 // serialize_config 完全对应，两边任何一处单独改动都会让对拍失败（这是刻意设计，
 // 用来防止一侧悄悄漂移）。
 func serializeConfig(cfg *RouterConfig) *canonical.Value {

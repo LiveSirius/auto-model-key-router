@@ -4,7 +4,7 @@
 // 这些函数看着简单，但都是「显示不对也没人报警」的地方，且 Python 的格式化语义
 // 相当细（截断后长度仍等于 limit、int/int 是精确有理数除法后一次舍入、
 // 百分号格式是十进制四舍六入五成双）。因此每个函数都由
-// scripts/gen_formatting_corpus.py 用 Python 参照实现生成语料，Go 侧逐条复现。
+// gen_formatting_corpus.py（已随 Python 退役移除） 用 Python 参照实现生成语料，Go 侧逐条复现。
 package formatting
 
 import (

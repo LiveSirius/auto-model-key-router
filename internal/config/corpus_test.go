@@ -34,7 +34,7 @@ func loadCorpus(t *testing.T, name string) []corpusEntry {
 	path := filepath.Join("testdata", name)
 	f, err := os.Open(path)
 	if err != nil {
-		t.Fatalf("打开语料失败（先运行 python scripts/gen_config_corpus.py）: %v", err)
+		t.Fatalf("打开语料失败（语料已冻结并随仓库提交，生成器已随 Python 退役移除）: %v", err)
 	}
 	defer f.Close()
 

@@ -17,7 +17,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
 
-// testdataDir 是差分语料目录；语料由 scripts/gen_websocket_corpus.py 驱动**真实的
+// testdataDir 是差分语料目录；语料由 gen_websocket_corpus.py（已随 Python 退役移除） 驱动**真实的
 // Python event_bus.py / app.py** 产出。期望值不是手写的：auth.jsonl 与 e2e.jsonl
 // 来自真实 EventBus 与真实 FastAPI 应用，broadcast.jsonl 是真实 broadcast 发出的
 // 字节，throttle.jsonl 来自 app.py:113-124 循环体的虚拟时钟转写。

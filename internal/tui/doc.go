@@ -89,7 +89,7 @@
 //
 // # 对拍
 //
-// scripts/gen_tui_corpus.py 用**真实 Python**（含真实 rich）产出
+// gen_tui_corpus.py（已随 Python 退役移除） 用**真实 Python**（含真实 rich）产出
 // testdata/tui_corpus.json：把 tui.console 换成固定尺寸的受控 Console，把
 // msvcrt/os.read/select/time.monotonic 换成脚本化桩，因此版式、折行、按键解析
 // 这些纯逻辑都能确定性重放（corpus_test.go）。语料用 --check 校验是否过期。

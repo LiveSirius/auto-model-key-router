@@ -4,7 +4,7 @@ package main
 //
 // 与 main.go（进程装配与监听）分开是为了让「选哪条分支、配置被改成了什么」可以脱离
 // 副作用单独断言：cmd/amkr/testdata/cli_corpus.json 由
-// scripts/gen_amkr_cli_corpus.py 驱动**真实 Python** 产出，Go 侧用 decide() 重放同一批
+// gen_amkr_cli_corpus.py（已随 Python 退役移除） 驱动**真实 Python** 产出，Go 侧用 decide() 重放同一批
 // 参数并比对分支与解析结果（见 cli_corpus_test.go）。
 //
 // # 24 个 flag 的处置

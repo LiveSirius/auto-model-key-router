@@ -16,7 +16,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/metrics"
 )
 
-// 本文件回放 scripts/gen_server_corpus.py 生成的语料。
+// 本文件回放 gen_server_corpus.py（已随 Python 退役移除） 生成的语料。
 //
 // 语料由**真实 Python FastAPI 应用**产出，断言「状态码 + 响应体字节 + content-type
 // + content-length」。与 internal/api 的语料回放同一套做法：不做任何宽容化。
@@ -39,7 +39,7 @@ import (
 //     因此回放 HEAD 用例时用「空体」与语料比较，长度仍按语料断言。
 const serverCorpusPath = "testdata/server_corpus.json"
 
-// 归一化占位符，与 scripts/gen_server_corpus.py 中的常量一一对应。
+// 归一化占位符，与 gen_server_corpus.py（已随 Python 退役移除） 中的常量一一对应。
 const (
 	corpusDirPlaceholder       = "<FIXTURE_DIR>"
 	corpusTimestampPlaceholder = "<TIMESTAMP>"
@@ -391,7 +391,7 @@ func TestServerCorpusCoversEveryRoute(t *testing.T) {
 		"GET /api/providers",
 		// 两条 WebSocket 路由（以及 /ws/events 上的普通 HTTP 请求）。它们的语料在
 		// ws_cases / ws_proxy_cases 里，但覆盖面清单是同一份——新增 WebSocket 路由时
-		// 必须同步这里与 scripts/gen_server_corpus.py 的 ROUTE_PATTERNS。
+		// 必须同步这里与 gen_server_corpus.py（已随 Python 退役移除） 的 ROUTE_PATTERNS。
 		"GET /ws/events",
 		"WS /ws/events",
 		"WS /v1/{path}",

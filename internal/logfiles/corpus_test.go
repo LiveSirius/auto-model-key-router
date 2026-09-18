@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// corpusFile 是 scripts/gen_logfiles_corpus.py 产出的对拍语料。
+// corpusFile 是 gen_logfiles_corpus.py（已随 Python 退役移除） 产出的对拍语料。
 //
 // 夹具路径与期望值全部是**相对于临时根**的 POSIX 路径：语料在 Windows 上生成、
 // 在 Linux CI 上重放，只有相对路径才与机器无关。

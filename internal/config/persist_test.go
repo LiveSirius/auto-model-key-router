@@ -13,7 +13,7 @@ import (
 // “json.dumps(data, indent=2, ensure_ascii=False) + "\n"“ 逐字节一致。
 //
 // 这是「用户直接换二进制」承诺的核心：配置文件必须能被两种实现互相读写而不产生
-// 差异。期望文本由 Python 实测得到（scripts/gen_config_model_corpus.py 同源）。
+// 差异。期望文本由 Python 实测得到（gen_config_model_corpus.py（已随 Python 退役移除） 同源）。
 func TestSaveConfigDataMatchesPythonIndent(t *testing.T) {
 	// 键序与嵌套刻意打乱，用来验证保存路径**不排序**（排序是 canonical.Dumps
 	// 的行为，落盘走的是顺序保留路径，两者不能混用）。

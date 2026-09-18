@@ -98,89 +98,10 @@ jobs:
       # 要么两侧一起漂移而「自我循环」永远为绿。
       # --check 不写盘、只逐字节比对现有语料，任一脚本非 0 即整轮红。
       # 一块语料一个独立 step，失败时一眼能看出是哪一块过期。
-      - name: 语料新鲜度（canonical）
-        run: python -X utf8 scripts/gen_canonical_corpus.py --check
-
-      - name: 语料新鲜度（config）
-        run: python -X utf8 scripts/gen_config_corpus.py --check
-
-      - name: 语料新鲜度（config model）
-        run: python -X utf8 scripts/gen_config_model_corpus.py --check
-
-      - name: 语料新鲜度（keypool）
-        run: python -X utf8 scripts/gen_keypool_corpus.py --check
-
-      - name: 语料新鲜度（configops）
-        run: python -X utf8 scripts/gen_configops_corpus.py --check
-
-      - name: 语料新鲜度（proxysupport）
-        # 这份语料钉的是 Python 的 bytes.decode("utf-8", errors="replace")：Go 标准库
-        # 没有等价物（strings.ToValidUTF8 会把连续非法字节折叠成一个 U+FFFD，而 Python
-        # 按 Unicode 最大子部分每段各给一个），故 Go 侧手写了 decodeUTF8Replacing。
-        # 它没有可推导的解析式，只能靠语料穷举——因此这份新鲜度闸门尤其重要。
-        run: python -X utf8 scripts/gen_proxysupport_corpus.py --check
-
-      - name: 语料新鲜度（formatting）
-        run: python -X utf8 scripts/gen_formatting_corpus.py --check
-
-      - name: 语料新鲜度（logfiles）
-        run: python -X utf8 scripts/gen_logfiles_corpus.py --check
-
-      - name: 语料新鲜度（clipboard）
-        run: python -X utf8 scripts/gen_clipboard_corpus.py --check
-
-      - name: 语料新鲜度（servicestatus）
-        run: python -X utf8 scripts/gen_servicestatus_corpus.py --check
-
-      - name: 语料新鲜度（updatecheck）
-        run: python -X utf8 scripts/gen_updatecheck_corpus.py --check
-
-      - name: 语料新鲜度（agent config）
-        run: python -X utf8 scripts/gen_agent_config_corpus.py --check
 
       # 以下 6 条此前**只存在于本地**：scripts/ 里有 23 个生成器，而 CI 只接了 16 个，
       # 于是这些模块的语料门禁实际上"没有牙"——本地能跑、CI 不管，漂移了也不会红。
       # 已逐条实测通过（耗时见注释），总新增约 25s。
-      - name: 语料新鲜度（metrics）
-        run: python -X utf8 scripts/gen_metrics_corpus.py --check
-
-      - name: 语料新鲜度（service）
-        run: python -X utf8 scripts/gen_service_corpus.py --check
-
-      - name: 语料新鲜度（config editor）
-        run: python -X utf8 scripts/gen_config_editor_corpus.py --check
-
-      - name: 语料新鲜度（tui）
-        run: python -X utf8 scripts/gen_tui_corpus.py --check
-
-      - name: 语料新鲜度（amkr CLI）
-        run: python -X utf8 scripts/gen_amkr_cli_corpus.py --check
-
-      - name: 语料新鲜度（websocket）
-        # 必须驱动真实 Python 模块 + 真实 in-process WS 服务器，本机实测约 18s。
-        run: python -X utf8 scripts/gen_websocket_corpus.py --check
-
-      - name: 语料新鲜度（ops API）
-        run: python -X utf8 scripts/gen_ops_api_corpus.py --check
-      - name: 语料新鲜度（management API）
-        # 与 proxy/upstream 同属"必须驱动真实 Python 应用"的一类，且是其中**最慢**的
-        # 一条：本机实测约 240s。放在 proxy 之前，超时问题可一眼归因。
-        run: python -X utf8 scripts/gen_management_api_corpus.py --check
-      - name: 语料新鲜度（proxy handler）
-        # 与 upstream 那条同属"必须驱动真实 Python 应用"的一类：它用 ASGITransport +
-        # 脚本化 MockTransport 跑真实 FastAPI 应用，本机实测约 113s。
-        run: python -X utf8 scripts/gen_proxy_handler_corpus.py --check
-      - name: 语料新鲜度（server 装配）
-        # 驱动真实 Python 应用（含 WebSocket 语料），本机实测约 119s，归入慢组。
-        # 它曾因墙钟依赖只在每天零点后一小时通过，现已钉死时钟（见 docs 的退役说明）。
-        run: python -X utf8 scripts/gen_server_corpus.py --check
-
-      - name: 语料新鲜度（upstream 交互语料）
-        # 这一条与其余几条不同：它必须**重跑 pytest**（用 AST 定位 tests/test_app.py 里
-        # 73 个内联 httpx.MockTransport 站点，再注入插件拦截真实交互），因此耗时约
-        # 2-3 分钟，而不是几百毫秒。放在最后，超时问题一眼能归因到这里。
-        # 上游交互（请求头、query、响应头）恰恰是出错不报错的地方，值得这个代价。
-        run: python -X utf8 scripts/gen_upstream_fixtures.py --check
 
   go:
     name: Go 静态检查与测试

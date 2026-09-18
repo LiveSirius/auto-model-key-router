@@ -14,7 +14,7 @@
 //   - 不接受 NaN / Infinity / -Infinity 字面量，Python 接受。
 //
 // 因此这里自带解析器与序列化器。逐字节正确性由
-// scripts/gen_canonical_corpus.py 生成、testdata/corpus.jsonl 承载的语料断言，
+// gen_canonical_corpus.py（已随 Python 退役移除） 生成、testdata/corpus.jsonl 承载的语料断言，
 // 该语料以 Python 真实实现为参照，不依赖测试时存在 Python 解释器。
 package canonical
 

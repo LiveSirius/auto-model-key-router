@@ -23,7 +23,7 @@ import (
 
 // 本文件覆盖运维面（ops_api.py 的 7 条路由）：
 //
-//  1. TestOpsAPIMatchesPython 回放 scripts/gen_ops_api_corpus.py 生成的语料，逐字节
+//  1. TestOpsAPIMatchesPython 回放 gen_ops_api_corpus.py（已随 Python 退役移除） 生成的语料，逐字节
 //     比对状态码 / content-type / content-length / 响应体 / 请求后的配置文件；
 //  2. 控制开关（OpsEnabled）与三条未接线接缝的**响亮失败**各有具名用例；
 //  3. 真实路径（internal/updatecheck）用一个假取回器端到端打通，证明接缝为 nil 时

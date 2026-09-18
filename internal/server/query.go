@@ -20,7 +20,7 @@ import (
 // 覆盖范围刻意收窄：只做三条 /metrics* 路由用到的形态（float / int / bool / str /
 // Literal，以及 gt/ge/le/min_length/max_length）。参照实现里没有别的查询参数。
 //
-// 三条容易写错的语义（都由 scripts/gen_server_corpus.py 用真实 Python 应用钉住）：
+// 三条容易写错的语义（都由 gen_server_corpus.py（已随 Python 退役移除） 用真实 Python 应用钉住）：
 //
 //  1. **重复参数取最后一个**。Starlette 的 QueryParams.__getitem__ 取列表末位
 //     （`?hours=1&hours=2` 得到 2.0），而 Go 的 url.Values.Get 取第一位——必须显式取

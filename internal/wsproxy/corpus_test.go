@@ -24,7 +24,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/proxysupport"
 )
 
-// testdataDir 是差分语料目录；proxy.jsonl 由 scripts/gen_websocket_corpus.py 驱动
+// testdataDir 是差分语料目录；proxy.jsonl 由 gen_websocket_corpus.py（已随 Python 退役移除） 驱动
 // **真实的** websocket_proxy.py 产出：synthesize 用例直接调 _websocket_http_request，
 // frames 用例跑真实最小 FastAPI 应用 + TestClient。
 const testdataDir = "testdata"

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// corpusFile 是 scripts/gen_clipboard_corpus.py 产出的对拍语料。
+// corpusFile 是 gen_clipboard_corpus.py（已随 Python 退役移除） 产出的对拍语料。
 type corpusFile struct {
 	Cases []corpusCase `json:"cases"`
 }

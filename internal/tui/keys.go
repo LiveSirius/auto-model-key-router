@@ -6,7 +6,7 @@ package tui
 // Go 侧把「原始输入」抽成两个小接口（RunReader 对应 msvcrt 的宽字符输入，
 // ByteReader 对应 POSIX 的 os.read+select），解析逻辑不变。
 // 于是 Windows 与 POSIX 两条解析分支都能用同一套脚本输入做对拍
-// （见 scripts/gen_tui_corpus.py 的 key 段与 testdata/tui_corpus.json）。
+// （见 gen_tui_corpus.py（已随 Python 退役移除） 的 key 段与 testdata/tui_corpus.json）。
 
 import (
 	"strings"

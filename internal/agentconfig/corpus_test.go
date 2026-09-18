@@ -13,7 +13,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// 本文件重放 scripts/gen_agent_config_corpus.py 生成的对拍语料。语料由**真实
+// 本文件重放 gen_agent_config_corpus.py（已随 Python 退役移除） 生成的对拍语料。语料由**真实
 // 运行** Python 侧的 auto_model_key_router/agent_config.py 得到——它是参照实现，
 // 不是手写的期望值。每条断言失败都指向一处真实的兼容性回归。
 //
@@ -144,7 +144,7 @@ func loadCorpus(t *testing.T) corpus {
 	t.Helper()
 	content, err := os.ReadFile(corpusFile)
 	if err != nil {
-		t.Fatalf("读取语料失败（先运行 python scripts/gen_agent_config_corpus.py）: %v", err)
+		t.Fatalf("读取语料失败（语料已冻结并随仓库提交，生成器已随 Python 退役移除）: %v", err)
 	}
 	var data corpus
 	if err := json.Unmarshal(content, &data); err != nil {

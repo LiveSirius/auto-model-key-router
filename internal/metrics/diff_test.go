@@ -14,7 +14,7 @@ import (
 
 // pythonLogicalDump 用 Go 侧驱动导出与语料同形的逻辑快照。
 //
-// 逐字段对齐 scripts/gen_metrics_corpus.py 的 logical_dump：语料是 Python 的
+// 逐字段对齐 gen_metrics_corpus.py（已随 Python 退役移除） 的 logical_dump：语料是 Python 的
 // 真实输出，任何字段错位都会让比对变成噪声。
 func pythonLogicalDump(t *testing.T, path string) schemaSnapshot {
 	t.Helper()
