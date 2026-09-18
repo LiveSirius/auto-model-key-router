@@ -70,7 +70,14 @@ define("location", {
   pathname: "/ui/",
   reload() { reloads += 1; },
 });
-define("window", { addEventListener() {}, isSecureContext: true, location: global.location });
+define("window", {
+  addEventListener() {},
+  isSecureContext: true,
+  location: global.location,
+  // 新建工作空间走 prompt 收名字。垫片必须给一个（默认返回 null = 取消），否则
+  // 选中「＋ 新建工作空间…」那一项会直接抛 TypeError。
+  prompt: () => null,
+});
 define("navigator", { clipboard: null });
 
 global.Node = FakeNode;
@@ -105,8 +112,15 @@ const server = {
   // 嵌入宿主时的挂载前缀；独立运行是空串。
   prefix: "",
   // 任务路由探针用的假数据与写入记录。
+  // tasks 是 tasksWorkspace 这个空间里的任务；其余空间一律为空。
   tasks: [],
+  tasksWorkspace: "default",
   writes: [],
+  // 工作空间目录（/ui/workspaces.json）。默认只有默认空间，与真实后端一致：
+  // 默认空间永远在清单里，哪怕它一个任务都没有。
+  workspaces: [{ name: "default", task_count: 0 }],
+  // 任务路由按空间过滤：记录每次请求带的空间头，好断言切换真的传到了后端。
+  taskWorkspaces: [],
   // 成本页探针用：价格目录（null = 服务端尚未就绪，应回 503）与该窗口的上游用量。
   pricing: null,
   pricingStatus: 200,
@@ -225,7 +239,15 @@ global.fetch = async (url, options = {}) => {
       ],
     });
   }
+  // 工作空间目录：挂在 WebUI 前缀下，但要鉴权（内容暴露配置结构）。
+  // 因此放在鉴权分支**之后**，与 tasks 同级。
+  if (path === "/ui/workspaces.json") {
+    return respond(200, { workspaces: server.workspaces });
+  }
   if (path.startsWith("/api/tasks")) {
+    // 任务路由是按空间过滤的：把请求头里的空间记下来，好断言切换真的传到了后端。
+    const workspace = headers["X-AMKR-Workspace"] || "default";
+    server.taskWorkspaces.push(workspace);
     if (options.method === "POST" || options.method === "PUT") {
       server.writes.push(JSON.parse(options.body));
       // 需要观察"保存进行中"的状态时，把响应挂住，由用例自己放行。
@@ -234,7 +256,9 @@ global.fetch = async (url, options = {}) => {
     }
     return respond(200, {
       config_revision: "rev-1",
-      tasks: server.tasks,
+      // 真实后端只回本空间的任务，垫片必须照做：否则「切空间后列表变了」这件事
+      // 测不出来（切换前后都拿到同一份数据，等于没验证过滤）。
+      tasks: workspace === server.tasksWorkspace ? server.tasks : [],
     });
   }
   return respond(200, {});
@@ -312,6 +336,24 @@ const setup = {
     global.location.hash = "#/tasks";
     storage.set("amkr.apiKey", "good-key");
     server.tasks = [];
+  },
+  // 任务路由页的工作空间切换：目录里的空间要画进下拉，切换要真的换掉请求头。
+  //
+  // 注意 setup 在模块 import **之后**才跑（app.js/tasks.js 的模块级 state 在那时
+  // 已经初始化），因此这里的 storage 设置影响不到首次渲染的默认空间。断言 accordingly
+  // 从「默认空间」出发，切到 teamA。
+  tasks_workspace_switch_scopes_requests: () => {
+    global.location.hash = "#/tasks";
+    storage.set("amkr.apiKey", "good-key");
+    server.workspaces = [
+      { name: "default", task_count: 2 },
+      { name: "teamA", task_count: 1 },
+    ];
+    // teamA 里有任务，默认空间是空的：这样「切换真的换了数据」才有可观测的差别。
+    server.tasksWorkspace = "teamA";
+    server.tasks = [
+      { name: "TEAM_TASK", model: "model-a", fallback_model: null, params: {} },
+    ];
   },
   // 成本页（有价格目录）：KPI、排行与逐条成本都必须画出来。
   // 目录与用量都给真实形状，这样断言的是"算出来的钱对不对"，而不是"页面没崩"。
@@ -541,7 +583,10 @@ if (scenario === "stale_key_prompts_login") {
 
   // 切首选模型不能重建表单：重建会把手填的参数一起清掉。这里先填一个只在内存里的
   // 值，再切模型，确认那个输入框还是同一个节点、值还在。
-  const selects = findAll(root, (n) => n.tagName === "select");
+  // 页面顶部的工作空间切换也是一个 <select>，必须排掉它，否则 selections[0] 会
+  // 指到空间而不是首选模型。
+  const selects = findAll(root, (n) => n.tagName === "select"
+    && !String(n.className || "").split(/\s+/).includes("workspace-select"));
   const primarySelect = selects[0];
   checks.primarySelectListsAllModels = primarySelect?.children.length === 2;
   if (primarySelect) {
@@ -612,6 +657,60 @@ if (scenario === "stale_key_prompts_login") {
   checks.writeHasModel = write?.model === "model-a";
   // 没填的参数不该被写进配置。
   checks.writeOmitsBlankParams = write !== undefined && !("temperature" in (write.params || {}));
+} else if (scenario === "tasks_workspace_switch_scopes_requests") {
+  checks.authorized = store.authorized === true;
+  checks.onTasksPage = store.page === "tasks";
+  // 目录里的两个空间都要出现在下拉里，且带上各自的任务数。
+  const workspaceSelect = findAll(root, (n) => n.tagName === "select"
+    && String(n.className || "").split(/\s+/).includes("workspace-select"))[0];
+  checks.hasWorkspaceSwitcher = Boolean(workspaceSelect);
+  // option 的 value 是**属性**（dom.js 对 value 走 el.value 赋值），因此读 .value。
+  checks.workspaceOptionsIncludeDefault = Boolean(workspaceSelect?.children.some((o) => o.value === "default"));
+  checks.workspaceOptionsIncludeTeamA = Boolean(workspaceSelect?.children.some((o) => o.value === "teamA"));
+  // 下拉里带任务数：空空间与有任务的空间长得一样会让人选错。
+  checks.workspaceOptionShowsCount = Boolean(workspaceSelect?.children
+    .some((o) => String(o.textContent).includes("2")));
+  // 首次进入不带空间头（默认空间），后端按缺省处理；该空间里没有任务。
+  checks.firstRequestUsesDefaultWorkspace = server.taskWorkspaces.at(-1) === "default";
+  checks.defaultWorkspaceIsEmpty = text().includes("尚未配置任务路由");
+
+  // 切到 teamA：后续请求必须带上新的空间头，并把选择记进 localStorage。
+  if (workspaceSelect) {
+    workspaceSelect.value = "teamA";
+    for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
+  }
+  await settle();
+  checks.switchIssuedRequest = server.taskWorkspaces.at(-1) === "teamA";
+  checks.switchRemembersChoice = storage.get("amkr.workspace") === "teamA";
+  // 切换后要重画：该空间的任务（TEAM_TASK）必须出现在页面上，而默认空间的空态文案
+  // 必须消失——否则画的是上一个空间的数据。
+  checks.switchRepaints = text().includes("TEAM_TASK");
+  checks.switchDropsPreviousWorkspace = !text().includes("尚未配置任务路由");
+  // 切空间要把编辑态清掉：编辑器里的任务属于**原来**的空间，留着再点保存会打到
+  // 新空间去（甚至因重名覆盖新空间里的同名任务）。
+  checks.switchClearsEditor = !buttons().some((node) => node.textContent.trim() === "保存任务");
+
+  // 下拉里要有「新建工作空间…」入口：新空间由「在里面建第一个任务」隐式产生，
+  // 没有这个入口就没法进入一个尚不存在的空间。
+  checks.hasNewWorkspaceOption = Boolean(workspaceSelect?.children
+    .some((o) => String(o.textContent).includes("新建工作空间")));
+
+  // 输入一个新名字：应切过去，且因为该空间还不在目录里，下拉要自己补一项，
+  // 否则显示成别的空间、与页面上的空列表对不上。
+  global.window.prompt = () => "teamB";
+  if (workspaceSelect) {
+    workspaceSelect.value = "";
+    for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
+  }
+  await settle();
+  checks.newWorkspaceRequestsIt = server.taskWorkspaces.at(-1) === "teamB";
+  checks.newWorkspaceShownInSwitcher = Boolean(findAll(root, (n) => n.tagName === "select"
+    && String(n.className || "").split(/\s+/).includes("workspace-select"))[0]?.children
+    .some((o) => o.value === "teamB"));
+  checks.newWorkspaceEmptyState = text().includes("teamB");
+  // 新空间还没有任务：这里必须说清「建了第一个任务才会写进配置」，否则用户会去
+  // 找一个并不存在的「保存空间」按钮。
+  checks.newWorkspaceExplainsPersistence = text().includes("才会写进配置");
 } else if (scenario === "cost_page_renders_with_pricing") {
   await settle();
   // 页面骨架与四张卡都在。

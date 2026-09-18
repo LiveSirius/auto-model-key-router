@@ -57,10 +57,12 @@ function apiBase() {
   return "";
 }
 
-async function request(path, { method = "GET", body, auth = true } = {}) {
+async function request(path, { method = "GET", body, auth = true, workspace } = {}) {
   const headers = {};
   if (auth) headers.Authorization = `Bearer ${getKey()}`;
   if (body !== undefined) headers["Content-Type"] = "application/json";
+  // 工作空间与代理面共用同一个头：管理面与调用方用同一个概念选空间。
+  if (workspace) headers["X-AMKR-Workspace"] = workspace;
   let response;
   try {
     response = await fetch(`${apiBase()}${path}`, {
@@ -224,17 +226,23 @@ export const api = {
   deleteUnified: (revision) =>
     request("/api/unified-model", { method: "DELETE", body: { config_revision: revision } }),
 
-  tasks: () => request("/api/tasks"),
-  createTask: (revision, payload) =>
-    request("/api/tasks", { method: "POST", body: { config_revision: revision, ...payload } }),
-  updateTask: (revision, taskName, payload) =>
+  tasks: (workspace) => request("/api/tasks", { workspace }),
+  createTask: (revision, workspace, payload) =>
+    request("/api/tasks", { method: "POST", workspace, body: { config_revision: revision, ...payload } }),
+  updateTask: (revision, workspace, taskName, payload) =>
     request(`/api/tasks/${encodeURIComponent(taskName)}`, {
       method: "PUT",
+      workspace,
       body: { config_revision: revision, ...payload },
     }),
-  deleteTask: (revision, taskName) =>
+  deleteTask: (revision, workspace, taskName) =>
     request(`/api/tasks/${encodeURIComponent(taskName)}`, {
       method: "DELETE",
+      workspace,
       body: { config_revision: revision },
     }),
+
+  // 工作空间目录：列出有任务的工作空间及各自任务数，供任务页填充切换下拉。
+  // GET /api/tasks 是按空间过滤的，因此从任务列表推不出「还有哪些空间」。
+  workspaces: () => request("/ui/workspaces.json"),
 };

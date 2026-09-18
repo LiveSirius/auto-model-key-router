@@ -2,6 +2,9 @@
 //
 // 调用方传 model: "TASK_XXXXXX" 即可命中；因为参数由任务固定，调用方再传
 // temperature 这类采样参数会被服务端拒绝（reasoning_effort 例外，见后端说明）。
+//
+// 任务名只在**工作空间**内唯一：不同空间可以各有一个同名任务。界面因此始终工作在
+// 一个具体空间里（默认空间即「不带 X-AMKR-Workspace 头」的那个），顶部下拉切换。
 
 import { h, mount, errorText } from "../dom.js";
 import { api } from "../api.js";
@@ -34,19 +37,95 @@ const PARAM_LABELS = Object.fromEntries([
   ["reasoning_effort", "reasoning_effort"],
 ]);
 
-const state = { tasks: [], models: [], revision: null, loading: true, error: null, editing: null, saving: false };
+// DEFAULT_WORKSPACE 与 config.DefaultWorkspace 一致：调用方不带 X-AMKR-Workspace
+// 头时命中的那个空间。界面上必须能选到它，哪怕它当前一个任务都没有。
+const DEFAULT_WORKSPACE = "default";
+
+// 记住用户选的空间：刷新或切页回来时不必重新选。任务路由是团队各自维护的，
+// 每次回到页面都被重置成默认空间会很烦人。
+const WORKSPACE_STORAGE = "amkr.workspace";
+
+function storedWorkspace() {
+  try {
+    return localStorage.getItem(WORKSPACE_STORAGE) || DEFAULT_WORKSPACE;
+  } catch {
+    // 隐私模式下 localStorage 可能直接抛异常；退回默认空间即可，不影响功能。
+    return DEFAULT_WORKSPACE;
+  }
+}
+
+function rememberWorkspace(workspace) {
+  try {
+    localStorage.setItem(WORKSPACE_STORAGE, workspace);
+  } catch {
+    // 存不下就算了：只影响下次进页面时的默认选中项。
+  }
+}
+
+const state = {
+  tasks: [],
+  models: [],
+  // workspaces 是 {name, task_count} 的列表，来自 /ui/workspaces.json。
+  workspaces: [],
+  workspace: storedWorkspace(),
+  revision: null,
+  loading: true,
+  error: null,
+  editing: null,
+  saving: false,
+};
 
 let host = null;
 // 首屏会被连续渲染两次（挂载 + 首次指标刷新），于是有两个 load 在途。没有这个
 // 令牌的话，先发的请求晚回来时会重绘整个页面：用户此时若已经点开编辑器，正在
 // 手填的参数就被悄悄冲掉了。
 let paintToken = 0;
+// workspacePinned 表示当前空间是用户**自己选的**（或刚输入的新名字），不是从
+// localStorage 恢复的。只有恢复来的名字才需要「它还在不在」的校验：用户输入的新
+// 空间名天然不在目录里（空空间不进目录），拿目录去纠正它会把刚输入的名字吃掉。
+let workspacePinned = false;
 
 async function load() {
-  const [tasks, models] = await Promise.all([api.tasks(), api.models()]);
+  // 目录要先于任务取：任务列表是**按空间过滤**的，若恢复出来的空间已经被删空，
+  // 列表会是空的，得先把选择纠正回一个真实存在的空间。
+  const workspaces = await api.workspaces();
+  state.workspaces = workspaces.workspaces || [];
+  if (!workspacePinned) {
+    const names = state.workspaces.map((item) => item.name);
+    // 默认空间永远在清单里，因此这里一定落到一个真实存在的空间上。
+    if (!names.includes(state.workspace)) {
+      state.workspace = names.includes(DEFAULT_WORKSPACE) ? DEFAULT_WORKSPACE : (names[0] || DEFAULT_WORKSPACE);
+      rememberWorkspace(state.workspace);
+    }
+  }
+
+  const [tasks, models] = await Promise.all([api.tasks(state.workspace), api.models()]);
   state.tasks = tasks.tasks || [];
   state.revision = tasks.config_revision ?? models.config_revision;
   state.models = models.models || [];
+}
+
+// switchWorkspace 换到另一个空间：清掉编辑态，重新读该空间的任务。
+//
+// editing 必须清掉：编辑器里那个任务属于**原来**的空间，留着它再点保存会打到
+// 新空间去（甚至因为重名而覆盖新空间里的同名任务）。
+async function switchWorkspace(workspace) {
+  if (workspace === state.workspace) return;
+  state.workspace = workspace;
+  workspacePinned = true;
+  rememberWorkspace(workspace);
+  state.editing = null;
+  // 先把旧任务清空再重绘：否则在新空间的名字底下会短暂列着上一个空间的任务，
+  // 而每张卡片都带「删除」——看错空间按下去删的就是另一个空间的任务。
+  state.tasks = [];
+  state.error = null;
+  draw();
+  try {
+    await load();
+  } catch (error) {
+    state.error = errorText(error);
+  }
+  draw();
 }
 
 function summary(task) {
@@ -160,9 +239,9 @@ function taskEditor(task) {
       mount(saveButton, "保存中…");
       try {
         if (isNew) {
-          await api.createTask(state.revision, { name, model, fallback_model: fallback || null, params });
+          await api.createTask(state.revision, state.workspace, { name, model, fallback_model: fallback || null, params });
         } else {
-          await api.updateTask(state.revision, name, { model, fallback_model: fallback || null, params });
+          await api.updateTask(state.revision, state.workspace, name, { model, fallback_model: fallback || null, params });
         }
         await load();
         state.editing = null;
@@ -221,6 +300,70 @@ export function renderTasks(context) {
   return host;
 }
 
+// workspaceSwitcher 是页面顶部的空间切换下拉 + 「新建空间」入口。
+//
+// 空间由「在它里面建任务」隐式产生（没有独立的创建接口），因此这里不能只给一个
+// 下拉：新空间必须先被人**选中**，再在里面建第一个任务才会真正存在。做法是让下拉
+// 带一个「+ 新建工作空间…」项，选中时弹一个名字输入框，把 state.workspace 换成它
+// （此时它还不是配置里的分组，任务列表为空），用户接着点「新建任务」即可落地。
+function workspaceSwitcher() {
+  const options = state.workspaces.map((item) => ({
+    value: item.name,
+    // 带上任务数：空空间与有任务的空间在下拉里长得一样会让人选错。
+    label: item.name === DEFAULT_WORKSPACE
+      ? `${item.name}（默认 · ${item.task_count}）`
+      : `${item.name}（${item.task_count}）`,
+  }));
+  const current = state.workspace;
+  // 当前空间不在目录里，说明它还没写进配置（刚输入的名字，或最后一个任务被别人的
+  // 会话删空了）。补一项进去，否则下拉会显示成默认空间、与页面上的空列表对不上。
+  if (!options.some((option) => option.value === current)) {
+    options.push({ value: current, label: `${current}（未写入配置）` });
+  }
+  // 新空间必须先被「选中」再在里面建任务才会存在（没有独立的创建接口），因此入口
+  // 就挂在下拉里：选中它即弹名字输入框。
+  options.push({ value: NEW_WORKSPACE, label: "＋ 新建工作空间…" });
+
+  return select(options, {
+    value: current,
+    disabled: state.saving,
+    // 带一个可识别的类名：编辑器里还有首选/备选/推理强度三个下拉，探针需要一条
+    // 可靠的方式区分「页面级的工作空间切换」与「编辑器里的字段」。
+    class: "workspace-select",
+    onChange: (event) => {
+      if (event.target.value === NEW_WORKSPACE) {
+        promptNewWorkspace();
+        return;
+      }
+      switchWorkspace(event.target.value);
+    },
+  });
+}
+
+// NEW_WORKSPACE 是下拉里「新建工作空间…」那一项的哨兵值。
+//
+// 不可能与真实空间名冲突：空间名来自配置的 workspaces 键，而它不可能为空串——
+// config 层对空名直接报「工作空间名不能为空」。
+const NEW_WORKSPACE = "";
+
+// promptNewWorkspace 询问一个新空间名并切过去。
+function promptNewWorkspace() {
+  const name = window.prompt("新建工作空间：输入一个名字。任务名只在工作空间内唯一，不同空间可以有同名任务。");
+  if (name === null) { draw(); return; }
+  const trimmed = name.trim();
+  if (!trimmed) {
+    toast("工作空间名不能为空。", "error");
+    draw();
+    return;
+  }
+  if (trimmed === DEFAULT_WORKSPACE) {
+    toast(`「${DEFAULT_WORKSPACE}」是默认工作空间，不能重名。`, "error");
+    draw();
+    return;
+  }
+  switchWorkspace(trimmed);
+}
+
 function draw() {
   if (!host) return;
   const children = [
@@ -228,6 +371,7 @@ function draw() {
       h("div", {}, h("h1", "任务路由"),
         h("p.sub", "把任务名当作模型名调用，自动使用该任务固定的模型与采样参数。")),
       h("div.spacer"),
+      state.workspaces.length ? workspaceSwitcher() : null,
       state.revision ? badge(`版本 ${String(state.revision).slice(0, 12)}`, "muted") : null,
       buttonNode("新建任务", {
         small: true,
@@ -249,10 +393,21 @@ function draw() {
   }
 
   if (!state.tasks.length && state.editing !== "__new__") {
-    children.push(empty("尚未配置任务路由。", {
-      hint: "新建一个任务后，调用方传 model: \"TASK_XXXXXX\" 即可命中。",
-      action: buttonNode("新建任务", { variant: "secondary", onClick: () => { state.editing = "__new__"; draw(); } }),
-    }));
+    // 空空间的提示要区分「默认空间本来就没有任务」与「这是一个还没落地的空间」：
+    // 后者是用户刚输入的名字，得让他知道下一步该做什么。
+    const isDefault = state.workspace === DEFAULT_WORKSPACE;
+    children.push(empty(
+      isDefault ? "尚未配置任务路由。" : `工作空间 ${state.workspace} 还没有任务。`,
+      {
+        // 命名空间由「在它里面建任务」隐式产生：没有任务时就还不存在于配置里，
+        // 这一点必须说清楚，否则用户会去找一个并不存在的「保存空间」按钮。
+        hint: isDefault
+          ? "新建一个任务后，调用方传 model: \"TASK_XXXXXX\" 即可命中。"
+          : "在这个空间里新建第一个任务后，它才会写进配置。调用方带 X-AMKR-Workspace: " +
+            state.workspace + " 即可命中其中的任务。",
+        action: buttonNode("新建任务", { variant: "secondary", onClick: () => { state.editing = "__new__"; draw(); } }),
+      },
+    ));
     render(host, children);
     return;
   }
@@ -277,7 +432,7 @@ function draw() {
             danger: true,
             onConfirm: async () => {
               try {
-                await api.deleteTask(state.revision, task.name);
+                await api.deleteTask(state.revision, state.workspace, task.name);
                 await load();
                 state.editing = null;
                 toast("任务路由已删除。");
