@@ -1,0 +1,3384 @@
+{
+  "corpus_version": 1,
+  "placeholders": {
+    "$HOME": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\home",
+    "$CWD": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\cwd",
+    "$CONFIG": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+    "$EXE": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+    "$LOG": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\logs\\server.log",
+    "$BIN": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\amkr",
+    "$ARCHIVE": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\logs\\server.20260102-030405.log"
+  },
+  "pid_file_path": [
+    {
+      "log_file_path": "C:/data/logs/server.log",
+      "expected": "C:\\data\\logs\\server.pid"
+    },
+    {
+      "log_file_path": "logs/server.log",
+      "expected": "logs\\server.pid"
+    },
+    {
+      "log_file_path": "server.log",
+      "expected": "server.pid"
+    },
+    {
+      "log_file_path": "/var/log/amkr/router.log",
+      "expected": "\\var\\log\\amkr\\server.pid"
+    }
+  ],
+  "read_pid": [
+    {
+      "content": "4242",
+      "expected": 4242
+    },
+    {
+      "content": "  4242\n",
+      "expected": 4242
+    },
+    {
+      "content": "+7",
+      "expected": 7
+    },
+    {
+      "content": "-7",
+      "expected": -7
+    },
+    {
+      "content": "",
+      "expected": null
+    },
+    {
+      "content": "abc",
+      "expected": null
+    },
+    {
+      "content": "42 43",
+      "expected": null
+    },
+    {
+      "content": "0",
+      "expected": 0
+    },
+    {
+      "content": null,
+      "expected": null
+    }
+  ],
+  "process_running_windows": [
+    {
+      "pid": 4242,
+      "tasklist_stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n",
+      "expected": true,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 4242",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 4242,
+      "tasklist_stdout": "\"python.exe\",\"993\",\"Console\",\"1\",\"10 K\"\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 4242",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 4242,
+      "tasklist_stdout": "INFO: No tasks are running which match the specified criteria.\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 4242",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 4242,
+      "tasklist_stdout": "",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 4242",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 4242,
+      "tasklist_stdout": "\"python.exe\",\"42420\",\"Console\",\"1\",\"1 K\"\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 4242",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 42420,
+      "tasklist_stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 42420",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 42420,
+      "tasklist_stdout": "\"python.exe\",\"993\",\"Console\",\"1\",\"10 K\"\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 42420",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 42420,
+      "tasklist_stdout": "INFO: No tasks are running which match the specified criteria.\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 42420",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 42420,
+      "tasklist_stdout": "",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 42420",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 42420,
+      "tasklist_stdout": "\"python.exe\",\"42420\",\"Console\",\"1\",\"1 K\"\n",
+      "expected": true,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 42420",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 1,
+      "tasklist_stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n",
+      "expected": true,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 1",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 1,
+      "tasklist_stdout": "\"python.exe\",\"993\",\"Console\",\"1\",\"10 K\"\n",
+      "expected": true,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 1",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 1,
+      "tasklist_stdout": "INFO: No tasks are running which match the specified criteria.\n",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 1",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 1,
+      "tasklist_stdout": "",
+      "expected": false,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 1",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    },
+    {
+      "pid": 1,
+      "tasklist_stdout": "\"python.exe\",\"42420\",\"Console\",\"1\",\"1 K\"\n",
+      "expected": true,
+      "command": [
+        "tasklist",
+        "/FI",
+        "PID eq 1",
+        "/FO",
+        "CSV",
+        "/NH"
+      ]
+    }
+  ],
+  "powershell_quote": [
+    {
+      "value": "C:/Program Files/amkr/amkr.exe",
+      "expected": "'C:/Program Files/amkr/amkr.exe'"
+    },
+    {
+      "value": "it's",
+      "expected": "'it''s'"
+    },
+    {
+      "value": "",
+      "expected": "''"
+    },
+    {
+      "value": "a'b'c",
+      "expected": "'a''b''c'"
+    },
+    {
+      "value": "中文 路径",
+      "expected": "'中文 路径'"
+    },
+    {
+      "value": "$env:PATH",
+      "expected": "'$env:PATH'"
+    }
+  ],
+  "shlex_join": [
+    {
+      "args": [
+        "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\amkr",
+        "--config",
+        "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+        "--serve-foreground"
+      ],
+      "expected": "'$BIN' --config '$CONFIG' --serve-foreground"
+    },
+    {
+      "args": [
+        "/opt/My App/bin/amkr",
+        "--config",
+        "/tmp/a b/c.json"
+      ],
+      "expected": "'/opt/My App/bin/amkr' --config '/tmp/a b/c.json'"
+    },
+    {
+      "args": [
+        "/opt/it's/amkr",
+        "--config",
+        "/tmp/'x'.json"
+      ],
+      "expected": "'/opt/it'\"'\"'s/amkr' --config '/tmp/'\"'\"'x'\"'\"'.json'"
+    },
+    {
+      "args": [
+        "/usr/bin/amkr",
+        "--config",
+        "中文目录/配置.json"
+      ],
+      "expected": "/usr/bin/amkr --config '中文目录/配置.json'"
+    },
+    {
+      "args": [],
+      "expected": ""
+    },
+    {
+      "args": [
+        ""
+      ],
+      "expected": "''"
+    },
+    {
+      "args": [
+        "--flag=value",
+        "a:b,c.d/e-f_g@h%i+j",
+        "~tilde"
+      ],
+      "expected": "--flag=value a:b,c.d/e-f_g@h%i+j '~tilde'"
+    }
+  ],
+  "windows_task_registered": [
+    {
+      "list_code": 0,
+      "xml_code": 0,
+      "expected": true,
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ],
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/XML"
+        ]
+      ]
+    },
+    {
+      "list_code": 0,
+      "xml_code": 1,
+      "expected": true,
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ],
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/XML"
+        ]
+      ]
+    },
+    {
+      "list_code": 1,
+      "xml_code": 0,
+      "expected": true,
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ],
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/XML"
+        ]
+      ]
+    },
+    {
+      "list_code": 1,
+      "xml_code": 1,
+      "expected": false,
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ],
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/XML"
+        ]
+      ]
+    }
+  ],
+  "windows_manage": [
+    {
+      "action": "install-user",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Create",
+          "/F",
+          "/SC",
+          "ONLOGON",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/RL",
+          "LIMITED",
+          "/IT",
+          "/TR",
+          "\"$EXE\" -m auto_model_key_router.main --config \"$CONFIG\" --serve-foreground"
+        ],
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0); Set-ScheduledTask -TaskName 'AutoModelKeyRouter' -Settings $settings | Out-Null"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭──────────────────────────────────────── Windows 登录自启 ────────────────────────────────────────╮\n│ OK install-user                                                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────── Windows 自启设置 ────────────────────────────────────────╮\n│ OK install-user                                                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK install-user                                                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 当前用户计划任务注册，权限级别为 LIMITED；任务会在该用户登录时启动。            │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install-user",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install-user"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Create",
+          "/F",
+          "/SC",
+          "ONLOGON",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/RL",
+          "LIMITED",
+          "/IT",
+          "/TR",
+          "\"$EXE\" -m auto_model_key_router.main --config \"$CONFIG\" --serve-foreground"
+        ],
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0); Set-ScheduledTask -TaskName 'AutoModelKeyRouter' -Settings $settings | Out-Null"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭──────────────────────────────────────── Windows 登录自启 ────────────────────────────────────────╮\n│ OK install-user                                                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────── Windows 自启设置 ────────────────────────────────────────╮\n│ OK install-user                                                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK install-user                                                                                  │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 当前用户计划任务注册，权限级别为 LIMITED；任务会在该用户登录时启动。            │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Create",
+          "/F",
+          "/SC",
+          "ONSTART",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/RU",
+          "SYSTEM",
+          "/RL",
+          "HIGHEST",
+          "/TR",
+          "\"$EXE\" -m auto_model_key_router.main --config \"$CONFIG\" --serve-foreground"
+        ],
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0); Set-ScheduledTask -TaskName 'AutoModelKeyRouter' -Settings $settings | Out-Null"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭──────────────────────────────────────── Windows 开机自启 ────────────────────────────────────────╮\n│ OK install                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────── Windows 自启设置 ────────────────────────────────────────╮\n│ OK install                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK install                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 开机启动计划任务注册，权限级别为 SYSTEM/HIGHEST；非管理员运行时会自动弹出 UAC   │\n│ 授权窗口。                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install"
+        }
+      ],
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','install-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "uninstall",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/End",
+          "/TN",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "schtasks",
+          "/Delete",
+          "/F",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 停止 ──────────────────────────────────────────╮\n│ OK uninstall                                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 没有找到后台服务 PID 文件。                                                                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK uninstall                                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "uninstall",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        }
+      ],
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','uninstall-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "start",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK start                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "start",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK start"
+        }
+      ],
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','start-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "stop",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/End",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK stop                                                                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "stop",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        }
+      ],
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','stop-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "restart",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/End",
+          "/TN",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 停止 ──────────────────────────────────────────╮\n│ OK restart                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK restart                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "restart",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        }
+      ],
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','restart-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "status",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK status                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "status",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK status                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install-elevated",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install-elevated"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Create",
+          "/F",
+          "/SC",
+          "ONSTART",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/RU",
+          "SYSTEM",
+          "/RL",
+          "HIGHEST",
+          "/TR",
+          "\"$EXE\" -m auto_model_key_router.main --config \"$CONFIG\" --serve-foreground"
+        ],
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0); Set-ScheduledTask -TaskName 'AutoModelKeyRouter' -Settings $settings | Out-Null"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭──────────────────────────────────────── Windows 开机自启 ────────────────────────────────────────╮\n│ OK install-elevated                                                                              │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────── Windows 自启设置 ────────────────────────────────────────╮\n│ OK install-elevated                                                                              │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK install-elevated                                                                              │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 开机启动计划任务注册，权限级别为 SYSTEM/HIGHEST；非管理员运行时会自动弹出 UAC   │\n│ 授权窗口。                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install-elevated",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install-elevated"
+        }
+      ],
+      "commands": [],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 未获得管理员权限，无法注册或管理开机启动任务。                                                   │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "start-elevated",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK start-elevated"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK start-elevated                                                                                │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "start-elevated",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK start-elevated"
+        }
+      ],
+      "commands": [],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 未获得管理员权限，无法注册或管理开机启动任务。                                                   │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "status-elevated",
+      "is_admin": true,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK status-elevated"
+        }
+      ],
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK status-elevated                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "status-elevated",
+      "is_admin": false,
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK status-elevated"
+        }
+      ],
+      "commands": [],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 未获得管理员权限，无法注册或管理开机启动任务。                                                   │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "bogus",
+      "is_admin": true,
+      "commands": [],
+      "panel": null,
+      "error": "KeyError"
+    }
+  ],
+  "elevation": [
+    {
+      "action": "install",
+      "result_code": 0,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','install-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "install",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "用户取消",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','install-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 用户取消                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "install",
+      "result_code": 1,
+      "result_stdout": "fallback",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','install-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ fallback                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "install",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','install-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 管理员授权被取消或执行失败。                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "uninstall",
+      "result_code": 0,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','uninstall-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "uninstall",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "用户取消",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','uninstall-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 用户取消                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "uninstall",
+      "result_code": 1,
+      "result_stdout": "fallback",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','uninstall-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ fallback                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "uninstall",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','uninstall-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 管理员授权被取消或执行失败。                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "start",
+      "result_code": 0,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','start-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "start",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "用户取消",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','start-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 用户取消                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "start",
+      "result_code": 1,
+      "result_stdout": "fallback",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','start-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ fallback                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "start",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','start-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 管理员授权被取消或执行失败。                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "stop",
+      "result_code": 0,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','stop-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "stop",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "用户取消",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','stop-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 用户取消                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "stop",
+      "result_code": 1,
+      "result_stdout": "fallback",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','stop-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ fallback                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "stop",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','stop-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 管理员授权被取消或执行失败。                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "restart",
+      "result_code": 0,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','restart-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 已通过 UAC 管理员权限完成 Windows 开机自启任务管理。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "restart",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "用户取消",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','restart-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 用户取消                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "restart",
+      "result_code": 1,
+      "result_stdout": "fallback",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','restart-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ fallback                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "action": "restart",
+      "result_code": 1,
+      "result_stdout": "",
+      "result_stderr": "",
+      "commands": [
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$process = Start-Process -FilePath '$EXE' -ArgumentList @('-m','auto_model_key_router.main','--config','$CONFIG','--service','restart-elevated') -Verb RunAs -Wait -PassThru; exit $process.ExitCode"
+        ]
+      ],
+      "panel": "╭────────────────────────────────────────── Windows UAC ───────────────────────────────────────────╮\n│ 管理员授权被取消或执行失败。                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    }
+  ],
+  "console_script": [
+    {
+      "argv0": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr",
+      "which": {},
+      "expected": null
+    },
+    {
+      "argv0": "amkr",
+      "which": {
+        "amkr": "$BIN"
+      },
+      "expected": "$BIN"
+    },
+    {
+      "argv0": "main.py",
+      "which": {
+        "amkr": "$BIN"
+      },
+      "expected": "$BIN"
+    },
+    {
+      "argv0": "main.py",
+      "which": {
+        "auto-model-key-router": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr"
+      },
+      "expected": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr"
+    },
+    {
+      "argv0": "main.py",
+      "which": {},
+      "expected": null
+    },
+    {
+      "argv0": "auto-model-key-router",
+      "which": {},
+      "expected": null
+    }
+  ],
+  "systemd_service_command": [
+    {
+      "console_script": null,
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "expected": [
+        "$EXE",
+        "-m",
+        "auto_model_key_router.main",
+        "--config",
+        "$CONFIG",
+        "--serve-foreground"
+      ]
+    },
+    {
+      "console_script": "$BIN",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "expected": [
+        "$BIN",
+        "--config",
+        "$CONFIG",
+        "--serve-foreground"
+      ]
+    }
+  ],
+  "systemd_registered": [
+    {
+      "file_exists": false,
+      "show_stdout": "LoadState=loaded\n",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "LoadState=loaded\n"
+        }
+      ],
+      "expected": true,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": false,
+      "show_stdout": "LoadState=not-found\n",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "LoadState=not-found\n"
+        }
+      ],
+      "expected": false,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": false,
+      "show_stdout": "LoadState=\n",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "LoadState=\n"
+        }
+      ],
+      "expected": false,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": false,
+      "show_stdout": "",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": ""
+        }
+      ],
+      "expected": false,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": true,
+      "show_stdout": "LoadState=loaded\n",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "LoadState=loaded\n"
+        }
+      ],
+      "expected": true,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": true,
+      "show_stdout": "LoadState=not-found\n",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "LoadState=not-found\n"
+        }
+      ],
+      "expected": true,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": true,
+      "show_stdout": "LoadState=\n",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "LoadState=\n"
+        }
+      ],
+      "expected": true,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    },
+    {
+      "file_exists": true,
+      "show_stdout": "",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": ""
+        }
+      ],
+      "expected": true,
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "show",
+          "auto-model-key-router.service",
+          "--property=LoadState",
+          "--no-pager"
+        ]
+      ]
+    }
+  ],
+  "systemd_manage": [
+    {
+      "action": "install",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        },
+        {
+          "code": 0,
+          "stdout": "OK install"
+        }
+      ],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "daemon-reload"
+        ],
+        [
+          "systemctl",
+          "--user",
+          "enable",
+          "--now",
+          "auto-model-key-router.service"
+        ],
+        [
+          "loginctl",
+          "enable-linger",
+          "amkr-user"
+        ]
+      ],
+      "unit_text": "[Unit]\nDescription=Auto Model Key Router\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nWorkingDirectory=$CWD\nExecStart='$EXE' -m auto_model_key_router.main --config '$CONFIG' --serve-foreground\nRestart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
+      "panel": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK install                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK install                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭───────────────────────────────────────── systemd linger ─────────────────────────────────────────╮\n│ OK install                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 系统服务 ────────────────────────────────────────────╮\n│ systemd 用户服务文件已写入:                                                                      │\n│ $HOME\\.config\\systemd\\user\\auto-model-key-r │\n│ outer.service                                                                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 systemd user service 注册，通常不需要 sudo；loginctl enable-linger                      │\n│ 可能需要管理员授权，失败时服务仍可在用户登录后自启。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "uninstall",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        },
+        {
+          "code": 0,
+          "stdout": "OK uninstall"
+        }
+      ],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "disable",
+          "--now",
+          "auto-model-key-router.service"
+        ],
+        [
+          "systemctl",
+          "--user",
+          "daemon-reload"
+        ]
+      ],
+      "unit_text": null,
+      "panel": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK uninstall                                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 没有找到后台服务 PID 文件。                                                                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK uninstall                                                                                     │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "start",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        },
+        {
+          "code": 0,
+          "stdout": "OK start"
+        }
+      ],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "start",
+          "auto-model-key-router.service"
+        ]
+      ],
+      "unit_text": null,
+      "panel": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK start                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "stop",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        },
+        {
+          "code": 0,
+          "stdout": "OK stop"
+        }
+      ],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "stop",
+          "auto-model-key-router.service"
+        ]
+      ],
+      "unit_text": null,
+      "panel": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK stop                                                                                          │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "restart",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        },
+        {
+          "code": 0,
+          "stdout": "OK restart"
+        }
+      ],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "restart",
+          "auto-model-key-router.service"
+        ]
+      ],
+      "unit_text": null,
+      "panel": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK restart                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "status",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        },
+        {
+          "code": 0,
+          "stdout": "OK status"
+        }
+      ],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "status",
+          "auto-model-key-router.service",
+          "--no-pager"
+        ]
+      ],
+      "unit_text": null,
+      "panel": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK status                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "console_script": "$BIN",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "unit_text": "[Unit]\nDescription=Auto Model Key Router\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nWorkingDirectory=$CWD\nExecStart='$BIN' --config '$CONFIG' --serve-foreground\nRestart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "daemon-reload"
+        ],
+        [
+          "systemctl",
+          "--user",
+          "enable",
+          "--now",
+          "auto-model-key-router.service"
+        ],
+        [
+          "loginctl",
+          "enable-linger",
+          "amkr-user"
+        ]
+      ],
+      "panel": null,
+      "error": null
+    },
+    {
+      "action": "install",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "console_script": "$CWD\\My App\\bin\\amkr",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "unit_text": "[Unit]\nDescription=Auto Model Key Router\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nWorkingDirectory=$CWD\nExecStart='$CWD\\My App\\bin\\amkr' --config '$CONFIG' --serve-foreground\nRestart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "daemon-reload"
+        ],
+        [
+          "systemctl",
+          "--user",
+          "enable",
+          "--now",
+          "auto-model-key-router.service"
+        ],
+        [
+          "loginctl",
+          "enable-linger",
+          "amkr-user"
+        ]
+      ],
+      "panel": null,
+      "error": null
+    },
+    {
+      "action": "install",
+      "executable": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
+      "config_path": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
+      "console_script": "$CWD\\it's\\amkr",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "unit_text": "[Unit]\nDescription=Auto Model Key Router\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nWorkingDirectory=$CWD\nExecStart='$CWD\\it'\"'\"'s\\amkr' --config '$CONFIG' --serve-foreground\nRestart=always\nRestartSec=3\n\n[Install]\nWantedBy=default.target\n",
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "daemon-reload"
+        ],
+        [
+          "systemctl",
+          "--user",
+          "enable",
+          "--now",
+          "auto-model-key-router.service"
+        ],
+        [
+          "loginctl",
+          "enable-linger",
+          "amkr-user"
+        ]
+      ],
+      "panel": null,
+      "error": null
+    }
+  ],
+  "background_start": [
+    {
+      "healthy": true,
+      "existing_pid": null,
+      "archive_result": null,
+      "run_script": [],
+      "responses": [
+        {
+          "status": 200,
+          "body": "{\"status\":\"ok\"}"
+        }
+      ],
+      "commands": [],
+      "url_calls": [
+        "http://127.0.0.1:8123/health"
+      ],
+      "spawn": [],
+      "archive_calls": [],
+      "pid_file": null,
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已在运行。                                                                               │\n│ 地址: http://127.0.0.1:8123                                                                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "healthy": false,
+      "existing_pid": null,
+      "archive_result": null,
+      "run_script": [],
+      "responses": [
+        {
+          "error": "oserror"
+        }
+      ],
+      "commands": [],
+      "url_calls": [
+        "http://127.0.0.1:8123/health"
+      ],
+      "spawn": [
+        {
+          "command": [
+            "$EXE",
+            "-m",
+            "auto_model_key_router.main",
+            "--config",
+            "$CONFIG",
+            "--serve-foreground"
+          ],
+          "cwd": "$CWD",
+          "has_stdout": true,
+          "has_stderr": true,
+          "has_stdin": true,
+          "start_new_session": false,
+          "creationflags": 134218248,
+          "close_fds": false,
+          "log_archived_env": "1"
+        }
+      ],
+      "archive_calls": [
+        "$LOG"
+      ],
+      "pid_file": "4242",
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已启动。                                                                                 │\n│ PID: 4242                                                                                        │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 日志: $LOG                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "healthy": false,
+      "existing_pid": 777,
+      "archive_result": "$ARCHIVE",
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "\"python.exe\",\"777\",\"Console\",\"1\",\"10,000 K\"\n"
+        }
+      ],
+      "responses": [
+        {
+          "error": "oserror"
+        }
+      ],
+      "commands": [
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 777",
+          "/FO",
+          "CSV",
+          "/NH"
+        ]
+      ],
+      "url_calls": [
+        "http://127.0.0.1:8123/health"
+      ],
+      "spawn": [
+        {
+          "command": [
+            "$EXE",
+            "-m",
+            "auto_model_key_router.main",
+            "--config",
+            "$CONFIG",
+            "--serve-foreground"
+          ],
+          "cwd": "$CWD",
+          "has_stdout": true,
+          "has_stderr": true,
+          "has_stdin": true,
+          "start_new_session": false,
+          "creationflags": 134218248,
+          "close_fds": false,
+          "log_archived_env": "1"
+        }
+      ],
+      "archive_calls": [
+        "$LOG"
+      ],
+      "pid_file": "4242",
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已启动。                                                                                 │\n│ PID: 4242                                                                                        │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 日志: $LOG                      │\n│ 旧日志已归档:                                                                                    │\n│ $ARCHIVE            │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    }
+  ],
+  "background_stop": [
+    {
+      "pid_file": null,
+      "checks": [],
+      "run_script": [],
+      "commands": [],
+      "sleeps": [],
+      "pid_file_exists": false,
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 没有找到后台服务 PID 文件。                                                                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "pid_file": 4242,
+      "checks": [
+        false
+      ],
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": ""
+        }
+      ],
+      "commands": [
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ]
+      ],
+      "sleeps": [],
+      "pid_file_exists": false,
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ PID 4242 已不存在，已清理 PID 文件。                                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "pid_file": 4242,
+      "checks": [
+        true,
+        false
+      ],
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n"
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        }
+      ],
+      "commands": [
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "taskkill",
+          "/PID",
+          "4242",
+          "/T",
+          "/F"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ]
+      ],
+      "sleeps": [],
+      "pid_file_exists": false,
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已停止。                                                                                 │\n│ PID: 4242                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "pid_file": 4242,
+      "checks": [
+        true,
+        true
+      ],
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n"
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        },
+        {
+          "code": 0,
+          "stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n"
+        }
+      ],
+      "commands": [
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "taskkill",
+          "/PID",
+          "4242",
+          "/T",
+          "/F"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ]
+      ],
+      "sleeps": [
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1,
+        0.1
+      ],
+      "pid_file_exists": true,
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 已发送停止信号，进程退出中。                                                                     │\n│ PID: 4242                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    }
+  ],
+  "health": [
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "{\"config_path\":\"C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json\",\"local_api_key_fingerprint\":\"abcd1234\"}"
+        }
+      ],
+      "healthy": true,
+      "service_health": true,
+      "config_path": "",
+      "fingerprint": "",
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.5
+        }
+      ]
+    },
+    {
+      "host": "0.0.0.0",
+      "port": 8123,
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "{\"status\":\"ok\"}"
+        }
+      ],
+      "healthy": true,
+      "service_health": true,
+      "config_path": "",
+      "fingerprint": "",
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.5
+        }
+      ]
+    },
+    {
+      "host": "::",
+      "port": 9999,
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "not json"
+        }
+      ],
+      "healthy": true,
+      "service_health": true,
+      "config_path": "",
+      "fingerprint": "",
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:9999/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:9999/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:9999/health",
+          "timeout": 0.5
+        }
+      ]
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "responses": [
+        {
+          "status": 500,
+          "body": "boom"
+        }
+      ],
+      "healthy": false,
+      "service_health": false,
+      "config_path": null,
+      "fingerprint": null,
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        }
+      ]
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "responses": [
+        {
+          "error": "oserror"
+        }
+      ],
+      "healthy": false,
+      "service_health": false,
+      "config_path": null,
+      "fingerprint": null,
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        }
+      ]
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "[1,2]"
+        }
+      ],
+      "healthy": true,
+      "service_health": true,
+      "config_path": "",
+      "fingerprint": "",
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.5
+        }
+      ]
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "{\"config_path\":123,\"local_api_key_fingerprint\":null}"
+        }
+      ],
+      "healthy": true,
+      "service_health": true,
+      "config_path": "123",
+      "fingerprint": "",
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.5
+        }
+      ]
+    },
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "error": "valueerror"
+        }
+      ],
+      "healthy": true,
+      "service_health": false,
+      "config_path": null,
+      "fingerprint": null,
+      "url_calls": [
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        },
+        {
+          "url": "http://127.0.0.1:8123/health",
+          "timeout": 0.1
+        }
+      ]
+    }
+  ],
+  "health_cache": [
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "clock": [
+        0.0,
+        0.5,
+        3.0
+      ],
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "error": "oserror"
+        }
+      ],
+      "expected": [
+        true,
+        true,
+        false
+      ],
+      "url_calls": [
+        "http://127.0.0.1:8123/health",
+        "http://127.0.0.1:8123/health"
+      ]
+    }
+  ],
+  "background_status": [
+    {
+      "healthy": false,
+      "config_path_field": null,
+      "fingerprint": null,
+      "responses": [
+        {
+          "error": "oserror"
+        }
+      ],
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 状态: 未运行                                                                                     │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 健康检查: http://127.0.0.1:8123/health                                                           │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "url_calls": [
+        "http://127.0.0.1:8123/health"
+      ]
+    },
+    {
+      "healthy": true,
+      "config_path_field": "$CONFIG",
+      "fingerprint": "abcd1234",
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "{\"config_path\":\"C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json\",\"local_api_key_fingerprint\":\"abcd1234\"}"
+        }
+      ],
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 状态: 运行中                                                                                     │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 健康检查: http://127.0.0.1:8123/health                                                           │\n│ 当前配置本地 key 指纹: 256cc1956291                                                              │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "url_calls": [
+        "http://127.0.0.1:8123/health",
+        "http://127.0.0.1:8123/health"
+      ]
+    },
+    {
+      "healthy": true,
+      "config_path_field": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\other-config.json",
+      "fingerprint": "",
+      "responses": [
+        {
+          "status": 200,
+          "body": "{}"
+        },
+        {
+          "status": 200,
+          "body": "{\"config_path\":\"C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\other-config.json\",\"local_api_key_fingerprint\":\"\"}"
+        }
+      ],
+      "panel": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 状态: 运行中                                                                                     │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 健康检查: http://127.0.0.1:8123/health                                                           │\n│ 当前配置本地 key 指纹: 256cc1956291                                                              │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "url_calls": [
+        "http://127.0.0.1:8123/health",
+        "http://127.0.0.1:8123/health"
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "platform": "Windows",
+      "expected": "╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 开机启动计划任务注册，权限级别为 SYSTEM/HIGHEST；非管理员运行时会自动弹出 UAC   │\n│ 授权窗口。                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "platform": "Linux",
+      "expected": "╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 systemd user service 注册，通常不需要 sudo；loginctl enable-linger                      │\n│ 可能需要管理员授权，失败时服务仍可在用户登录后自启。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    },
+    {
+      "platform": "Darwin",
+      "expected": "╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前系统暂不支持自动注册为用户级系统服务。                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+    }
+  ],
+  "status_render": [
+    {
+      "registered": true,
+      "rows": [
+        [
+          "平台",
+          "Windows 计划任务"
+        ],
+        [
+          "任务名",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "注册状态",
+          ""
+        ],
+        [
+          "运行状态",
+          "Ready"
+        ],
+        [
+          "执行程序",
+          "C:\\Program Files\\amkr\\amkr.exe"
+        ]
+      ],
+      "expected_rows": [
+        [
+          "平台",
+          "Windows 计划任务"
+        ],
+        [
+          "任务名",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "注册状态",
+          "[green]已注册[/green]"
+        ],
+        [
+          "运行状态",
+          "Ready"
+        ],
+        [
+          "执行程序",
+          "C:\\Program Files\\amkr\\amkr.exe"
+        ]
+      ],
+      "detail_panels": [
+        "╭──────────────────────────────────────── Windows 原始状态 ────────────────────────────────────────╮\n│ RAW TEXT                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+        "╭────────────────────────────────────────────── 其他 ──────────────────────────────────────────────╮\n│ 未找到计划任务，或 schtasks 不可用。                                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+      ]
+    },
+    {
+      "registered": false,
+      "rows": [
+        [
+          "平台",
+          "Windows 计划任务"
+        ],
+        [
+          "任务名",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "注册状态",
+          ""
+        ],
+        [
+          "运行状态",
+          "Ready"
+        ],
+        [
+          "执行程序",
+          "C:\\Program Files\\amkr\\amkr.exe"
+        ]
+      ],
+      "expected_rows": [
+        [
+          "平台",
+          "Windows 计划任务"
+        ],
+        [
+          "任务名",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "注册状态",
+          "[yellow]未注册[/yellow]"
+        ],
+        [
+          "运行状态",
+          "Ready"
+        ],
+        [
+          "执行程序",
+          "C:\\Program Files\\amkr\\amkr.exe"
+        ]
+      ],
+      "detail_panels": [
+        "╭──────────────────────────────────────── Windows 原始状态 ────────────────────────────────────────╮\n│ RAW TEXT                                                                                         │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+        "╭────────────────────────────────────────────── 其他 ──────────────────────────────────────────────╮\n│ 未找到计划任务，或 schtasks 不可用。                                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯"
+      ]
+    }
+  ],
+  "run_service_action": [
+    {
+      "action": "start_amkr",
+      "kind": "background-start",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [],
+      "responses": [
+        {
+          "error": "oserror"
+        }
+      ],
+      "commands": [],
+      "text": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已启动。                                                                                 │\n│ PID: 4242                                                                                        │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 日志: $LOG                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "stop_amkr",
+      "kind": "background-stop",
+      "platform": "Windows",
+      "pid": 4242,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n"
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "taskkill",
+          "/PID",
+          "4242",
+          "/T",
+          "/F"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ]
+      ],
+      "text": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已停止。                                                                                 │\n│ PID: 4242                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "restart_amkr",
+      "kind": "background-restart",
+      "platform": "Windows",
+      "pid": 4242,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "\"python.exe\",\"4242\",\"Console\",\"1\",\"10,000 K\"\n"
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        },
+        {
+          "code": 0,
+          "stdout": ""
+        }
+      ],
+      "responses": [
+        {
+          "error": "oserror"
+        }
+      ],
+      "commands": [
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ],
+        [
+          "taskkill",
+          "/PID",
+          "4242",
+          "/T",
+          "/F"
+        ],
+        [
+          "tasklist",
+          "/FI",
+          "PID eq 4242",
+          "/FO",
+          "CSV",
+          "/NH"
+        ]
+      ],
+      "text": "╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已停止。                                                                                 │\n│ PID: 4242                                                                                        │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n\n╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 后台服务已启动。                                                                                 │\n│ PID: 4242                                                                                        │\n│ 地址: http://127.0.0.1:8123                                                                      │\n│ 日志: $LOG                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "status_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/Query",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/V",
+          "/FO",
+          "LIST"
+        ]
+      ],
+      "text": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install_user_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/Create",
+          "/F",
+          "/SC",
+          "ONLOGON",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/RL",
+          "LIMITED",
+          "/IT",
+          "/TR",
+          "\"$EXE\" -m auto_model_key_router.main --config \"$CONFIG\" --serve-foreground"
+        ],
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0); Set-ScheduledTask -TaskName 'AutoModelKeyRouter' -Settings $settings | Out-Null"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "text": "╭──────────────────────────────────────── Windows 登录自启 ────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────── Windows 自启设置 ────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 当前用户计划任务注册，权限级别为 LIMITED；任务会在该用户登录时启动。            │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install_system_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/Create",
+          "/F",
+          "/SC",
+          "ONSTART",
+          "/TN",
+          "AutoModelKeyRouter",
+          "/RU",
+          "SYSTEM",
+          "/RL",
+          "HIGHEST",
+          "/TR",
+          "\"$EXE\" -m auto_model_key_router.main --config \"$CONFIG\" --serve-foreground"
+        ],
+        [
+          "powershell",
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-Command",
+          "$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Seconds 0); Set-ScheduledTask -TaskName 'AutoModelKeyRouter' -Settings $settings | Out-Null"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "text": "╭──────────────────────────────────────── Windows 开机自启 ────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────── Windows 自启设置 ────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 Windows 开机启动计划任务注册，权限级别为 SYSTEM/HIGHEST；非管理员运行时会自动弹出 UAC   │\n│ 授权窗口。                                                                                       │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "uninstall_system_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/End",
+          "/TN",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "schtasks",
+          "/Delete",
+          "/F",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "text": "╭────────────────────────────────────────── Windows 停止 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 后台服务 ────────────────────────────────────────────╮\n│ 没有找到后台服务 PID 文件。                                                                      │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "start_system_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "text": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "stop_system_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/End",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "text": "╭────────────────────────────────────────── Windows 自启 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "restart_system_amkr",
+      "kind": "system",
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "schtasks",
+          "/End",
+          "/TN",
+          "AutoModelKeyRouter"
+        ],
+        [
+          "schtasks",
+          "/Run",
+          "/TN",
+          "AutoModelKeyRouter"
+        ]
+      ],
+      "text": "╭────────────────────────────────────────── Windows 停止 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── Windows 启动 ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "install_system_amkr",
+      "kind": "system",
+      "platform": "Linux",
+      "pid": null,
+      "run_script": [
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        },
+        {
+          "code": 0,
+          "stdout": "OK"
+        }
+      ],
+      "responses": [],
+      "commands": [
+        [
+          "systemctl",
+          "--user",
+          "daemon-reload"
+        ],
+        [
+          "systemctl",
+          "--user",
+          "enable",
+          "--now",
+          "auto-model-key-router.service"
+        ],
+        [
+          "loginctl",
+          "enable-linger",
+          "amkr-user"
+        ]
+      ],
+      "text": "╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭────────────────────────────────────────── systemd user ──────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭───────────────────────────────────────── systemd linger ─────────────────────────────────────────╮\n│ OK                                                                                               │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 系统服务 ────────────────────────────────────────────╮\n│ systemd 用户服务文件已写入:                                                                      │\n│ $HOME\\.config\\systemd\\user\\auto-model-key-r │\n│ outer.service                                                                                    │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯\n╭──────────────────────────────────────────── 权限说明 ────────────────────────────────────────────╮\n│ 当前使用 systemd user service 注册，通常不需要 sudo；loginctl enable-linger                      │\n│ 可能需要管理员授权，失败时服务仍可在用户登录后自启。                                             │\n╰──────────────────────────────────────────────────────────────────────────────────────────────────╯",
+      "error": null
+    },
+    {
+      "action": "bogus_action",
+      "kind": null,
+      "platform": "Windows",
+      "pid": null,
+      "run_script": [],
+      "responses": [],
+      "commands": [],
+      "text": null,
+      "error": "KeyError"
+    }
+  ]
+}
