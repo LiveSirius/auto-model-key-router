@@ -41,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/Sparrived/auto-model-key-router/mas
 ### 一行安装（Windows / PowerShell）
 
 ```powershell
-irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 -OutFile "$env:TEMP\amkr-install.ps1"; & "$env:TEMP\amkr-install.ps1"
 ```
 
 装到 `%LOCALAPPDATA%\Programs\AutoModelKeyRouter\amkr.exe`，**不需要管理员权限**。指定版本：

@@ -10,7 +10,11 @@
     兼容 PowerShell 5.1+（Windows 10/11 自带的 Windows PowerShell 即可）。
 
 .EXAMPLE
-    irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 | iex
+    irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 -OutFile "$env:TEMP\amkr-install.ps1"; & "$env:TEMP\amkr-install.ps1"
+
+    注意：**不要**用 `irm <url> | iex`。本文件带 UTF-8 BOM（Windows PowerShell 5.1 需要它才能
+    正确读取中文），而 iex 会把 BOM 当成标识符的一部分，导致 `<#` 不再被识别为注释、报
+    "The term '<#' is not recognized"。-OutFile 形式由 PowerShell 按文件读取，BOM 被正确处理。
 
 .EXAMPLE
     .\install.ps1 -Version 5.0.0
