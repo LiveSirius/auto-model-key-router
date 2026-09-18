@@ -74,7 +74,7 @@ func EmptyConfigDict() (*canonical.Value, error) {
 		canonical.ObjectPair{Key: "metrics_db_path", Value: canonical.NewString(metricsPath)},
 		canonical.ObjectPair{Key: "log_file_path", Value: canonical.NewString(logPath)},
 		canonical.ObjectPair{Key: "local_api_key", Value: canonical.NewString(localAPIKey)},
-		canonical.ObjectPair{Key: "webui_enabled", Value: canonical.NewBool(false)},
+		canonical.ObjectPair{Key: "webui_enabled", Value: canonical.NewBool(true)},
 		canonical.ObjectPair{Key: "ops_enabled", Value: canonical.NewBool(true)},
 		canonical.ObjectPair{Key: "providers", Value: canonical.NewObject()},
 		canonical.ObjectPair{Key: "models", Value: canonical.NewObject()},

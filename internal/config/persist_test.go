@@ -189,7 +189,7 @@ func TestEmptyConfigDictKeyOrder(t *testing.T) {
 		"max_retries":               "2",
 		"key_failure_threshold":     "2",
 		"key_cooldown_seconds":      "60",
-		"webui_enabled":             "false",
+		"webui_enabled":             "true",
 		"ops_enabled":               "true",
 		"config_version":            "4",
 	}
