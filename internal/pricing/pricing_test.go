@@ -509,6 +509,50 @@ func TestRefreshOnceIsSingleFlight(t *testing.T) {
 	}
 }
 
+// TestRefreshOnceSkipsFreshCatalog 断言目录仍新鲜时再触发不会重复取回。
+//
+// 这是"一次过期只下载一次"的核心不变式，且**同步可判**：过期时会一口气踢出多个后台
+// goroutine（连续几次 /ui/pricing.json 读就会），而闸门只挡"同时在途"——若无脑取回，
+// 第一个成功之后其余每个都会再把 4.7 MB 下一遍。这里刻意不靠 goroutine 调度巧合去撞，
+// 直接断言"刚取回的目录不会被再取一次"。
+func TestRefreshOnceSkipsFreshCatalog(t *testing.T) {
+	fake := &fakeFetcher{result: []FetchResult{
+		{Body: []byte(catalogFixture), ETag: `W/"first"`},
+		{Body: []byte(catalogFixture), ETag: `W/"second"`},
+	}}
+	catalog := newTestCatalog(fake.fetch)
+
+	if err := catalog.refreshOnce(t.Context()); err != nil {
+		t.Fatalf("预热取回失败: %v", err)
+	}
+	if err := catalog.refreshOnce(t.Context()); err != nil {
+		t.Fatalf("新鲜期内重复触发应被跳过，却返回错误: %v", err)
+	}
+	if calls := len(fake.calls); calls != 1 {
+		t.Errorf("取回次数 = %d，期望 1（新鲜期内不得重复取回）", calls)
+	}
+}
+
+// TestRefreshOnceRespectsRetryBackoff 断言取回失败后不会立刻被穿透重试。
+//
+// 失败时 recordFailure 把下次允许取回的时间推到 now+DefaultRetry。若 refreshOnce 不看
+// 这个时间，一次网络抖动会被同一批 goroutine 立刻重试多次，把 4.7 MB 反复打向上游。
+func TestRefreshOnceRespectsRetryBackoff(t *testing.T) {
+	fake := &fakeFetcher{errs: []error{errors.New("上游不可达"), errors.New("上游不可达")}}
+	catalog := newTestCatalog(fake.fetch)
+
+	if err := catalog.refreshOnce(t.Context()); err == nil {
+		t.Fatal("取回失败应当返回错误")
+	}
+	// 退避期内再触发：应直接跳过（返回 nil），不再打上游。
+	if err := catalog.refreshOnce(t.Context()); err != nil {
+		t.Fatalf("退避期内重复触发应被跳过，却返回错误: %v", err)
+	}
+	if calls := len(fake.calls); calls != 1 {
+		t.Errorf("取回次数 = %d，期望 1（退避期内不得重试）", calls)
+	}
+}
+
 // TestPayloadTriggersBackgroundRefreshOnce 断言过期时只踢一次后台刷新。
 //
 // 目录 4.7 MB，若每个 /ui/pricing.json 请求都触发一次取回，页面轮询会把上游打爆。
@@ -532,17 +576,22 @@ func TestPayloadTriggersBackgroundRefreshOnce(t *testing.T) {
 			t.Fatal("过期后旧目录仍应可用")
 		}
 	}
+	// 等到所有被踢出的后台 goroutine 都跑完再读数。不能在"看到 ≥2 次"时就收工：
+	// 那会在其余 goroutine 尚未调度时提前读数，漏掉它们各自的重复取回，而本测试
+	// 要抓的正是这个（闸门只挡同时在途、挡不住后继者再下 4.7 MB）。
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
 		catalog.mu.Lock()
 		loading := catalog.loading
-		calls := len(fake.calls)
 		catalog.mu.Unlock()
-		if !loading && calls >= 2 {
+		if !loading {
 			break
 		}
-		time.Sleep(5 * time.Millisecond)
+		time.Sleep(2 * time.Millisecond)
 	}
+	// 静默窗口：在途 goroutine 若还要取回，这段时间内必然已经计数。
+	time.Sleep(100 * time.Millisecond)
+
 	catalog.mu.Lock()
 	calls := len(fake.calls)
 	catalog.mu.Unlock()

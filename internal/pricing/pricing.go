@@ -286,15 +286,25 @@ func (c *Catalog) Payload() ([]byte, bool) {
 	return payload, payload != nil
 }
 
-// refreshOnce 是**唯一**的取回入口，并保证同一时刻最多一次在途取回。
+// refreshOnce 是**唯一**的取回入口，并保证一次过期只触发一次真实取回。
 //
 // 为什么必须收在一处：取回有两条触发路径——Payload 的过期触发，与 Start 的定期循环。
 // 若各自直接调 Refresh，两条路径可以同时打向上游，等于把 4.7 MB 下载两遍、并让两次
-// 结果互相覆盖（先返回的那次可能把后返回的更新结果盖掉）。这里用 loading 做闸门：
-// 已在途时直接返回 nil，不做第二次取回。
+// 结果互相覆盖（先返回的那次可能把后返回的更新结果盖掉）。
+//
+// 只挡"同时在途"是不够的：一次过期会踢出**多个** goroutine（连着几次
+// /ui/pricing.json 读就会），第一个取回成功、闸门落下之后，其余 goroutine 若直接
+// 取回，就会把刚刚已经新鲜的目录再下载一遍——读几次就下载几次。因此拿到闸门后要
+// 再确认一次新鲜度，不新鲜才取回。DefaultRetry 的失败退避也靠这一步生效：否则一次
+// 失败会被同一批 goroutine 立刻穿透重试。
 func (c *Catalog) refreshOnce(ctx context.Context) error {
 	c.mu.Lock()
 	if c.loading {
+		c.mu.Unlock()
+		return nil
+	}
+	if c.now().Before(c.nextAt) {
+		// 目录已新鲜（别人刚取回，或失败退避尚未到期）：无需再取。
 		c.mu.Unlock()
 		return nil
 	}
