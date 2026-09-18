@@ -192,6 +192,38 @@ func TestPricingEndpointAbsentWithoutWebUI(t *testing.T) {
 	}
 }
 
+// TestPricingEndpointFollowsMountPrefix 断言挂了嵌入前缀时价格目录也跟着走。
+//
+// 路由用的是 webui.Path(MountPrefix) 拼出来的前缀（嵌入宿主时是 /amkr/ui），若这里写死
+// "/ui/" 就会只在独立运行时可用、嵌入后 404——而 WebUI 自己的请求是按 location.pathname
+// 反推前缀的（webui/api.js 的 apiBase），两边必须一致。
+func TestPricingEndpointFollowsMountPrefix(t *testing.T) {
+	fetch, _ := stubPricingFetch(t, endpointCatalog)
+	app := newTestAppWith(t, t.TempDir(), appFixture{
+		webUIEnabled: true,
+		mutate: func(options *Options) {
+			options.MountPrefix = "/amkr"
+			options.WebUIAssets = fs.FS(fstest.MapFS{
+				"index.html": &fstest.MapFile{Data: []byte("<html>amkr</html>")},
+			})
+			options.PricingFetch = fetch
+		},
+	})
+	waitForPricing(t, app)
+
+	// 带前缀时可用。
+	recorder := serve(app, http.MethodGet, "/amkr/ui/pricing.json", "")
+	if recorder.Code != http.StatusOK {
+		t.Errorf("GET /amkr/ui/pricing.json 状态码 = %d，期望 200（body=%s）",
+			recorder.Code, recorder.Body.String())
+	}
+	// 不带前缀时**不应**可达：前缀是挂载契约，绕过它就等于映射到了别的位置。
+	plain := serve(app, http.MethodGet, "/ui/pricing.json", "")
+	if plain.Code != http.StatusNotFound {
+		t.Errorf("无前缀的 /ui/pricing.json 状态码 = %d，期望 404", plain.Code)
+	}
+}
+
 // TestPricingCatalogStartsEvenWhenDisabled 断言缺省的 App 不会因为 PricingFetch 为 nil
 // 而出网，也不会在 Close 时卡住。
 //
