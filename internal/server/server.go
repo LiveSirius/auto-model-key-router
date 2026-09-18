@@ -69,6 +69,14 @@ type Options struct {
 	CheckUpdate func(timeout float64) api.UpdateCheckResult
 	// Logger 交给 internal/proxy 做结构化日志；nil 时按 AMKR_LOG_FORMAT 选择格式。
 	Logger *slog.Logger
+	// AccessLogger 接收每个 HTTP 请求的访问日志，对应参照实现里 uvicorn 的
+	// `uvicorn.access`（uvicorn_log_config 把它接到 log_file_path）。nil 表示不记访问
+	// 日志，此时路由树不做任何包装。
+	//
+	// 单独一个字段而不是复用 Logger：参照实现里两者是**不同的 logger**（access 走
+	// uvicorn.access、应用侧走 auto_model_key_router.app），落到文件后 logger 名要能
+	// 区分，因此不能共用同一个 *slog.Logger。
+	AccessLogger *slog.Logger
 	// MountPrefix 是嵌入到宿主时的挂载前缀（独立运行时为空串）。它只影响 /health
 	// 报出的 webui_path（app.py:418 的 mount_path 语义）。
 	MountPrefix string
@@ -220,7 +228,9 @@ func New(options Options) (*App, error) {
 		app.api.CheckUpdate = defaultCheckUpdate(options.Version)
 	}
 
-	app.handler = app.buildHandler()
+	// 访问日志包在**整棵树**外面，对应 uvicorn 在协议层为每个请求记一行——它不关心
+	// 请求最终落到哪条路由，404/405 也照样记（历史日志里 404、503 都有 access 行）。
+	app.handler = app.accessLog(app.buildHandler())
 	// 广播循环最后启动：它要读 app.eventBus 与 app.broadcaster，而且必须在 Handler
 	// 可用之前就绪（第一个 /ws/events 连接会立刻触发一次 metrics_snapshot 广播）。
 	// 对应 lifespan 启动时创建 _metrics_broadcast_task（app.py:64-66）。
