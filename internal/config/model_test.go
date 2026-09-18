@@ -2,10 +2,23 @@ package config
 
 import (
 	"errors"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
+
+// cachePathPlaceholder 是 model.jsonl 输出里「平台缓存目录 + 目录分隔符」的占位符。
+//
+// 语料由 Windows 上的参照实现产出，因此省略 endpoint_capabilities_path /
+// metrics_db_path / log_file_path 时录制下来的是**生成机的缓存布局**
+// （`C:\Users\<user>\AppData\Local\AutoModelKeyRouter\`）。那部分不是契约：契约是
+// 「这三个字段缺失或为空时回落到 config.DefaultCacheDir()」。回放时把占位符换成
+// 本平台解析出的缓存目录（连同平台目录分隔符），断言才在三个平台上都成立。
+//
+// 生成器已随 Python 退役移除，语料是**手工**把 Windows 前缀替换成这个占位符的。
+const cachePathPlaceholder = "<cache>"
 
 // TestFromDictMatchesPython 是 RouterConfig 解析与校验的核心对拍断言。
 //
@@ -35,11 +48,30 @@ func TestFromDictMatchesPython(t *testing.T) {
 				t.Fatalf("参照实现成功，但 Go 报错: %v", err)
 			}
 			got := canonical.Dumps(serializeConfig(cfg))
-			if got != entry.Output {
-				t.Errorf("输出不一致\n期望: %s\n实际: %s", entry.Output, got)
+			want := expectedConfigOutput(t, entry.Output)
+			if got != want {
+				t.Errorf("输出不一致\n期望: %s\n实际: %s", want, got)
 			}
 		})
 	}
+}
+
+// expectedConfigOutput 把语料输出里的缓存目录占位符换成本平台解析出的目录。
+//
+// 只替换占位符，其余字节（键序、浮点写法、空值形态）照旧逐字节比对。
+func expectedConfigOutput(t *testing.T, output string) string {
+	t.Helper()
+	if !strings.Contains(output, cachePathPlaceholder) {
+		return output
+	}
+	cacheDir, err := DefaultCacheDir()
+	if err != nil {
+		t.Fatalf("解析平台缓存目录失败: %v", err)
+	}
+	// 占位符位于 JSON 字符串内部，替换值必须按 JSON 规则转义（Windows 路径里
+	// 的反斜杠在语料文本中是 `\\`）。
+	escaped := strings.ReplaceAll(cacheDir+string(filepath.Separator), `\`, `\\`)
+	return strings.ReplaceAll(output, cachePathPlaceholder, escaped)
 }
 
 // serializeConfig 把 RouterConfig 摊平成与语料一致的结构。
