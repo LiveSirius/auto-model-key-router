@@ -76,6 +76,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/probes/{probe_id}/cancel` | 仅本地 | 取消探测 |
 | `POST` | `/api/config/export`、`/api/config/import` | 仅本地 | 导出或导入可迁移配置 |
 | `GET` | `/ui/` | 无 | 内置 WebUI（需 `webui_enabled`，未启用或资产缺失时返回 `404`） |
+| `GET` | `/ui/pricing.json` | 无 | models.dev 价格目录快照，用于 WebUI 估算成本（需 `webui_enabled`） |
 | `GET` | `/api/logs` | 仅本地 | 读取日志文件尾部（默认最后 64 KiB） |
 | `GET` | `/api/tool` | 仅本地 | 查询版本、可用更新与 WebUI 状态 |
 | `POST` | `/api/tool/webui` | 仅本地 | 启用或关闭 WebUI（写入配置，需重启服务生效） |
@@ -868,6 +869,74 @@ http://127.0.0.1:8000/ui/
 ### 鉴权
 
 `/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
+
+### `GET /ui/pricing.json`
+
+返回 models.dev 价格目录的服务端缓存快照，供 WebUI 估算成本。**不需要鉴权**：内容是 models.dev 的公开数据，与 `/ui/` 下的静态资产同级。
+
+价格目录由服务进程在启动时取回一次、此后每 6 小时复验一次（条件请求，命中时是 `304`，不重复传 230 KB）。它**只驻内存、不落盘**；取回失败不会清空已有目录，而是在载荷的 `error` 字段里说明，让界面显示"旧价格 + 告警"。
+
+| 参数 | 说明 |
+| --- | --- |
+| 无 | 不接受任何查询参数 |
+
+响应（`Content-Type: application/json`，并带 `ETag` 与 `Cache-Control: public, must-revalidate, max-age=0`）：
+
+```json
+{
+  "version": 1,
+  "source": "https://models.dev/api.json",
+  "updated_at": "2026-01-02T03:04:05Z",
+  "error": null,
+  "models": {
+    "gpt-4o": { "input": 2.5, "output": 10, "cache_read": 1.25 },
+    "claude-sonnet-4-5": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }
+  }
+}
+```
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `version` | 整数 | 载荷版本，字段形状有破坏性变化时递增 |
+| `source` | 字符串 | 价格来源，固定为 models.dev 的 `api.json` |
+| `updated_at` | 字符串 \| null | 目录取回时间（RFC3339 UTC）；从未成功取回时为 `null` |
+| `error` | 字符串 \| null | 最近一次刷新失败的原因；非 `null` 表示当前价格是旧的 |
+| `models` | 对象 | 小写模型 id → 单价，单位是 **USD / 100 万 token** |
+
+`models` 里的条目只保证有 `input` 与 `output`；`cache_read` / `cache_write` **缺失即不存在**（不会补 `0`），客户端应回退到 `input` 价而不是当成免费。
+
+同一模型 id 在 models.dev 上可能被多家供应商列出，服务端已按"排除 `input`/`output` 全为 `0` 的挂名条目后取最便宜"收敛成一条。这一步不能省：实测有数百个模型被部分供应商标成全 `0`，不做排除会让成本页显示一张全零的假账。
+
+状态码：
+
+| 状态码 | 场景 |
+| --- | --- |
+| `200` | 返回目录快照 |
+| `304` | 请求带 `If-None-Match` 且与当前 `ETag` 一致 |
+| `405` | 非 `GET` / `HEAD` |
+| `503` | 目录尚不可用（服务刚启动、或一直取不到）。**不返回空目录**——那会让客户端把每个模型当成免费 |
+| `404` | `webui_enabled` 未启用时，该路由与 `/ui/` 一起不存在 |
+
+> 价格目录挂在 `/ui/` 前缀下，因此与 WebUI 同生共死：`webui_enabled` 为假时它也不可达。成本估算是 WebUI 的读数，没有界面时无人消费。
+
+### 成本估算口径
+
+金额是**派生读数，不落库**：指标库只存 token 用量，成本由 WebUI 按当前目录现算。因此目录更新后，历史请求的估算金额会跟着变——单价是外部事实，不是本项目的记账结果。
+
+按 token **类别**分别计价（单位 USD / 100 万 token）：
+
+| 类别 | token 字段 | 单价 |
+| --- | --- | --- |
+| 普通输入 | `prompt_tokens` 减去下面两类缓存量 | `input` |
+| 缓存读 | `cache_read_input_tokens`，为 `0` 时退回 `cached_tokens` | `cache_read`，缺失时回退 `input` |
+| 缓存写 | `cache_creation_input_tokens` | `cache_write`，缺失时回退 `input` |
+| 输出 | `completion_tokens` | `output` |
+
+不能直接用 `uncached_prompt_tokens` 乘 `input`：对 Anthropic，`prompt_tokens = input_tokens + cache_read + cache_creation`，而 `uncached_prompt_tokens` 等于 `input + cache_creation`，拿它乘输入价会把缓存写计费两次——一次按输入价、一次按 `cache_write`。
+
+匹配按 `upstream_model` 名称（大小写不敏感），依次尝试：原名 → 去掉 `vendor/` 前缀 → 去掉 `-YYYY-MM-DD` / `-YYYYMMDD` 日期后缀。匹配不到时成本显示 `—`，**不显示 `$0`**；有部分条目未匹配时，界面会明确标出"x/y 项有定价"，避免局部金额被读成完整账单。
+
+> 当前实现使用目录里的**基础单价**，忽略 models.dev 的阶梯定价（`cost.tiers`，如超长上下文加价，约 460 个模型带此字段）；也不做汇率换算，金额固定是 USD。
 
 ### `GET /api/logs`
 
