@@ -333,11 +333,21 @@ func TestOpsAPIMatchesPython(t *testing.T) {
 				t.Errorf("content-type 不一致: got %q want %v", got, derefString(entry.ContentType))
 			}
 			// 把语料里的生成目录换成回放目录：只有响应体里的路径字段需要替换。
+			//
+			// 两步替换：夹具目录（/api/logs 的 path 字段来自夹具里的 log_file_path）
+			// 换成回放目录，再把 409 里的 <CONFIG_PATH> 换成回放时真正用的配置文件
+			// 路径——这条路径是 Go 侧用 filepath.Join 拼出来的，分隔符随平台变化，
+			// 不能沿用语料录制时写死的 `\`。
 			replayDir := filepath.Dir(replay.configPath)
 			wantBody := strings.ReplaceAll(
 				entry.BodyText,
 				jsonEscapedPath(corpus.fixtureDir),
 				jsonEscapedPath(replayDir),
+			)
+			wantBody = strings.ReplaceAll(
+				wantBody,
+				configPathPlaceholder,
+				jsonEscapedPath(replay.configPath),
 			)
 			wantLength := entry.ContentLength
 			if wantBody != entry.BodyText {

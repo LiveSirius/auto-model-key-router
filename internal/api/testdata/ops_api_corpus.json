@@ -823,7 +823,7 @@
       "status": 409,
       "content_type": "application/json",
       "content_length": "115",
-      "body_text": "{\"detail\":\"配置文件不存在: C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_ops_api_corpus\\\\router-config.json\"}",
+      "body_text": "{\"detail\":\"配置文件不存在: <CONFIG_PATH>\"}",
       "config_after": null
     },
     {

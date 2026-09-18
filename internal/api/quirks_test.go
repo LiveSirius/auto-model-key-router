@@ -430,7 +430,7 @@ func mustParseBody(t *testing.T, text string) *canonical.Value {
 }
 
 // TestCorpusContentLengthIsSelfConsistent 检查语料自身的一致性：除了 204 与
-// 「路径被替换」的用例，content-length 必须等于响应体字节数。
+// 「路径被占位符替换」的用例，content-length 必须等于响应体字节数。
 //
 // 这条断言把「语料被手工改坏」挡在门口：如果只改 body_text 不改 content-length，
 // Go 侧会因为响应头对不上而失败，但失败原因会指向 Go 实现。这里先自查语料。
@@ -441,6 +441,13 @@ func TestCorpusContentLengthIsSelfConsistent(t *testing.T) {
 			if entry.BodyText != "" {
 				t.Errorf("用例 %s 记录了响应体却没有 content-length", entry.Name)
 			}
+			continue
+		}
+		// 带 <CONFIG_PATH> 占位符的响应体不参与这条自查：它录下的 content-length 对应
+		// 的是**生成机上的真实路径**，与占位符本身的长度无关。这类用例的长度断言由回放
+		// 测试按替换后的期望体重算（见 corpus_test.go 的 configPathPlaceholder 与
+		// TestManagementAPIMatchesPython），在这里对着占位符比长度只会误报。
+		if strings.Contains(entry.BodyText, configPathPlaceholder) {
 			continue
 		}
 		want := strconv.Itoa(len(entry.BodyText))

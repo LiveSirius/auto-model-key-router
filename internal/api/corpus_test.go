@@ -75,21 +75,22 @@ type corpusSetupStep struct {
 }
 
 type corpusData struct {
-	version    int
-	fixtureDir string
-	fixture    *canonical.Value
-	cases      []corpusCase
+	version int
+	fixture *canonical.Value
+	cases   []corpusCase
 }
 
-// configPathInCorpus 是语料里那份配置文件的完整路径。
+// configPathPlaceholder 是语料响应体里「配置文件完整路径」的占位符。
 //
-// 回放时把语料里的这个字符串换成 Go 自己的配置文件路径即可：**配置内容的路径不受
-// 影响**，因为夹具里的 endpoint_capabilities_path 等字段原样保留语料里的值。
-// 这一点很关键——config_revision 是整份配置（含这三个路径字段）的哈希，一旦回放时
-// 改写它们，版本号就会与 Python 不一致，所有带 config_revision 的响应都会对不上。
-func (c *corpusData) configPathInCorpus() string {
-	return filepath.Join(c.fixtureDir, "router-config.json")
-}
+// 语料录制的是生成机上的绝对路径（Windows 临时目录），而 409 的 detail 里那条路径
+// 来自**回放时真正使用的配置文件位置**（replay.configPath）；同时 Windows 的 `\`
+// 与 POSIX 的 `/` 也不能写死。因此语料只记录占位符，回放时用
+// jsonEscapedPath(replay.configPath) 替换——与 internal/server 语料的
+// <FIXTURE_DIR> 是同一套做法。
+//
+// 刻意不用 filepath.Join(fixtureDir, "router-config.json") 去还原：语料里的分隔符
+// 是录制时的 `\`，Join 在 Linux 上会拼出混合分隔符，替换一个字节也匹配不到。
+const configPathPlaceholder = "<CONFIG_PATH>"
 
 // jsonEscapedPath 把路径转成它出现在 JSON 响应体里的样子。
 //
@@ -107,9 +108,8 @@ func loadCorpus(t *testing.T) *corpusData {
 		t.Fatalf("读取语料失败: %v", err)
 	}
 	var meta struct {
-		Version    int          `json:"version"`
-		FixtureDir string       `json:"fixture_dir"`
-		Cases      []corpusCase `json:"cases"`
+		Version int          `json:"version"`
+		Cases   []corpusCase `json:"cases"`
 	}
 	if err := json.Unmarshal(raw, &meta); err != nil {
 		t.Fatalf("解析语料元数据失败: %v", err)
@@ -154,10 +154,9 @@ func loadCorpus(t *testing.T) *corpusData {
 		}
 	}
 	return &corpusData{
-		version:    meta.Version,
-		fixtureDir: meta.FixtureDir,
-		fixture:    root.Lookup("fixture"),
-		cases:      meta.Cases,
+		version: meta.Version,
+		fixture: root.Lookup("fixture"),
+		cases:   meta.Cases,
 	}
 }
 
@@ -186,7 +185,8 @@ func (c *corpusData) corpusIndex(t *testing.T, name string) int {
 // substitutePaths 把语料里的固定临时目录换成当前用例的目录。
 //
 // 只用于**响应体**里的路径（例如 409「配置文件不存在: ...」）。夹具内容不能被替换，
-// 否则 config_revision 会随回放目录变化（见 corpusData.configPathInCorpus 的说明）。
+// 否则 config_revision 会随回放目录变化（夹具里的三个路径字段是整份配置哈希的一部分，
+// 回放时改写它们会让所有带 config_revision 的响应都对不上）。
 func substitutePaths(value *canonical.Value, from, to string) *canonical.Value {
 	if from == "" || value == nil {
 		return value.Clone()
@@ -496,11 +496,12 @@ func TestManagementAPIMatchesPython(t *testing.T) {
 			if got := replay.recorder.Header().Get("Content-Type"); !equalOptionalHeader(got, entry.ContentType) {
 				t.Errorf("content-type 不一致: got %q want %v", got, derefString(entry.ContentType))
 			}
-			// 只有「配置文件不存在」的 409 会把**配置文件路径**写进响应体，把语料里的
-			// 生成路径换成回放时用的路径即可；配置内容里的路径不做替换。
+			// 只有「配置文件不存在」的 409 会把**配置文件路径**写进响应体：语料里记的是
+			// <CONFIG_PATH> 占位符，这里换成回放时真正用的路径（按 JSON 规则转义，Windows
+			// 上是 `\\`、POSIX 上是 `/`）；配置内容里的路径不做替换。
 			wantBody := strings.ReplaceAll(
 				entry.BodyText,
-				jsonEscapedPath(corpus.configPathInCorpus()),
+				configPathPlaceholder,
 				jsonEscapedPath(replay.configPath),
 			)
 			// 路径换过之后长度自然变了，此时 content-length 的期望值要跟着体一起重算，
