@@ -45,18 +45,57 @@ type streamWriter interface {
 // rawStream 是「字节级原样转发（SSE 时按事件边界切分）」的流式处理器。
 //
 // 移植 proxy_handler.py:1081 的 _stream_upstream。
+//
+// 它虽然不改写下游字节，但**必须**顺带抽 usage：`/v1/chat/completions` 的流式请求
+// 恒走这一条（messages / responses 才走重建流），少了这一步所有 chat 流式请求的
+// token 用量都会记成 0。
 type rawStream struct {
 	isSSE    bool
 	splitter *sseEventSplitter
+	// lifecycle 用于回写抽取到的 usage；nil 时只转发（等价于不记账）。
+	lifecycle *streamLifecycle
+	// usageSplitter 按**行**缓冲以抽取 usage，与按事件边界切分的 splitter 是两件事
+	// （对应参照实现里并列的 buffer 与 sse_buffer 两个局部变量）。
+	usageSplitter *protocol.SSESplitter
 }
 
 // newRawStream 构造原样转发流。
-func newRawStream(_ *streamLifecycle, mediaType string, _ func() time.Time) *rawStream {
-	stream := &rawStream{isSSE: isSSEMediaType(mediaType)}
+func newRawStream(lifecycle *streamLifecycle, mediaType string, _ func() time.Time) *rawStream {
+	stream := &rawStream{
+		isSSE:         isSSEMediaType(mediaType),
+		lifecycle:     lifecycle,
+		usageSplitter: protocol.NewSSESplitter(),
+	}
 	if stream.isSSE {
 		stream.splitter = &sseEventSplitter{}
 	}
 	return stream
+}
+
+// absorbUsage 从本块里抽取 usage 并合并进生命周期记录。
+//
+// 移植 proxy_handler.py:1123 的 `_stream_usage`：逐行找 `data:` 载荷，**本块最后一处**
+// usage 生效（同名函数在三个流式路径上共用）。这里复刻两个容易漏掉的细节：
+//
+//   - 该动作对 **SSE 与非 SSE 一律执行**（参照实现把它放在 is_sse 分支之前），
+//     因此原生 Anthropic 端点的 message_start / message_delta 也能取到 usage；
+//   - 行缓冲跨块保留，被 TCP 分片切开的 usage 行能拼回。参照实现只在收到换行时
+//     才处理该行，**流末尾没有换行的半行会被丢弃**——这里保持同一语义（不调用
+//     Flush），避免在多出一个 usage 的同时改变与参照实现的可比性。升级路径：若
+//     实测有上游以无换行结尾发送 usage，再把残余行补一个换行喂一次。
+func (s *rawStream) absorbUsage(chunk []byte) {
+	if s.lifecycle == nil || s.usageSplitter == nil {
+		return
+	}
+	var usage *canonical.Value
+	for _, line := range s.usageSplitter.Push(chunk) {
+		if extracted := protocol.ExtractUsage(line.Payload); extracted != nil {
+			usage = extracted
+		}
+	}
+	if usage != nil {
+		s.lifecycle.SetUsage(mergeUsage(s.lifecycle.Usage(), usage))
+	}
 }
 
 func (s *rawStream) begin(_ http.ResponseWriter) {}
@@ -65,7 +104,11 @@ func (s *rawStream) begin(_ http.ResponseWriter) {}
 func (s *rawStream) abort(w http.ResponseWriter) { s.flush(w) }
 
 // push 转发一块：SSE 路径按事件切分，其余原样吐出。
+//
+// usage 抽取排在转发**之前**，与参照实现的 `_stream_usage` 调用位置一致
+// （proxy_handler.py:1123）：下游写失败时该块已经计过 usage，行为可比。
 func (s *rawStream) push(w http.ResponseWriter, chunk []byte) bool {
+	s.absorbUsage(chunk)
 	if s.isSSE {
 		for _, event := range s.splitter.push(chunk) {
 			if !writeBytes(w, event) {

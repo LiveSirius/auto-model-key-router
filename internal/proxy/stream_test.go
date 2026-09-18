@@ -139,6 +139,93 @@ func TestAnthropicStreamMidStreamErrorEmitsNoErrorFrame(t *testing.T) {
 	}
 }
 
+// chunkedReader 按给定分片逐次产出，不制造错误。
+//
+// scriptedTransport 会把 Chunks 拼接成一个 strings.Reader（分片边界因此丢失），
+// 需要真正跨块切分的用例得自己给 Reader。
+type chunkedReader struct {
+	chunks []string
+	index  int
+}
+
+func (r *chunkedReader) Read(p []byte) (int, error) {
+	if r.index >= len(r.chunks) {
+		return 0, io.EOF
+	}
+	chunk := r.chunks[r.index]
+	r.index++
+	return copy(p, chunk), nil
+}
+
+// TestRawStreamExtractsUsageFromSSE 锁定「原样转发流同样要抽取 usage」。
+//
+// 参照实现的 _stream_upstream 在转发每块之前调用 _stream_usage 并合并进
+// lifecycle.usage（proxy_handler.py:1123-1125），与 Anthropic / Responses 两条重建流
+// 走的是同一套记账。Go 侧的 rawStream 只做字节转发、完全没解析 usage，于是
+// `/v1/chat/completions` 的**流式**请求（它恒走原样转发）token 用量恒为 0。
+func TestRawStreamExtractsUsageFromSSE(t *testing.T) {
+	env := newTestEnv(t, simpleChatConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions", sseStep(
+		"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n",
+		"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":11,\"completion_tokens\":22}}\n\n",
+		"data: [DONE]\n\n",
+	))
+
+	env.request(http.MethodPost, "chat/completions",
+		`{"model":"vendor-model","messages":[],"stream":true}`, nil)
+
+	records := env.metrics.take()
+	if len(records) != 1 {
+		t.Fatalf("指标行数: got %d want 1", len(records))
+	}
+	usage := records[0].Usage
+	if usage == nil {
+		t.Fatal("原样转发流必须抽取 usage，实得 nil")
+	}
+	if got := usage.Lookup("prompt_tokens").PyStr(); got != "11" {
+		t.Fatalf("prompt_tokens: got %s want 11", got)
+	}
+	if got := usage.Lookup("completion_tokens").PyStr(); got != "22" {
+		t.Fatalf("completion_tokens: got %s want 22", got)
+	}
+}
+
+// TestRawStreamExtractsUsageAcrossChunks 覆盖 usage 行被 TCP 分片切开的情形。
+//
+// 断言的是「按行缓冲」而不是「按块解析」：只在本块内找 data: 行会漏掉这条 usage。
+func TestRawStreamExtractsUsageAcrossChunks(t *testing.T) {
+	env := newTestEnv(t, simpleChatConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions", upstreamStep{
+		Status:  200,
+		Headers: map[string]string{"content-type": "text/event-stream"},
+		Reader: &chunkedReader{chunks: []string{
+			"data: {\"choices\":[],\"usa",
+			"ge\":{\"prompt_tokens\":7,",
+			"\"completion_tokens\":8}}\n\n",
+		}},
+	})
+
+	env.request(http.MethodPost, "chat/completions",
+		`{"model":"vendor-model","messages":[],"stream":true}`, nil)
+
+	records := env.metrics.take()
+	if len(records) != 1 {
+		t.Fatalf("指标行数: got %d want 1", len(records))
+	}
+	usage := records[0].Usage
+	if usage == nil {
+		t.Fatal("跨块切分的 usage 行必须被拼回，实得 nil")
+	}
+	if got := usage.Lookup("prompt_tokens").PyStr(); got != "7" {
+		t.Fatalf("prompt_tokens: got %s want 7", got)
+	}
+	if got := usage.Lookup("completion_tokens").PyStr(); got != "8" {
+		t.Fatalf("completion_tokens: got %s want 8", got)
+	}
+}
+
 // 编译期哨兵：确保 io 的引用不被误删（Reader 字段的类型）。
 var _ io.Reader = (*breakingReader)(nil)
 
