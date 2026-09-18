@@ -23,7 +23,7 @@ import { barList } from "../charts.js";
 import { TIME_RANGES, rank } from "../chart-math.js";
 import {
   loadPricing, pricingStatus, currentIndex, lookupPrice, aggregateCost,
-  requestCost, sumCost, formatCost, formatCostExact, formatPrice,
+  requestCost, sumCost, costParts, formatCost, formatCostExact, formatPrice,
 } from "../pricing.js";
 
 const state = {
@@ -312,7 +312,10 @@ function compositionCard(metrics, index) {
   const totals = { input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
   let priced = 0;
   for (const [name, stats] of Object.entries(metrics.upstream_models || {})) {
-    const parts = costParts(index, name, stats);
+    const entry = lookupPrice(index, name);
+    // 与合计共用 pricing.js 的 costParts：同屏的"估算成本"与这里的四项分解必须出自
+    // 同一处算术，否则改了一处就会出现两个互相矛盾的数字。
+    const parts = costParts(entry, stats);
     if (!parts) continue;
     priced += 1;
     totals.input += parts.input;
@@ -410,29 +413,6 @@ function recentCostCard(index) {
   );
 }
 
-// —— 成本拆解（与 webui/pricing.js 的 estimateCost 同口径，这里额外给出明细）——
-
-// costParts 返回成本的四项分解；没有单价时返回 null。
-function costParts(index, modelId, stats) {
-  const entry = lookupPrice(index, modelId);
-  if (!entry || !stats) return null;
-  const prompt = number(stats.prompt_tokens);
-  const completion = number(stats.completion_tokens);
-  const cacheReadField = number(stats.cache_read_input_tokens);
-  const cacheRead = cacheReadField > 0 ? cacheReadField : number(stats.cached_tokens);
-  const cacheWrite = number(stats.cache_creation_input_tokens);
-  let fresh = prompt - cacheRead - cacheWrite;
-  if (fresh < 0) fresh = 0;
-  const readPrice = entry.cacheRead === null ? entry.input : entry.cacheRead;
-  const writePrice = entry.cacheWrite === null ? entry.input : entry.cacheWrite;
-  const per = 1e6;
-  return {
-    input: (fresh * entry.input) / per,
-    cacheRead: (cacheRead * readPrice) / per,
-    cacheWrite: (cacheWrite * writePrice) / per,
-    output: (completion * entry.output) / per,
-  };
-}
 
 function number(value) {
   const n = Number(value);

@@ -99,6 +99,19 @@ check("cost_does_not_double_bill_cache_write", cost < naive, `${cost} !< ${naive
 // 真正的判据是缓存写必须用 cache_write 价（3.75）而不是输入价（3）。
 check("cost_uses_cache_write_price", near(cost, (500000 * 3 + 400000 * 0.3 + 100000 * 3.75 + 200000 * 15) / 1e6));
 
+// 四项分解必须与合计**出自同一处算术**：界面同屏既有"估算成本"合计（KPI）又有"成本构成"
+// 的四项分解，两处各写一份公式的话，改了一处就会让同屏两个数字互相矛盾。
+//
+// 这里断言的是**四项的具体数值**，不是"四项之和等于 estimateCost"——后者是同义反复
+// （estimateCost 本身就是四项之和），改坏了也照样成立，没有检出力。
+check("cost_parts_exist", typeof m.costParts === "function");
+const parts = m.costParts(sonnet, usage);
+check("cost_parts_breakdown",
+  near(parts.input, 1.5) && near(parts.cacheRead, 0.12) && near(parts.cacheWrite, 0.375) && near(parts.output, 3.0),
+  JSON.stringify(parts));
+check("cost_parts_null_without_entry", m.costParts(null, usage) === null);
+check("cost_parts_null_without_usage", m.costParts(sonnet, null) === null);
+
 // OpenAI 语义：只有 cached_tokens（cache_read_input_tokens 为 0），且没有缓存写。
 const gpt4o = index.models.get("gpt-4o");
 const openaiUsage = {
@@ -120,6 +133,9 @@ check("cost_missing_cache_price_falls_back_to_input", near(m.estimateCost(noCach
   String(m.estimateCost(noCache, noCacheUsage)));
 
 // 零用量 = $0（真实存在：失败的请求没有 token）。
+// 零用量时四项全 0、合计也是 0（不是 null）。
+const zeroParts = m.costParts(gpt4o, {});
+check("cost_parts_zero_usage", zeroParts !== null && zeroParts.input === 0 && zeroParts.output === 0);
 check("cost_zero_usage_is_zero", m.estimateCost(gpt4o, {}) === 0);
 
 // 负数/NaN/字符串一律当 0，绝不产生负成本。

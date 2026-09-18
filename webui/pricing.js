@@ -111,6 +111,19 @@ function candidates(key) {
 // 缓存读的取法：优先 cache_read_input_tokens，为 0 时退回 cached_tokens
 // （OpenAI 走 prompt_tokens_details.cached_tokens，此时前者是 0）。
 export function estimateCost(entry, usage) {
+  const parts = costParts(entry, usage);
+  if (!parts) return null;
+  return parts.input + parts.cacheRead + parts.cacheWrite + parts.output;
+}
+
+// costParts 把成本拆成四项（USD）。estimateCost 是它的和。
+//
+// **四项与总额必须出自同一处算术。** 界面同屏既有"估算成本"合计、又有"成本构成"的四项
+// 分解；两处各写一份公式的话，日后改了一处就会让同屏两个数字互相矛盾，而且很难被发现。
+// 因此这里只算一次，合计与分解都基于它。
+//
+// 没有单价或没有用量时返回 null（调用方据此显示 "—"，而不是 $0）。
+export function costParts(entry, usage) {
   if (!entry || !usage) return null;
 
   const prompt = count(usage.prompt_tokens);
@@ -129,12 +142,12 @@ export function estimateCost(entry, usage) {
   const readPrice = entry.cacheRead === null ? inputPrice : entry.cacheRead;
   const writePrice = entry.cacheWrite === null ? inputPrice : entry.cacheWrite;
 
-  const total =
-    (fresh * inputPrice) +
-    (cacheRead * readPrice) +
-    (cacheWrite * writePrice) +
-    (completion * entry.output);
-  return total / PER_TOKENS;
+  return {
+    input: (fresh * inputPrice) / PER_TOKENS,
+    cacheRead: (cacheRead * readPrice) / PER_TOKENS,
+    cacheWrite: (cacheWrite * writePrice) / PER_TOKENS,
+    output: (completion * entry.output) / PER_TOKENS,
+  };
 }
 
 // count 把 token 字段收敛成非负整数。
