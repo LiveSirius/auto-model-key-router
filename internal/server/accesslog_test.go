@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/logfiles"
@@ -376,6 +377,13 @@ func TestAccessLogWrapperKeepsStreamingFlush(t *testing.T) {
 	server := httptest.NewServer(app.accessLog(inner))
 	defer server.Close()
 
+	// 断言失败时也必须放行处理器：它阻塞在 <-release，而 server.Close() 会等它结束。
+	// 少了这一层，任何一条 t.Fatal 都会变成「测试卡满 -timeout 后 panic」——CI 上确实
+	// 这样红过一次（10 分钟超时，栈顶就是下面那条断言）。
+	var releaseOnce sync.Once
+	releaseHandler := func() { releaseOnce.Do(func() { close(release) }) }
+	defer releaseHandler()
+
 	response, err := http.Get(server.URL)
 	if err != nil {
 		t.Fatalf("请求失败: %v", err)
@@ -389,12 +397,16 @@ func TestAccessLogWrapperKeepsStreamingFlush(t *testing.T) {
 	if string(buffer) != "first" {
 		t.Fatalf("第一段 = %q, 期望 %q", buffer, "first")
 	}
+	// 这里必须**等待**处理器走到 close(streamed)，不能非阻塞探测：客户端读到 "first"
+	// 只证明 Flush 已经发生，而 close(streamed) 紧随其后、中间没有阻塞点——但客户端
+	// 协程可能先被调度，于是非阻塞探测会把「客户端先跑」误判成「处理器没写第一段」。
+	// 等待是有界的（正常是微秒级），超时仍然算失败。
 	select {
 	case <-streamed:
-	default:
-		t.Fatal("处理器还没写第一段")
+	case <-time.After(5 * time.Second):
+		t.Fatal("处理器写了第一段，但 5 秒内没有走到 Flush 之后")
 	}
-	close(release)
+	releaseHandler()
 	rest, err := io.ReadAll(response.Body)
 	if err != nil {
 		t.Fatalf("读取剩余内容失败: %v", err)
