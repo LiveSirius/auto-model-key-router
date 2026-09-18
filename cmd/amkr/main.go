@@ -41,6 +41,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/configservice"
+	"github.com/Sparrived/auto-model-key-router/internal/logfiles"
 	"github.com/Sparrived/auto-model-key-router/internal/server"
 	"github.com/Sparrived/auto-model-key-router/internal/service"
 	"github.com/Sparrived/auto-model-key-router/internal/tui"
@@ -379,12 +380,38 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 		defer cleanup()
 	}
 
-	app, err := server.New(server.Options{
+	// 日志落点：参照实现的 uvicorn_log_config 把**所有**日志（应用侧、访问、服务器
+	// 自身）写进 config.log_file_path，运维接口 /api/logs 读的就是这个文件。迁移时
+	// 这一环漏了，Go 侧只往 stderr 写，于是 log_file_path 恒为空、WebUI 的「服务日志」
+	// 面板永远是空的——这正是本次修复的根因。
+	//
+	// 前台启动**不归档**旧日志：对应的归档动作由调用方在更早处完成
+	// （ArchiveLogForForeground，且 AMKR_LOG_ARCHIVED=1 时不重复归档），这里以追加
+	// 方式打开即可。
+	sink, err := logfiles.Open(loaded.LogFilePath)
+	if err != nil {
+		// 日志文件打不开不该拦住服务：参照实现里 logging.FileHandler 的失败同样只是
+		// 让那一路日志丢失，进程照常启动。
+		fmt.Fprintf(os.Stderr, "amkr: 打开日志文件 %s 失败: %v\n", loaded.LogFilePath, err)
+		sink = nil
+	}
+	defer func() {
+		if sink != nil {
+			_ = sink.Close()
+		}
+	}()
+
+	options := server.Options{
 		ConfigPath:  configPath,
 		Config:      loaded,
 		Version:     version,
 		WebUIAssets: amkr.WebUIAssets,
-	})
+	}
+	if sink != nil {
+		options.Logger = sink.App
+		options.AccessLogger = sink.Access
+	}
+	app, err := server.New(options)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "amkr: 装配服务失败: %v\n", err)
 		return 1
@@ -408,13 +435,39 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 	signals, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// 启动行写日志文件，对应 uvicorn.error 的 `Uvicorn running on http://…`。
+	//
+	// 只在日志不可用**或** stderr 是终端时才同时打印到 stderr，避免同一行落进日志
+	// 文件两遍：后台启动路径（internal/service/spawn.go）把子进程的 stdout/stderr
+	// 重定向到**同一个**日志文件，若这里无条件打印，日志里就会先是 Go 原样的
+	// `amkr 4.1.0 监听 …`、再来一行 Python 格式的同义行。Windows 计划任务路径没有
+	// 重定向，无条件打印则纯粹是把这行丢掉。
+	startup := fmt.Sprintf("amkr %s 监听 http://%s", version, address)
+	if sink != nil {
+		sink.Server.Info(startup)
+	}
+	if sink == nil || isTerminal(os.Stderr) {
+		fmt.Fprintln(os.Stderr, startup)
+	}
+
 	failures := make(chan error, 1)
 	go func() {
-		fmt.Fprintf(os.Stderr, "amkr %s 监听 http://%s\n", version, address)
 		failures <- httpServer.ListenAndServe()
 	}()
 
 	return waitForStop(httpServer, failures, signals.Done(), os.Stderr)
+}
+
+// isTerminal 判断 w 是不是字符设备（交互式终端）。
+//
+// 只用于决定「这行要不要同时给人看」：日志文件已由 sink 保证，控制台输出是锦上
+// 添花，判错了也不影响日志内容的正确性。
+func isTerminal(w *os.File) bool {
+	info, err := w.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
 }
 
 // waitForStop 等待「监听失败」与「收到中断」两件事之一，返回进程退出码。
