@@ -444,6 +444,41 @@ CI 侧：`ci.yml` 的 `python` 作业在这些退役完毕后整体删除，只�
 
 **未验证**：只验证了**读**。Go 版**写**入该库后 Python 能否继续读、以及双向交替读写，
 尚未验证——切换时若需要回退到 Python，这一点需要先测。
+## 陷阱：本机 `NO_PROXY` 会让语料门禁整批假失败
+
+**现象**：`gen_ops_api / gen_server / gen_proxy_handler / gen_upstream_fixtures` 会**在 4–5 秒内
+失败**（正常要 73–309 秒），报错栈底是：
+
+```
+httpx.InvalidURL: Invalid port: ':1]'
+```
+
+**根因**：本机（开发者的代理客户端，监听 127.0.0.1:7890）设置了：
+
+```
+HTTP_PROXY=http://127.0.0.1:7890/
+HTTPS_PROXY=http://127.0.0.1:7890/
+NO_PROXY=localhost,127.*,192.168.*,...,::1,[::1]
+```
+
+`NO_PROXY` 里的 **`[::1]`** 这个条目会让 httpx 在构造 `URLPattern` 时把它当成带端口的 URL，
+于是抛 `Invalid port: ':1]'`。凡是用到 httpx 的生成器（即所有经 `TestClient` 驱动真实 ASGI 应用
+的那些）都会在**建立客户端**这一步就炸掉，根本走不到语料比对。
+
+**这不是代码缺陷，也不是语料漂移**。判定方法：清掉该变量后同一条命令立刻恢复正常——
+实测 `NO_PROXY=''` 后 ops_api 57 条 / 172s 通过，server 309s、proxy_handler 254s、
+upstream_fixtures 304s 全部 exit 0。
+
+**CI 不受影响**（GitHub Actions 没有这个变量）。本地复现或排查时：
+
+```powershell
+$env:NO_PROXY=''; $env:no_proxy=''   # 仅影响当前进程
+python -X utf8 scripts/gen_server_corpus.py --check
+```
+
+**教训**：门禁"秒退"几乎总是环境或导入期异常，而不是语料不一致——真正的语料不一致会在跑完
+全部用例（几十秒到几分钟）之后才报出来。看到"很快失败"应先看栈底，别急着怀疑自己刚改的代码。
+（本轮我一度以为接线引入了回归，正是这条把它排除了。）
 ## 提交约定
 
 按模块独立提交，Conventional Commits：`<type>(<scope>): <中文摘要>`，正文说明
