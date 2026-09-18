@@ -55,7 +55,9 @@ function summary(task) {
 }
 
 // 逗号分隔的 stop 序列；空字符串表示不固定该参数。
-const stopText = (task) => (task.params?.stop || []).join(", ");
+// task 为 null 表示"新建"（taskEditor(null)），因此必须对 task 本身做可选链：
+// 只写 task.params?.stop 会在新建时抛 TypeError，让整个编辑器画不出来。
+const stopText = (task) => (task?.params?.stop || []).join(", ");
 
 function taskEditor(task) {
   const isNew = !task;
