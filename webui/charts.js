@@ -6,7 +6,7 @@
 // - 图表以真实像素宽度渲染（不用 preserveAspectRatio="none" 拉伸），
 //   因为拉伸会把描边和文字一起压扁，读数就不准了。
 
-import { h, svg, mount, formatClock, formatClockSeconds, formatDateTime, clamp } from "./dom.js";
+import { h, svg, mount, formatClockSeconds, formatDateTime, formatAxisTime, clamp } from "./dom.js";
 import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
   heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_SLOTS, HEAT_LEVELS,
@@ -62,6 +62,23 @@ function formatValue(metric, value) {
   return metric.format(value);
 }
 
+// 时间轴标签的格式由**整段跨度**决定（见 dom.js 的 formatAxisTime）：长窗口下
+// 固定 "HH:MM" 会退化成每个点都是 "00:00" 的噪声。跨度优先用真实的首尾时间戳，
+// 拿不到再退回「点数 × 桶宽」。
+function axisTimeFormatter(points, bucketSeconds) {
+  const list = points || [];
+  const at = (point) => point?.at ?? point?.started_at;
+  const first = at(list[0]);
+  const last = at(list[list.length - 1]);
+  let span = 0;
+  if (first && last) {
+    const seconds = (Date.parse(last) - Date.parse(first)) / 1000;
+    if (Number.isFinite(seconds) && seconds > 0) span = seconds;
+  }
+  if (!span) span = Math.max(0, list.length - 1) * (Number(bucketSeconds) || 0);
+  return (value) => formatAxisTime(value, span);
+}
+
 function withUnit(metric, value) {
   const text = formatValue(metric, value);
   if (text === "—") return text;
@@ -109,6 +126,7 @@ export function lineChart({
   height = 240,
   showArea = true,
   ariaLabel,
+  cumulative = false,
 }) {
   const metric = METRIC_MAP[metricId] || METRIC_MAP.rpm;
   const host = h("div.chart-host", { style: { height: `${height}px` } });
@@ -120,6 +138,15 @@ export function lineChart({
     value: metricValue(point, metric, bucketSeconds),
     raw: point,
   }));
+  // 累计模式：把每桶读数改写成"到此为止的总和"，用来画"总量涨到多少"。
+  // 缺失的桶（null）不参与累加也不算断点——它只是没采样，不是总量归零。
+  if (cumulative) {
+    let running = 0;
+    for (const point of series) {
+      if (readable(point)) running += point.value;
+      point.value = running;
+    }
+  }
 
   sizing(host, (width) => {
     const innerW = Math.max(10, width - PAD.left - PAD.right);
@@ -148,11 +175,12 @@ export function lineChart({
     }
 
     // 时间轴标签
+    const formatAxis = axisTimeFormatter(series, bucketSeconds);
     for (const tick of timeTicks(series, Math.max(2, Math.floor(innerW / 92)))) {
       node.append(svg("text", {
         class: "axis-label", x: x(tick.index), y: height - PAD.bottom + 18,
         "text-anchor": "middle", ...AXIS_TEXT,
-      }, formatClock(tick.at)));
+      }, formatAxis(tick.at)));
     }
 
     const baseline = PAD.top + innerH;
@@ -248,7 +276,7 @@ export function lineChart({
 }
 
 // —— 堆叠柱：输入 / 输出 Token 随时间构成 ——
-export function stackedBars({ points, height = 200, series: seriesSpec, bucketSeconds = 60 }) {
+export function stackedBars({ points, height = 200, series: seriesSpec, bucketSeconds = 60, ariaLabel = "Token 构成随时间变化", emptyText = "该时间窗内没有 Token 用量" }) {
   const specs = seriesSpec || [
     { id: "prompt", label: "输入", tone: "primary", pick: (point) => point.prompt_tokens },
     { id: "completion", label: "输出", tone: "secondary", pick: (point) => point.completion_tokens },
@@ -268,7 +296,7 @@ export function stackedBars({ points, height = 200, series: seriesSpec, bucketSe
 
     const node = svg("svg", {
       width, height, viewBox: `0 0 ${width} ${height}`,
-      class: "chart stacked", role: "img", "aria-label": "Token 构成随时间变化",
+      class: "chart stacked", role: "img", "aria-label": ariaLabel,
     });
 
     for (const tick of scale.ticks) {
@@ -281,11 +309,12 @@ export function stackedBars({ points, height = 200, series: seriesSpec, bucketSe
     }
 
     const labelPoints = (points || []).map((point) => ({ started_at: point.started_at }));
+    const formatAxis = axisTimeFormatter(points, bucketSeconds);
     for (const tick of timeTicks(labelPoints, Math.max(2, Math.floor(innerW / 92)))) {
       node.append(svg("text", {
         class: "axis-label", x: PAD.left + tick.index * slot + barWidth / 2, y: height - PAD.bottom + 18,
         "text-anchor": "middle", ...AXIS_TEXT,
-      }, formatClock(tick.at)));
+      }, formatAxis(tick.at)));
     }
 
     const baseline = PAD.top + innerH;
@@ -323,7 +352,7 @@ export function stackedBars({ points, height = 200, series: seriesSpec, bucketSe
       }
     });
 
-    if (!totals.some((value) => value > 0)) frame.append(h("div.chart-empty", "该时间窗内没有 Token 用量"));
+    if (!totals.some((value) => value > 0)) frame.append(h("div.chart-empty", emptyText));
     return frame;
   });
   return host;

@@ -16,6 +16,8 @@ const BUCKET_LADDER = [15, 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 10
 // 后端 MAX_SERIES_POINTS = 500：超过会被 422 拒绝，所以取桶要留一格余量。
 export const MAX_SERIES_POINTS = 500;
 
+// 实时监控的快捷窗口（概览页）。刻意只到 7 天：这一页看的是"现在怎么样"，
+// 再长的窗口该去用量统计页看。
 export const TIME_RANGES = [
   { hours: 1, label: "1 小时", short: "1h" },
   { hours: 6, label: "6 小时", short: "6h" },
@@ -23,6 +25,68 @@ export const TIME_RANGES = [
   { hours: 72, label: "3 天", short: "3d" },
   { hours: 168, label: "7 天", short: "7d" },
 ];
+
+// 历史用量窗口（用量统计页）：在实时窗口之上加月/季/半年/年，外加「全部」。
+// 上限 8760 小时（1 年）来自后端 /metrics/series 的 hours 上界。
+export const LONG_RANGES = [
+  { hours: 720, label: "1 个月", short: "1m" },
+  { hours: 2160, label: "3 个月", short: "3m" },
+  { hours: 4320, label: "6 个月", short: "6m" },
+  { hours: 8760, label: "1 年", short: "1y" },
+];
+
+// ALL_HISTORY 是「全部」这个虚拟窗口的 id。
+//
+// 它不能用固定 hours 表达：历史有多长只有服务端知道。因此先用
+// /metrics/requests?all_history=true 读回 earliest（window.from 为 null 时说明库是空的），
+// 再据此推导 hours —— 这条路由的 hours 上限是 720，所以**不能**用 hours 表达「全部」，
+// 但它的 all_history 分支会把 window.from 设成库里的最早时间，正好是我们要的跨度。
+// 推导结果仍受 series 的 8760 上限约束，超出时按 8760 截断并在界面上标注。
+export const ALL_HISTORY = "all";
+export const MAX_HISTORY_HOURS = 8760;
+export const USAGE_RANGES = [
+  ...TIME_RANGES,
+  ...LONG_RANGES,
+  { hours: ALL_HISTORY, label: "全部历史", short: "全部" },
+];
+
+// 窗口描述：把选中项解析成"要请求多少小时、界面上怎么称呼"。
+// selection 既可以是小时数，也可以是 ALL_HISTORY；「全部」的真实跨度由调用方用
+// historyHours() 从服务端读回后经 allHours 传入（拿不到时退回上限）。
+export function rangeSpec(selection, { allHours = null } = {}) {
+  if (selection === ALL_HISTORY) {
+    const hours = allHours || MAX_HISTORY_HOURS;
+    return {
+      hours,
+      label: "全部历史",
+      short: "全部",
+      all: true,
+      // 跨度顶到后端上限时必须说明"只覆盖到上限"，否则"全部"会被当成真的是全部。
+      truncated: hours >= MAX_HISTORY_HOURS,
+    };
+  }
+  const found = USAGE_RANGES.find((range) => range.hours === selection);
+  const hours = Number(selection) || 1;
+  return {
+    hours,
+    label: found?.label || `${hours} 小时`,
+    short: found?.short || `${hours}h`,
+    all: false,
+    truncated: false,
+  };
+}
+
+// 从服务端给出的最早时间推导历史跨度（小时），并夹到后端上限内。
+// 返回 null 表示"库里没有任何记录"，此时没有窗口可画。
+export function historyHours(earliest, now = Date.now()) {
+  if (!earliest) return null;
+  const started = Date.parse(earliest);
+  if (!Number.isFinite(started)) return null;
+  const elapsed = now - started;
+  if (!(elapsed > 0)) return null;
+  // 向上取整：跨度是 1.2 小时时取 2 小时，否则会漏掉最早那条记录所在的部分桶。
+  return Math.min(MAX_HISTORY_HOURS, Math.max(1, Math.ceil(elapsed / 3600000)));
+}
 
 // 选最小的、能满足点数上限的桶宽：越小越精确。
 export function pickBucketSeconds(hours) {
@@ -33,6 +97,9 @@ export function pickBucketSeconds(hours) {
 }
 
 export function bucketLabel(seconds) {
+  // 天级桶说"1 天"而不是"24 小时"：长窗口的读数区会写"366 个数据点"，配"24 小时/点"
+  // 要心算才知道覆盖多久，而"1 天/点"一眼就懂。
+  if (seconds % 86400 === 0) return `${seconds / 86400} 天`;
   if (seconds % 3600 === 0) return `${seconds / 3600} 小时`;
   if (seconds % 60 === 0) return `${seconds / 60} 分钟`;
   return `${seconds} 秒`;
@@ -119,6 +186,19 @@ export const METRICS = [
     value: (point) => point.total_tokens,
     total: (sums) => sums.total_tokens,
     format: (value) => formatCompactNumber(value),
+  },
+  // 计数型（不换算速率）：累计曲线要用"一共多少次"，而不是"每分钟多少次"。
+  // 与 rpm 的分工是单位不同，不是同一指标的两种画法。
+  {
+    id: "requests",
+    label: "请求数",
+    short: "请求",
+    unit: "次",
+    percent: false,
+    hint: "每个时间桶的上游请求次数（不换算速率）",
+    value: (point) => point.requests,
+    total: (sums) => sums.requests,
+    format: (value) => formatNumber(value, 0),
   },
 ];
 
@@ -422,6 +502,107 @@ export function heatmapScale(cells) {
 export function heatmapLevel(value, max, steps = 4) {
   if (!(max > 0)) return 0;
   return Math.min(steps, Math.max(0, Math.ceil(value / (max / steps))));
+}
+
+// —— 历史用量聚合 ——
+// 长窗口（月/季/年）里逐桶列表没有可读性：366 个日桶要一行行看。
+// 历史视角要的是"按天/按时段的汇总"，所以下面把这三种聚合收敛成纯函数。
+
+// 北京日历日（"YYYY-MM-DD"）。用 en-CA 是因为它的短日期格式恰好是 ISO 顺序，
+// 不必手工拼接补零（拼接版本容易在月份/日期上写反）。
+const BEIJING_DATE = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit",
+});
+
+export function beijingDate(value) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return BEIJING_DATE.format(date);
+}
+
+// 按北京日历日聚合序列点。
+//
+// 分母型字段（耗时、首字）必须**加权求和后再除**，不能对每日均值再平均 ——
+// 与 windowSums 同一个理由：1 次请求的一天和 1000 次请求的一天权重相同会算错。
+export function dailyUsage(points) {
+  const days = new Map();
+  for (const point of points || []) {
+    const key = beijingDate(point?.started_at);
+    if (!key) continue;
+    let day = days.get(key);
+    if (!day) {
+      day = {
+        date: key, requests: 0, successes: 0, failures: 0, retries: 0,
+        prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0,
+        total_duration_ms: 0, total_first_token_ms: 0, buckets: 0, partial: false,
+      };
+      days.set(key, day);
+    }
+    day.requests += number(point.requests);
+    day.successes += number(point.successes);
+    day.failures += number(point.failures);
+    day.retries += number(point.retries);
+    day.prompt_tokens += number(point.prompt_tokens);
+    day.completion_tokens += number(point.completion_tokens);
+    day.total_tokens += number(point.total_tokens);
+    day.cached_tokens += number(point.cached_tokens);
+    day.total_duration_ms += number(point.total_duration_ms);
+    day.total_first_token_ms += number(point.total_first_token_ms);
+    day.buckets += 1;
+    if (point.complete === false) day.partial = true;
+  }
+  // 字典序即时间序（ISO 日期），不必解析回 Date 再比。
+  return [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// 按时段（0-23 时，北京时间）聚合：回答"高峰在几点"。
+//
+// 与热力图的分工：热力图看**周内**节律（工作日 vs 周末），这里把整段窗口压成
+// 24 根柱子看**日内**节律 —— 3 个月以上的窗口用热力图会糊成一团，看时段分布更实用。
+export function hourlyProfile(points, { value = (point) => number(point.requests) } = {}) {
+  const hours = Array.from({ length: 24 }, (_, hour) => ({ hour, value: 0, buckets: 0 }));
+  for (const point of points || []) {
+    const slot = beijingSlot(point?.started_at);
+    if (!slot) continue;
+    // beijingSlot 的 slot 是半小时格，除以 2 得到小时。它同时保证了时区正确。
+    const hour = Math.floor(slot.slot / 2);
+    hours[hour].value += value(point);
+    hours[hour].buckets += 1;
+  }
+  return hours;
+}
+
+// 累计曲线：把每桶读数累加，用于"总量涨到多少"的历史读数。
+// 缺失桶（null）不参与累加也不重置 —— 它只是没采样，不是总量归零。
+export function cumulativeSeries(seriesPoints) {
+  let running = 0;
+  return (seriesPoints || []).map((point) => {
+    if (readable(point)) running += point.value;
+    return { ...point, value: running };
+  });
+}
+
+// 分段对比：把窗口按时间对半切开，比较前后两半。
+//
+// 用"对半"而不是"与上一个等长窗口比"：后者要为每种窗口再多取一份数据，
+// 而长窗口（1 年）翻倍查询代价很高。对半切只用手上已有的点，且读作
+// "后半段相对前半段"同样能回答"用量在涨还是在跌"。
+export function splitCompare(points, reducer = "sum") {
+  const list = completeOnly(points);
+  if (list.length < 2) return null;
+  const half = Math.floor(list.length / 2);
+  const before = summarize(list.slice(0, half), reducer);
+  const after = summarize(list.slice(half), reducer);
+  if (before === null || after === null) return null;
+  const change = before ? (after - before) / before : null;
+  return { before, after, change };
+}
+
+function summarize(seriesPoints, reducer) {
+  const values = (seriesPoints || []).filter(readable).map((point) => point.value);
+  if (!values.length) return null;
+  if (reducer === "avg") return values.reduce((sum, value) => sum + value, 0) / values.length;
+  return values.reduce((sum, value) => sum + value, 0);
 }
 
 // —— 数字格式化（纯函数，与 dom.js 的展示版保持一致精度）——

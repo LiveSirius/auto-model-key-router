@@ -100,6 +100,29 @@ export function formatDateTime(value) {
   }).format(date);
 }
 
+// 坐标轴时间标签：格式跟着**整段跨度**走，而不是固定成时刻。
+//
+// 固定 "HH:MM" 在长窗口下会退化成噪声：1 年窗口（366 个日桶）里每个点都是
+// 同一个月日交替的 "00:00"，读不出"这是几月"，轴就白标了。分档依据是跨度而不是
+// 桶宽 —— 6 小时窗口配 5 分钟桶仍是"看时刻"，而 1 个月窗口配 1 小时桶要看日期。
+export function formatAxisTime(value, spanSeconds) {
+  const date = toDate(value);
+  if (!date) return "-";
+  const span = Number(spanSeconds) || 0;
+  // 两天以内：时刻就够定位（"10:30" 落在今天还是昨天由上下文可知）。
+  if (span <= 2 * 86400) return formatClock(date);
+  // 两个月以内：月日足够，带上时刻会挤成一团。
+  if (span <= 60 * 86400) {
+    return new Intl.DateTimeFormat("zh-CN", {
+      timeZone: DISPLAY_TZ, month: "2-digit", day: "2-digit",
+    }).format(date);
+  }
+  // 再长就看年月：跨年时只给月日会出现两个 "01-01"，无法分辨是哪一年。
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: DISPLAY_TZ, year: "numeric", month: "2-digit",
+  }).format(date);
+}
+
 // 相对时间只用于"刚刚发生过"的短窗口提示，超过一天就退回绝对时间。
 export function formatRelative(value, now = Date.now()) {
   const date = toDate(value);
