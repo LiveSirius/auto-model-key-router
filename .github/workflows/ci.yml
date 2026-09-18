@@ -72,6 +72,11 @@ jobs:
         # 默认路由拼得起来、品牌识别不能被单字符品牌名（xAI）误伤。
         run: node webui/probes/webui_providers_probe.mjs
 
+      - name: 模型路由页探针
+        # 同一套左侧竖向导航：模型列表也要竖排在左栏、旧的横排标签页条不能回来，
+        # 且切换模型/展开编辑器时右侧详情要跟着换。
+        run: node webui/probes/webui_routing_probe.mjs
+
   go:
     name: Go 静态检查与测试
     runs-on: ubuntu-latest

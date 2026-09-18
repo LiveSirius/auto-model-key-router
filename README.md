@@ -362,6 +362,7 @@ go test ./...           # 全部包
 node scripts/webui_module_check.mjs      # 16 个 ES 模块的加载检查
 node webui/probes/webui_chart_probe.mjs  # 图表口径
 node webui/probes/webui_tip_probe.mjs
+node webui/probes/webui_routing_probe.mjs  # 模型路由页左侧导航
 node webui/probes/webui_auth_probe.mjs   # 鉴权与任务路由页；不带参数=跑全部场景
 ```
 
