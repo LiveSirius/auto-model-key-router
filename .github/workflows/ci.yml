@@ -47,7 +47,7 @@ jobs:
           node-version: "22"
 
       - name: ES 模块加载检查
-        # 逐个 import webui/ 下的全部 18 个 ES 模块，抓语法错误与 import 图断裂。
+        # 逐个 import webui/ 下的全部 ES 模块，抓语法错误与 import 图断裂。
         run: node scripts/webui_module_check.mjs
 
       - name: 图表口径探针
@@ -66,6 +66,11 @@ jobs:
         # 锁住成本公式：缓存 token 不能重复计费；拿不到单价必须回 null 而不是 0
         # （0 会被读成"免费"）；模型名匹配要穿透日期后缀与供应商前缀。
         run: node webui/probes/webui_pricing_probe.mjs
+
+      - name: 供应商页探针
+        # 锁住左侧竖向导航与预置：标签页条不能被改回来、预置地址必须与后端
+        # 默认路由拼得起来、品牌识别不能被单字符品牌名（xAI）误伤。
+        run: node webui/probes/webui_providers_probe.mjs
 
   go:
     name: Go 静态检查与测试

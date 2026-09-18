@@ -59,6 +59,7 @@ jobs:
           node webui/probes/webui_tip_probe.mjs
           node webui/probes/webui_auth_probe.mjs
           node webui/probes/webui_pricing_probe.mjs
+          node webui/probes/webui_providers_probe.mjs
 
   # ---- 构建与发布 ----
   release:
