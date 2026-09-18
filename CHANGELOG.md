@@ -2,6 +2,40 @@
 
 ## [Unreleased]
 
+（暂无）
+
+## [5.0.0] - 2026-09-18
+
+### 重大变更：实现语言从 Python 迁移到 Go
+
+整个项目已用 Go 重写，**Python 实现已退役并从仓库移除**（含 41 个模块与全部 Python 测试）。
+发布物由 Python 包（PyPI）改为**单个 Go 二进制**（GitHub Releases）。
+
+- **部署形态**：单个二进制，配置、WebUI 静态资产（`//go:embed`）与 SQLite 指标库驱动全部编在里面，
+  运行时不需要 Python、node 或任何额外依赖。
+- **数据兼容**：SQLite 指标库 schema 与参照实现逐字节对齐（19 列、7 索引、无 `user_version`），
+  可直接沿用既有 `metrics.sqlite3`；已用真实生产库（70 MB）验证 Go 与 Python 读取结果逐项一致。
+- **配置兼容**：v4 配置 JSON 直接可用，无需迁移。
+
+#### 破坏性变更
+
+- **终端交互界面（TUI）入口移除**。`amkr` 不带参数时的行为由「进入终端界面」改为
+  **前台启动服务**；配置与查看改用 WebUI（`http://127.0.0.1:<port>/ui`）或管理 API。
+- **`--show-logs` 移除**。日志查看改由 `GET /api/logs` 与 WebUI 承担。
+- **`--update` 与 `--restart-service-after-update` 移除**（自更新功能取消）。
+  `--check-update` 保留，但**改为只查 GitHub Releases**。
+- **访客 Key 不再需要 `[visitor]` 额外安装**：访客功能现为常驻，`amkr-visitor` 固定 Key 直接可用。
+- **安装方式变更**：不再有 `pip install` / `pipx` / `uv tool` 安装路径。改为从源码构建
+  （`go build ./cmd/amkr`，需 Go 1.24+）或使用 Docker 镜像。
+- **`/health` 的 `version` 字段**会反映新版本号，按版本断言的自建监控需同步。
+
+#### 兼容性保障
+
+迁移采用差分对拍：23 份语料由 Python 参照实现产出并逐字节冻结在 `internal/*/testdata/`
+与 `cmd/amkr/testdata/` 中，Go 测试逐条回放。语言退役不等于丢掉凭证——这些冻结语料仍是
+兼容性的回归锁。
+
+
 ### Added
 
 - 新增 **embeddings（嵌入）路由**：`POST /v1/embeddings` 走与图像同构的第三种 unified 目标 —— 请求 `unified-model` 时命中 `unified_model.embeddings` 计划（`primary` + 可选 `fallback`），未配置该计划则继承 `default.primary`（不继承 `default.fallback`），其余 Key 路由、重试与熔断语义与既有目标完全一致。上游路径默认 `v1/embeddings`，可按上游 URL 配置 `upstream_routes[base_url].embeddings` 覆盖（别名 `embedding` / `embed`），TUI / WebUI / 管理 API / `--unified-target` 都已能读写该计划。

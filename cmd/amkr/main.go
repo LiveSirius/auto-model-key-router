@@ -51,7 +51,7 @@ import (
 
 // version 与 pyproject.toml 的 project.version 保持一致；发布时可用
 // `-ldflags "-X main.version=..."` 覆盖。
-var version = "4.1.0"
+var version = "5.0.0"
 
 // shutdownTimeout 是优雅关停的上限。
 //
