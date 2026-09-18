@@ -712,16 +712,18 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .segment[aria-pressed="true"] { background: var(--md-primary); color: #fff; }
 .segment[aria-pressed="true"]:hover { background: var(--md-primary-variant); color: #fff; }
 
-/* ══ 供应商：左侧竖向导航 + 右侧详情 ══
-   供应商数量随使用增长，横排标签页会换行或横向滚动、把页头撑高；竖排只占一列，
-   再多也只是这一列变长，右侧详情的位置始终不动。 */
-.provider-split {
+/* ══ 左侧竖向导航 + 右侧详情（供应商页、模型路由页共用）══
+   列表项数量随使用增长（供应商十几家、模型几十个都很常见），横排标签页会换行或
+   横向滚动、把页头撑高；竖排只占一列，再多也只是这一列变长，右侧详情的位置始终不动。
+   两页共用同一套类名，是为了让"导航在左、详情在右"这条排版规则只有一个落点——
+   各写一份迟早会漂成两种间距。 */
+.rail-split {
   display: grid;
   grid-template-columns: minmax(180px, 216px) minmax(0, 1fr);
   gap: var(--sp-2);
   align-items: start;
 }
-.provider-rail {
+.rail-nav {
   display: flex; flex-direction: column; gap: 2px;
   position: sticky; top: var(--sp-2);
   max-height: calc(100vh - var(--sp-6));
@@ -749,7 +751,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .rail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-meta { font-size: 11px; font-weight: 400; color: var(--md-on-surface-variant); }
 .rail-item[aria-current="true"] .rail-meta { color: var(--md-primary); opacity: 0.8; }
-.provider-detail { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+.rail-detail { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
 
 .toolbar {
   display: flex; align-items: center; gap: var(--sp-1);
@@ -1116,7 +1118,7 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   :root { --nav-w: 200px; }
   .col-3, .col-4, .col-5 { grid-column: span 6; }
   .col-7, .col-8 { grid-column: span 12; }
-  .provider-split { grid-template-columns: minmax(160px, 184px) minmax(0, 1fr); }
+  .rail-split { grid-template-columns: minmax(160px, 184px) minmax(0, 1fr); }
 }
 @media (max-width: 860px) {
   :root { --nav-w: 100%; }
@@ -1136,8 +1138,8 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   .col-3, .col-4, .col-5, .col-6 { grid-column: span 12; }
   /* 窄屏不再左右分栏：左侧 180px 的栏会把右侧的 Key 表挤到没法看。
    * 改成横向滚动条，与上面 .nav 在同一断点的退化方式一致。 */
-  .provider-split { grid-template-columns: minmax(0, 1fr); }
-  .provider-rail {
+  .rail-split { grid-template-columns: minmax(0, 1fr); }
+  .rail-nav {
     position: static; max-height: none;
     flex-direction: row; overflow-x: auto; overflow-y: hidden;
     gap: 4px;

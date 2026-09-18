@@ -158,12 +158,37 @@ export function renderRouting(context) {
   return host;
 }
 
+// 模型导航：竖向排在详情左侧，与供应商页共用同一套排版（.rail-split / .rail-nav）。
+//
+// 模型数量只会比供应商更多（一个供应商就能贡献几十个），横排标签页尤其撑不住；
+// 竖排只占一列，再多也只是这一列变长，右侧详情的位置始终不动。
+//
+// 不带图标：供应商那栏的品牌标志是有信息量的（一眼分辨是哪家），而这里每一行都是
+// 同一个「路由」图标，重复几十次只是占宽。列只有 180px，留给模型名更有用。
+//
+// 语义用 nav + aria-current，不用 role="tab"：真正的 tab 需要配套的
+// role="tabpanel" 与方向键 roving tabindex，这里没有实现，标成 tab 属于空头承诺。
+function routeRail() {
+  return h("nav.rail-nav", { "aria-label": "模型列表" },
+    state.routes.map((route) => h("button.rail-item", {
+      type: "button",
+      "aria-current": route.id === state.active ? "true" : null,
+      onClick: () => { state.active = route.id; state.editing = null; draw(); },
+    },
+      h("span.rail-text", {},
+        h("span.rail-name", route.id),
+        h("span.rail-meta", `${(route.targets || []).length} 个目标`),
+      ),
+    )),
+  );
+}
+
 function draw() {
   if (!host) return;
   const children = [
     h("div.page-head", {},
       h("div", {}, h("h1", "模型路由"),
-        h("p.sub", "管理路由别名和路由模式；模型的目标 Key 在下方按顺序排列。")),
+        h("p.sub", "管理路由别名和路由模式；模型的目标 Key 在右侧按顺序排列。")),
       h("div.spacer"),
       state.revision ? badge(`版本 ${String(state.revision).slice(0, 12)}`, "muted") : null,
     ),
@@ -175,18 +200,14 @@ function draw() {
     return;
   }
 
-  children.push(h("div.tabs", { role: "tablist" }, state.routes.map((route) => h("button.tab", {
-    type: "button", role: "tab", "aria-selected": String(route.id === state.active),
-    onClick: () => { state.active = route.id; state.editing = null; draw(); },
-  }, `模型 · ${route.id}`))));
-
   const route = state.routes.find((item) => item.id === state.active);
   if (!route) { render(host, children); return; }
 
+  const detail = [];
   if (state.editing === route.id) {
-    children.push(card(routeEditor(route)));
+    detail.push(card(routeEditor(route)));
   } else {
-    children.push(card(
+    detail.push(card(
       cardHead(route.id,
         badge(modeLabel(route.routing_mode), "muted"),
         badge(`${(route.targets || []).length} 个目标`, "muted"),
@@ -203,5 +224,10 @@ function draw() {
       ),
     ));
   }
+
+  children.push(h("div.rail-split", {},
+    routeRail(),
+    h("div.rail-detail", {}, detail),
+  ));
   render(host, children);
 }

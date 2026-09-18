@@ -615,7 +615,7 @@ export function renderProviders(context) {
   return host;
 }
 
-// 供应商导航：竖向排在详情左侧。
+// 供应商导航：竖向排在详情左侧，与模型路由页共用同一套排版（.rail-split / .rail-nav）。
 //
 // 为什么竖排而不是沿用顶部的横向标签页：供应商数量随使用增长，十几家很常见。
 // 横排标签页要么换行、要么横向滚动，把页头撑成两三行；竖排只占一列，再多也只是
@@ -624,7 +624,7 @@ export function renderProviders(context) {
 // 语义用 nav + aria-current，不用 role="tab"：真正的 tab 需要配套的
 // role="tabpanel" 与方向键 roving tabindex，这里没有实现，标成 tab 属于空头承诺。
 function providerRail() {
-  return h("nav.provider-rail", { "aria-label": "供应商列表" },
+  return h("nav.rail-nav", { "aria-label": "供应商列表" },
     state.providers.map((item) => {
       const count = (item.keys || []).length;
       return h("button.rail-item", {
@@ -706,9 +706,9 @@ function draw() {
 
   detail.push(probePanel(provider));
 
-  children.push(h("div.provider-split", {},
+  children.push(h("div.rail-split", {},
     providerRail(),
-    h("div.provider-detail", {}, detail),
+    h("div.rail-detail", {}, detail),
   ));
   render(host, children);
 }

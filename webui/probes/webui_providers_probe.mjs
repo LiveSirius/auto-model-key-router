@@ -134,12 +134,13 @@ await new Promise((resolve) => setTimeout(resolve, 0));
 await new Promise((resolve) => setTimeout(resolve, 0));
 
 // —— 布局：切换器必须竖排在左侧，横向标签页条必须消失 ——
-const split = byClass(host, "provider-split")[0];
-const rail = byClass(host, "provider-rail")[0];
+// 类名用共用的 .rail-* （模型路由页也在用），供应商页特有的 .provider-* 已经不存在了。
+const split = byClass(host, "rail-split")[0];
+const rail = byClass(host, "rail-nav")[0];
 check("split_present", Boolean(split));
 check("rail_is_nav", rail?.tagName === "nav", rail?.tagName);
 check("rail_is_first_column", split?.children[0] === rail);
-check("detail_is_second_column", hasClass(split?.children[1] || new FakeNode("x"), "provider-detail"));
+check("detail_is_second_column", hasClass(split?.children[1] || new FakeNode("x"), "rail-detail"));
 check("old_tabs_strip_removed", byClass(host, "tabs").length === 0);
 check("detail_holds_cards", byClass(split?.children[1] || new FakeNode("x"), "card").length >= 2);
 
@@ -166,7 +167,7 @@ check("brand_icon_has_path", byTag(brandSvg || new FakeNode("x"), "path").length
 
 // —— 切换供应商：详情必须跟着换 ——
 click(items[1]);
-const rail2 = byClass(host, "provider-rail")[0];
+const rail2 = byClass(host, "rail-nav")[0];
 check("switch_updates_current", byClass(rail2, "rail-item")[1]?.attrs["aria-current"] === "true");
 check("switch_repaints_detail", findText(host, "my-deepseek"));
 
