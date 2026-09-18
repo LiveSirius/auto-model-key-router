@@ -9,7 +9,7 @@ AMKR 是单个 Go 二进制：配置、WebUI 静态资产（`//go:embed`）与 S
 - **按模型管理 Key**：Key 属于供应商（`providers.*.keys`），模型通过 `targets[]`（`{provider, key, upstream_model}`）绑定一个或多个 Key；同一 Key 可服务多个模型，支持 `round_robin`、`priority`、`only_first`。
 - **失败切换与冷却**：遇到 `401/403/429/5xx` 等可重试错误时自动重试或切换 Key，并在进程内临时冷却异常 Key。
 - **统一模型名**：客户端固定请求 `unified-model`，真实模型和固定 Key 可在路由器侧随时切换。
-- **任务路由**：把任务名（`TASK_XXXXXX`）直接当模型名传，由路由器决定用哪个模型（首选 + 备选）和哪组采样参数；调用方改不了这些参数。
+- **任务路由**：把任务名（`TASK_XXXXXX`）直接当模型名传，由路由器决定用哪个模型（首选 + 备选）和哪组采样参数；调用方改不了这些参数。任务名只在工作空间内唯一，用 `X-AMKR-Workspace` 头隔离不同团队的任务集合。
 - **每个 Key 独立探测**：模型清单按 Key 缓存（同一供应商不同 Key 可见模型可能不同），添加 Key 时自动探测该 Key，也可在 WebUI 的供应商页或管理 API 手动刷新。
 - **OpenAI-compatible 代理**：支持 `/v1/chat/completions`、`/v1/models`、`/v1/embeddings`、图像生成与编辑，并兼容 Claude Code 的 `/v1/messages` 与 Codex 的 `/v1/responses`；升级到 `/v1/*` 的 WebSocket 连接会被转发到上游。可为不同协议模式配置上游额外路径。
 - **WebUI 管理**：浏览器里配置供应商与 Key、模型路由、统一模型、任务路由、客户端接入、服务注册和运行设置。
@@ -160,6 +160,18 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 任务名对应的模型、备选模型和采样参数都在 AMKR 侧固定，调用方不需要知道真实模型名。详见 [`docs/USAGE.md`](docs/USAGE.md#9-任务路由)。
 
+任务名只在**工作空间**内唯一，用 `X-AMKR-Workspace` 头选择（不带即默认工作空间，也就是配置的顶层 `tasks`）：不同工作空间可以有同名任务，各自指向自己的模型与参数。
+
+```bash
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer amkr_your-local-api-key" \
+  -H "X-AMKR-Workspace: teamA" \
+  -d '{"model": "TASK_000001", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+该头不会转发给上游，也不会影响既有调用方（不带头就是原来的行为）。详见 [工作空间](docs/USAGE.md#91-工作空间把任务集合分开)。
+
 除代理路径外，服务还提供 `GET /health`（无需鉴权）、`GET /v1/models`、`GET /metrics`、`GET /metrics/requests`、`GET /metrics/series`、`GET /ws/events`（事件流，WebSocket），以及 `/api/*` 管理接口（供应商、Key、模型、路由、统一模型、任务、探测、配置导入导出、设置）。完整清单见 [`docs/API.md`](docs/API.md)。
 
 ## WebUI
@@ -306,11 +318,18 @@ amkr --version
       "fallback_model": null,
       "params": {"temperature": 0.2, "top_p": 0.9}
     }
+  },
+  "workspaces": {
+    "teamA": {
+      "tasks": {
+        "TASK_000001": {"model": "claude-sonnet-4", "params": {"temperature": 0.7}}
+      }
+    }
   }
 }
 ```
 
-> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model, fallback_model?, params?}`；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`reasoning_effort`，写错键名会在保存时报错。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 WebUI 的供应商页刷新探测（单个 Key 或批量、可限端点范围），或调用管理 API 的 probe 接口。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
+> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model, fallback_model?, params?}`；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`reasoning_effort`，写错键名会在保存时报错。`workspaces` 同样可选，每个键是一个工作空间名，值里的 `tasks` 形状与顶层 `tasks` 完全相同；顶层 `tasks` 就是默认工作空间（不带 `X-AMKR-Workspace` 头时命中的那个），任务名只在同一工作空间内需要唯一。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 WebUI 的供应商页刷新探测（单个 Key 或批量、可限端点范围），或调用管理 API 的 probe 接口。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
 
 流式请求使用分段超时：`stream_first_byte_timeout`（默认 60 秒）覆盖等待上游响应头和第一块响应体的总时间，`stream_idle_timeout`（默认 60 秒）限制首块之后相邻响应块的等待时间，两者都必须大于 0。响应头返回前超时会按现有重试策略切换 Key；下游流建立后超时只结束当前流，不会自动重放请求。普通请求超时与这两个流式超时都可以在 WebUI 的**设置**页统一调整。
 

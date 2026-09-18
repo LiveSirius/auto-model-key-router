@@ -66,8 +66,8 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/providers/{provider_id}/keys/{key_name}/probe` | 仅本地 | 同步刷新指定 Key 的能力探测，可用 `modes` 限定路由检查范围 |
 | `GET/POST` | `/api/routes` | 仅本地 | 查询或创建模型路由 |
 | `GET/PUT/DELETE` | `/api/routes/{route_id}` | 仅本地 | 查询、更新或删除模型路由 |
-| `GET/POST` | `/api/tasks` | 仅本地 | 查询或创建任务路由（`TASK_XXXXXX` → 模型 + 固定参数） |
-| `GET/PUT/DELETE` | `/api/tasks/{task_name}` | 仅本地 | 查询、更新或删除任务路由 |
+| `GET/POST` | `/api/tasks` | 仅本地 | 查询或创建任务路由（`TASK_XXXXXX` → 模型 + 固定参数）；可用 `X-AMKR-Workspace` 头指定工作空间 |
+| `GET/PUT/DELETE` | `/api/tasks/{task_name}` | 仅本地 | 查询、更新或删除任务路由；可用 `X-AMKR-Workspace` 头指定工作空间 |
 | `GET/PUT` | `/api/settings` | 仅本地 | 查询或更新监听、超时和重试设置 |
 | `POST` | `/api/settings/local-api-key` | 仅本地 | 重置本地鉴权 Key；新 Key 仅在本次响应返回 |
 | `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 GitHub Releases 版本检查 |
@@ -87,16 +87,21 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/integrations/{agent}` | 仅本地 | 以 `unified-model` 或 `native` 模式接管该 Agent 配置 |
 | `POST` | `/api/integrations/{agent}/rollback` | 仅本地 | 回退该 Agent 到备份配置 |
 
-### 为什么自更新挂在 `/ui/` 而不是新增 `/api/` 路由
+### 为什么新增能力挂在 `/ui/` 而不是新增 `/api/` 路由
 
 管理面的 47 条与运维面的 7 条路由被逐字节语料锁定，那些语料由已退役的 Python 参照
-实现产出，是本项目兼容性的唯一凭证。自更新是 Go 版**新增**的能力，Python 侧没有对应
-实现，给它手写一条 `/api` 语料等于伪造兼容性证据。因此与价格目录一样挂在 `/ui/` 前缀
-下——那里不在任何冻结清单之内。
+实现产出，是本项目兼容性的唯一凭证。自更新与工作空间目录都是 Go 版**新增**的能力，
+Python 侧没有对应实现，给它们手写 `/api` 语料等于伪造兼容性证据。因此与价格目录一样
+挂在 `/ui/` 前缀下——那里不在任何冻结清单之内。
+
+工作空间对**既有**代理与管理路由的影响只体现为新增的 `X-AMKR-Workspace` 请求头：
+不带该头的请求（也就是全部语料）行为逐字节不变，因此 `tasks/list` 这类被锁定的响应
+体不需要（也不允许）新增 `workspace` 字段。
 
 与 `/ui/pricing.json` 的区别是**鉴权**：价格目录是公开只读数据，自更新会替换磁盘上的
 可执行文件并重启服务，因此 `/ui/update/apply` 要求完整权限（访客 key 一律 401），
 只有 `/ui/update/status` 不鉴权（它只回答「这个构建有没有自更新能力」）。
+`/ui/workspaces.json` 与自更新同类，要求完整权限。
 
 `/api/update/check` 保持不变，仍用于「只检查、不安装」。
 
@@ -138,7 +143,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 
 ### 任务路由
 
-任务名（`TASK_XXXXXX`）是配置 `tasks` 里定义的虚拟模型名。请求它时，真实模型和采样参数都由 AMKR 侧决定：
+任务名（`TASK_XXXXXX`）是配置里定义的任务。请求它时，真实模型和采样参数都由 AMKR 侧决定：
 
 ```json
 {"model": "TASK_000001", "messages": [{"role": "user", "content": "hi"}]}
@@ -150,6 +155,28 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 - 不在任务 `params` 里的参数（如 `max_tokens`）照常透传。
 - 任务不接受调用方指定 Key（`TASK_000001[main]` 返回 `400`），Key 仍由目标模型自身的路由模式决定。
 - 访客 Key 不能访问任务名。
+
+#### 工作空间
+
+任务名只在**工作空间**内唯一：不同工作空间可以有同名任务，各自指向不同的模型与参数。工作空间由请求头选择：
+
+| 头 | 说明 |
+| --- | --- |
+| `X-AMKR-Workspace` | 工作空间名。缺省或为空串即默认工作空间（配置的顶层 `tasks` 段）；超过首尾空白的部分会被裁掉 |
+
+```bash
+# 命中 workspaces.teamA.tasks 里的 TASK_000001
+curl http://127.0.0.1:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer amkr_your-local-api-key" \
+  -H "X-AMKR-Workspace: teamA" \
+  -d '{"model": "TASK_000001", "messages": [{"role": "user", "content": "hi"}]}'
+```
+
+- 该头**不会**转发给上游：它是 AMKR 自己的路由状态，上游既看不懂也不该看到，因此与 `Authorization`、`X-Api-Key`、`Host` 等同属转发前剔除的请求头。
+- 未配置的工作空间名不是错误：任务查表落空后会按普通模型名继续解析，因此最终和「模型未配置」是同一个 `404`。
+- 工作空间只隔离任务：模型的 ID、别名、隐藏别名与 `unified-model` 仍然全局唯一，任务名也不能与它们撞名。
+- 访客 Key 不能使用任务，带上该头也一样。
 
 成功选中路由后，服务会把传给上游的 `model` 改为真实模型 ID，并用选中 Key 的密钥替换鉴权头。其他兼容参数通常会继续传给上游。
 
@@ -725,19 +752,35 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 任务路由把「模型 + 固定采样参数」打包成一个可直接当 `model` 传的名字。任务名不能与模型 ID、别名、隐藏别名或 `unified-model` 撞名（否则路由语义会取决于查表顺序），也不能指定 Key。
 
+这五个端点都认 `X-AMKR-Workspace` 头，语义与代理面完全一致：缺省即默认工作空间（顶层 `tasks`），带 `X-AMKR-Workspace: teamA` 即读写 `workspaces.teamA.tasks`。任务名只在工作空间内唯一，因此**同一空间内**重名报 `409`、跨空间同名合法；`GET/PUT/DELETE /api/tasks/{task_name}` 取的是该空间里的那个任务，别的空间的同名任务不会被误改。工作空间名不需要事先声明：在它下面建第一个任务即存在，删掉最后一个任务即消失。
+
+响应体没有变化：`TaskResponse` 不含 `workspace` 字段（`tasks/list` 的字节被对拍语料锁定），当前空间由请求头决定。
+
 #### `GET /api/tasks`
 
-返回 `{"tasks": [TaskResponse]}`，另含 `config_revision`。
+返回 `{"tasks": [TaskResponse]}`（只含该空间的任务），另含 `config_revision`。
 
 #### `POST /api/tasks`
 
-请求体为 TaskCreate，成功返回 `201` 与 TaskResponse（含 `config_revision`）。
+请求体为 TaskCreate，成功返回 `201` 与 TaskResponse（含 `config_revision`）。该空间已有同名任务时返回 `409`（`{"detail": "任务已存在: <name>"}`）。
 
 #### `GET/PUT/DELETE /api/tasks/{task_name}`
 
-查询、更新或删除单个任务。`PUT` 请求体为 TaskUpdate + `config_revision`，成功返回 `200` 与更新后的 TaskResponse；`GET` 返回 TaskResponse；`DELETE` 请求体只需 `config_revision`，成功返回 `204`。任务不存在时返回 `404`（`{"detail": "任务不存在: <name>"}`）。
+查询、更新或删除单个任务。`PUT` 请求体为 TaskUpdate + `config_revision`，成功返回 `200` 与更新后的 TaskResponse；`GET` 返回 TaskResponse；`DELETE` 请求体只需 `config_revision`，成功返回 `204`。该空间里任务不存在时返回 `404`（`{"detail": "任务不存在: <name>"}`）——**不会**回落到别的空间的同名任务。
 
-任务随 `/api/config/export`、`/api/config/import` 一同迁移；导入时引用不到模型的任务会被跳过（与「该模型从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有备选没了则退化为单模型任务。
+任务随 `/api/config/export`、`/api/config/import` 一同迁移（命名工作空间也在其中）；导入时引用不到模型的任务会被跳过（与「该模型从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有备选没了则退化为单模型任务。
+
+#### `GET /ui/workspaces.json`
+
+列出**有任务**的工作空间及各自任务数，供 WebUI 填充切换下拉：
+
+```json
+{"workspaces": [{"name": "default", "task_count": 2}, {"name": "teamA", "task_count": 1}]}
+```
+
+默认工作空间 `default` 固定排在首位。没有任何任务的工作空间不会出现——空间由「在它里面建任务」隐式产生，空分组既不可观测也没有意义（删空的工作空间也会从配置里消失）。
+
+该端点挂在 WebUI 前缀下（`/ui/...`，与 `pricing.json` 同类），因此它**不在**管理 API 的 47 条路由清单里：那些路由的响应字节由已退役的参照实现生成的语料逐字节锁定，而工作空间是 Go 侧新增的能力，没有可比对的 oracle。默认需要本地鉴权（与其它管理端点一致）；WebUI 关闭时该路径不注册。
 
 ### 供应商接口与能力探测
 
@@ -888,6 +931,14 @@ http://127.0.0.1:8000/ui/
 ### 鉴权
 
 `/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
+
+### `GET /ui/workspaces.json`
+
+列出有任务的工作空间及各自任务数，供任务路由页填充切换下拉。**需要鉴权**（内容反映配置结构，不是公开数据）。详见「任务路由接口」一节的说明。
+
+```json
+{"workspaces": [{"name": "default", "task_count": 2}, {"name": "teamA", "task_count": 1}]}
+```
 
 ### `GET /ui/pricing.json`
 
