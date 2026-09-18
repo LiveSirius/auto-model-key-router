@@ -248,6 +248,9 @@ type Catalog struct {
 }
 
 // New 构造目录。fetch 为 nil 时用真实的 HTTP 实现。
+//
+// **生产路径不会传 nil**（server.Options.PricingFetch 的 nil 表示完全不出网，见
+// internal/server/pricing.go）；这里的兜底只是为了让本包独立可用。
 func New(fetch Fetcher) *Catalog {
 	if fetch == nil {
 		fetch = HTTPFetcher(nil)
@@ -266,32 +269,44 @@ func New(fetch Fetcher) *Catalog {
 // 不可用只发生在**从未成功取回**时（首次启动、或一直连不上 models.dev）。此时前端
 // 应当显示"无定价"而不是把成本算成 0。
 //
-// 已过期时踢一次后台刷新，同一个 Catalog 上同时最多一次（loading 闸门）。
+// 已过期时踢一次后台刷新；刷新立刻返回，绝不阻塞请求（目录 4.7 MB，冷取实测数秒）。
 func (c *Catalog) Payload() ([]byte, bool) {
-	now := c.now()
-
 	c.mu.Lock()
-	start := !now.Before(c.nextAt) && !c.loading
-	if start {
-		c.loading = true
-	}
+	stale := !c.now().Before(c.nextAt)
 	var payload []byte
 	if c.snap != nil {
 		payload = c.snap.payload
 	}
 	c.mu.Unlock()
 
-	if start {
-		go func() {
-			defer func() {
-				c.mu.Lock()
-				c.loading = false
-				c.mu.Unlock()
-			}()
-			_ = c.Refresh(context.Background())
-		}()
+	if stale {
+		// 后台跑：请求线程只取快照，不参与取回。
+		go func() { _ = c.refreshOnce(context.Background()) }()
 	}
 	return payload, payload != nil
+}
+
+// refreshOnce 是**唯一**的取回入口，并保证同一时刻最多一次在途取回。
+//
+// 为什么必须收在一处：取回有两条触发路径——Payload 的过期触发，与 Start 的定期循环。
+// 若各自直接调 Refresh，两条路径可以同时打向上游，等于把 4.7 MB 下载两遍、并让两次
+// 结果互相覆盖（先返回的那次可能把后返回的更新结果盖掉）。这里用 loading 做闸门：
+// 已在途时直接返回 nil，不做第二次取回。
+func (c *Catalog) refreshOnce(ctx context.Context) error {
+	c.mu.Lock()
+	if c.loading {
+		c.mu.Unlock()
+		return nil
+	}
+	c.loading = true
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.loading = false
+		c.mu.Unlock()
+	}()
+	return c.Refresh(ctx)
 }
 
 // Refresh 同步取回并按需重建目录。测试直接调它；生产路径由 Payload 在后台调用。
@@ -442,7 +457,7 @@ func (c *Catalog) Start() (stop func()) {
 	go func() {
 		defer close(done)
 		// 预热：失败不致命，界面会显示"无定价"，下一轮 TTL 后再试。
-		_ = c.Refresh(ctx)
+		_ = c.refreshOnce(ctx)
 		ticker := time.NewTicker(c.ttl)
 		defer ticker.Stop()
 		for {
@@ -450,7 +465,9 @@ func (c *Catalog) Start() (stop func()) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				_ = c.Refresh(ctx)
+				// 走 refreshOnce 而不是 Refresh：若此刻恰好有一次过期触发的后台取回
+				// 在途，这一轮就跳过，避免两路同时下载 4.7 MB。
+				_ = c.refreshOnce(ctx)
 			}
 		}
 	}()

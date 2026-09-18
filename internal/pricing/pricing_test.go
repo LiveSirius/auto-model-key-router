@@ -2,6 +2,7 @@ package pricing
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -443,6 +444,69 @@ func TestStartStopIsIdempotent(t *testing.T) {
 	stop := catalog.Start()
 	stop()
 	stop()
+}
+
+// TestRefreshOnceIsSingleFlight 断言**并发**触发取回时只会真正下载一次。
+//
+// 触发路径有两条：Payload 的过期触发与 Start 的定期循环。若它们各自直接取回，两路可以
+// 同时打向上游——把 4.7 MB 下载两遍，并且两次结果互相覆盖。这里用一个"卡住"的取回
+// 模拟慢网络，在它返回前并发触发多次，断言只发生一次真实取回。
+func TestRefreshOnceIsSingleFlight(t *testing.T) {
+	var mu sync.Mutex
+	calls := 0
+	release := make(chan struct{})
+	fetcher := func(url, etag string, timeout time.Duration) (FetchResult, error) {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			// 第一次取回挂住，让并发的其它触发都落在闸门内。
+			<-release
+		}
+		return FetchResult{Body: []byte(catalogFixture), ETag: `W/"a"`}, nil
+	}
+	catalog := newTestCatalog(fetcher)
+
+	// 直接并发调 refreshOnce：第一次拿到闸门并阻塞，其余应立即返回而不取回。
+	const parallel = 8
+	var wg sync.WaitGroup
+	wg.Add(parallel)
+	for range parallel {
+		go func() {
+			defer wg.Done()
+			_ = catalog.refreshOnce(t.Context())
+		}()
+	}
+
+	// 等到第一次取回确实已经开始，且闸门已落下。
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		catalog.mu.Lock()
+		loading := catalog.loading
+		catalog.mu.Unlock()
+		mu.Lock()
+		started := calls >= 1
+		mu.Unlock()
+		if loading && started {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	close(release)
+	wg.Wait()
+
+	mu.Lock()
+	total := calls
+	mu.Unlock()
+	if total != 1 {
+		t.Errorf("并发触发下的取回次数 = %d，期望 1（单飞闸门失效）", total)
+	}
+	// 取回成功后目录必须可用。
+	if _, ok := catalog.Payload(); !ok {
+		t.Error("单飞取回后目录应可用")
+	}
 }
 
 // TestPayloadTriggersBackgroundRefreshOnce 断言过期时只踢一次后台刷新。
