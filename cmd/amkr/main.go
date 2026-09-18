@@ -6,13 +6,15 @@
 //
 // # 与参照实现（main.py，202 行）的关系
 //
-// 24 个 flag 的处置、被砍掉的三个 flag、以及默认动作的开放决策都写在 cli.go 的文件头。
+// 24 个 flag 的处置、被砍掉的两个 flag、以及默认动作的开放决策都写在 cli.go 的文件头。
 // 本文件只补充执行层的差异：
 //
 //   - **--check-update 的可手动更新命令**。参照实现给的是 pip/uv 命令（update.py），
-//     Go 版按决策 8 给的是本平台的安装脚本一行命令（Windows 是 install.ps1，其余是
+//     Go 版给的是本平台的安装脚本一行命令（Windows 是 install.ps1，其余是
 //     install.sh）。渲染函数把命令作为参数，语料用参照实现的命令文本喂进去逐行对拍
 //     （见 versionCheckLines 与 defaultManualUpdateCommand）。
+//     自更新恢复（`--update`）后这条提示仍然成立——重跑安装脚本能装到同一份最新产物；
+//     面板文案与语料一并冻结，为免再改一次兼容性凭证，没有把它改成推荐 `amkr --update`。
 //   - **--show-config 不含 quick_metrics_items**（要直查 metrics.db 的原始 SQL，
 //     internal/metrics 没有等价接口），见 cli.go 的说明。
 //
@@ -45,6 +47,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/configservice"
 	"github.com/Sparrived/auto-model-key-router/internal/logfiles"
 	"github.com/Sparrived/auto-model-key-router/internal/pricing"
+	"github.com/Sparrived/auto-model-key-router/internal/selfupdate"
 	"github.com/Sparrived/auto-model-key-router/internal/server"
 	"github.com/Sparrived/auto-model-key-router/internal/service"
 	"github.com/Sparrived/auto-model-key-router/internal/tui"
@@ -87,6 +90,7 @@ const defaultUsage = `用法: amkr [选项]
   --show-address           展示监听地址
   --show-api-key           打印本地授权 Key
   --check-update           检查最新版本
+  --update                 检查并自更新到最新版本（自动重启服务）
   --version                打印版本号
   --install-service        注册为系统服务
   --service ACTION         管理系统服务（install/start/stop/restart/status/...）
@@ -181,12 +185,15 @@ func waitForHealth(cfg *config.RouterConfig, timeout time.Duration) bool {
 	return false
 }
 
-// defaultManualUpdateCommand 返回当前平台推荐的手动更新命令（决策 8）。
+// defaultManualUpdateCommand 返回当前平台推荐的手动更新命令。
 //
 // 参照实现给的是 pip/uv 命令；Go 版从 v5.0.0 起的分发方式是「预编译二进制 + 安装
 // 脚本」，因此这里让用户重跑安装脚本（脚本自己会取最新 release 并校验 sha256），
 // 与 README 的安装一节一致。仍然用 `go install` 的源码用户可以直接照做，只是不再
 // 由面板提示——让大多数二进制安装的用户看到一条不需要 Go 工具链的命令更重要。
+//
+// 自更新（`--update`）恢复后这条命令依然有效，因此没有改掉它；改它会动到被逐字节
+// 冻结的版本检查语料（cmd/amkr/testdata/cli_corpus.json 的 version_check 段）。
 func defaultManualUpdateCommand() string {
 	if runtime.GOOS == "windows" {
 		return "irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 | iex"
@@ -264,6 +271,12 @@ func runCLI(argv []string, stdout, stderr io.Writer, overrides *cliEnv) int {
 		terminal.Print(versionCheckPanel(ctx.checkUpdate(), ctx.manualUpdateCommand))
 		return 0
 	}
+	// 收尾助手在**加载配置之前**处理不了：它要按配置判断服务注册形态。但它也绝不该走
+	// 下面那串「写配置 / 加载配置 / 分派」的常规路径（那会再去抢端口）。因此这里单独
+	// 前置处理，并把配置路径解析交给它自己。
+	if command == commandUpdateHelper {
+		return runUpdateHelper(opts.updateHelper, opts.configPath, opts.updateHelperStop, ctx.err)
+	}
 
 	resolved, err := config.ResolveConfigPath(opts.configPath)
 	if err != nil {
@@ -312,6 +325,20 @@ func runCLI(argv []string, stdout, stderr io.Writer, overrides *cliEnv) int {
 		return 0
 	case commandShowConfig:
 		printConfigSummary(terminal, loaded)
+		return 0
+	case commandUpdate:
+		// --update 需要配置路径（收尾助手要按同一份配置重启服务），因此排在配置解析之后。
+		executable, err := os.Executable()
+		if err != nil {
+			printErrorPanel(terminal, err, "更新失败")
+			return 1
+		}
+		result, err := runSelfUpdate(ctx.checkUpdate, executable, resolved, loaded)
+		if err != nil {
+			printErrorPanel(terminal, err, "更新失败")
+			return 1
+		}
+		terminal.Print(updatePanel(result))
 		return 0
 	case commandStop:
 		terminal.Print(ctx.service.StopBackground(loaded))
@@ -479,6 +506,12 @@ func escapeMarkup(value string) string {
 	return strings.ReplaceAll(value, "[", `\[`)
 }
 
+// checkUpdate 查一次最新版本（服务端自更新用它）。
+func checkUpdate() updatecheck.Result {
+	fetch := updatecheck.HTTPFetcher(&http.Client{Timeout: checkUpdateTimeout})
+	return updatecheck.CheckLatestVersion(fetch, version, checkUpdateTimeout)
+}
+
 // serveForeground 写 PID 文件后监听端口（原 main.go 的 run，加上了 PID/日志处理）。
 func serveForeground(configPath string, loaded *config.RouterConfig) int {
 	env := service.DefaultEnv()
@@ -488,6 +521,13 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 	}
 	if cleanup != nil {
 		defer cleanup()
+	}
+
+	// 清掉上次自更新遗留的 <exe>.old：收尾助手删它时旧进程可能还映射着那个映像（更新
+	// 自身的就是它），那种情况下删除会失败。此刻持有者已经退出，再试一次必然成功。
+	// 尽力而为，失败不影响启动。
+	if executable, err := os.Executable(); err == nil {
+		selfupdate.CleanStale(executable)
 	}
 
 	// 日志落点：参照实现的 uvicorn_log_config 把**所有**日志（应用侧、访问、服务器
@@ -511,6 +551,13 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 		}
 	}()
 
+	// 自更新由服务进程自己发起时（WebUI/API 的「立即更新」），换完文件后由本进程优雅
+	// 退出、收尾助手接管重启。因此这里要能"从外部"请求关停，并且让出端口。
+	//
+	// **为什么服务端反而没有 CLI 那个权限问题**：助手是本服务进程的子进程，继承它的
+	// 权限。服务以 SYSTEM 计划任务运行时，助手同样是 SYSTEM，因此 `schtasks` 查得到、
+	// 也 Run 得起来——CLI 路径（普通用户）才受"Access is denied"限制。
+	shutdownRequested := make(chan struct{})
 	options := server.Options{
 		ConfigPath:  configPath,
 		Config:      loaded,
@@ -519,6 +566,26 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 		// 价格目录（models.dev）走真实网络：只有在这里显式选择，测试才不会被联网
 		// 影响（见 server.Options.PricingFetch）。
 		PricingFetch: pricing.HTTPFetcher(&http.Client{Timeout: pricingTimeout}),
+		// 自更新：StopOld=false（本进程就是被替换的服务，自己退出即可，见 Perform 的
+		// 说明），并把自己关停的能力交给它。
+		SelfUpdate: func(executable string) (selfupdate.Result, error) {
+			return selfupdate.Perform(selfupdate.Options{
+				Check:      checkUpdate,
+				Executable: executable,
+				ConfigPath: configPath,
+				StopOld:    false,
+				Client:     updateHTTPClient(),
+				Spawn:      selfUpdateSpawner(service.DefaultEnv()),
+			})
+		},
+		RequestShutdown: func() {
+			// 只关一次：重复 close 会 panic。
+			select {
+			case <-shutdownRequested:
+			default:
+				close(shutdownRequested)
+			}
+		},
 	}
 	if sink != nil {
 		options.Logger = sink.App
@@ -568,7 +635,18 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 		failures <- httpServer.ListenAndServe()
 	}()
 
-	return waitForStop(httpServer, failures, signals.Done(), os.Stderr)
+	// 信号与「自更新请求关停」合并成一个通道：waitForStop 只需要知道"该停了"。
+	// shutdownRequested 由 /ui/update/apply 在响应写出后关闭。
+	interrupted := make(chan struct{})
+	go func() {
+		select {
+		case <-signals.Done():
+		case <-shutdownRequested:
+		}
+		close(interrupted)
+	}()
+
+	return waitForStop(httpServer, failures, interrupted, os.Stderr)
 }
 
 // isTerminal 判断 w 是不是字符设备（交互式终端）。

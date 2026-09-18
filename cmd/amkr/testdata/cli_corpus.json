@@ -3,7 +3,6 @@
   "version": "4.1.0",
   "dropped_flags": [
     "--show-logs",
-    "--update",
     "--restart-service-after-update"
   ],
   "flags": [
@@ -1063,7 +1062,7 @@
       ],
       "exit": 0,
       "actions": [
-        "update-dropped"
+        "update"
       ],
       "config": null,
       "switch": null,

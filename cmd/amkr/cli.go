@@ -13,16 +13,25 @@ package main
 //
 //	--config --host --port --show-config --show-address --show-api-key
 //	--get-api-key --get-key --switch-model --switch-key --unified-target
-//	--show-unified-model --version --check-update --serve --webui --no-webui
-//	--no-ops --serve-foreground --stop --status --install-service --service
+//	--show-unified-model --version --check-update --update --serve --webui
+//	--no-webui --no-ops --serve-foreground --update-helper --stop --status
+//	--install-service --service
+//
+// 新增（自更新，见 --update 的说明）：
+//
+//	--update --update-helper
 //
 // **按产品决策砍掉**（不再定义，解析时报「flag provided but not defined」并返回 2）：
 //
 //	--show-logs                 只驱动 logs_tui.py（决策 7 砍掉）
-//	--update                    只驱动 update.py 的自更新（决策 8 砍掉）
-//	--restart-service-after-update  同上（update.py:613 的自更新收尾）
+//	--restart-service-after-update  update.py:613 的自更新收尾；Go 版改由
+//	                            --update-helper 助手进程自动重启，不再需要这个开关
 //
-// 这三条都由 TestDroppedFlagsAreNotDefined 具名锁定。
+// 这两条都由 TestDroppedFlagsAreNotDefined 具名锁定。
+//
+// 注意 `--update` 曾经也是被砍的一员（产品决策 8「取消自更新」）。该决策已被**推翻**：
+// 现在恢复 `--update`，并补上 WebUI/API 入口。恢复的理由与实现见 docs/CLI.md 的
+// 「版本检查与更新」一节；语料里的对应条目也一并改了（原本标注为 update-dropped）。
 //
 // # 刻意保留的差异
 //
@@ -80,6 +89,10 @@ const (
 	commandBackground
 	// commandCheckUpdate 对应 `--check-update`（在配置加载之前，main.py:87-89）。
 	commandCheckUpdate
+	// commandUpdate 对应 `--update`：检查并自更新到最新版本。
+	commandUpdate
+	// commandUpdateHelper 是 `--update-helper`（隐藏）：自更新的收尾助手进程。
+	commandUpdateHelper
 	// commandShowAddress 对应 `--show-address`。
 	commandShowAddress
 	// commandShowAPIKey 对应 `--show-api-key`（含两个别名）。
@@ -109,6 +122,10 @@ func (c command) String() string {
 		return "background-start"
 	case commandCheckUpdate:
 		return "check-update"
+	case commandUpdate:
+		return "update"
+	case commandUpdateHelper:
+		return "update-helper"
 	case commandShowAddress:
 		return "show-address"
 	case commandShowAPIKey:
@@ -153,6 +170,15 @@ type options struct {
 	showUnifiedModel bool
 	showVersion      bool
 	checkUpdate      bool
+	// update 对应 `--update`：检查并自更新。
+	update bool
+	// updateHelper 对应 `--update-helper`（隐藏）：它是 `--update` 换完文件后启动的
+	// 收尾进程，**不是**给用户用的入口。取值是被挪开的旧二进制路径。
+	updateHelper    string
+	updateHelperSet bool
+	// updateHelperStop 对应 `--update-helper-stop`（隐藏）：告诉助手旧服务需要它主动
+	// 停掉。仅 CLI 触发的更新带上（见 internal/selfupdate.HelperStopFlag）。
+	updateHelperStop bool
 	serve            bool
 	webui            *bool
 	ops              *bool
@@ -218,6 +244,14 @@ func parseOptions(argv []string, errOut io.Writer) (*options, error) {
 	flags.BoolVar(&opts.showUnifiedModel, "show-unified-model", false, "查看统一模型当前指向")
 	flags.BoolVar(&opts.showVersion, "version", false, "打印版本号后退出")
 	flags.BoolVar(&opts.checkUpdate, "check-update", false, "通过 GitHub Releases 检查最新版本")
+	flags.BoolVar(&opts.update, "update", false, "检查并自更新到最新版本")
+	flags.Func("update-helper", "自更新收尾助手（内部参数）：清理旧文件并按注册状态重启服务", func(value string) error {
+		opts.updateHelper = value
+		opts.updateHelperSet = true
+		return nil
+	})
+	flags.BoolVar(&opts.updateHelperStop, "update-helper-stop", false,
+		"自更新收尾助手（内部参数）：旧服务需要助手主动停掉")
 	flags.BoolVar(&opts.serve, "serve", false, "跳过 Terminal UI，后台启动服务")
 	flags.Var(triFlag{target: &opts.webui, value: true}, "webui", "启用随包发布的 WebUI")
 	flags.Var(triFlag{target: &opts.webui, value: false}, "no-webui", "关闭 WebUI")
@@ -273,12 +307,20 @@ func selectCommand(opts *options) command {
 	switch {
 	case opts.checkUpdate:
 		return commandCheckUpdate
+	case opts.updateHelperSet:
+		// 内部助手：它由 `--update` 启动，绝不与其它动作组合使用，因此放在最前面判定，
+		// 免得被某个「也有副作用」的分支抢先。
+		return commandUpdateHelper
 	case opts.switchModel != nil || opts.switchKey != nil:
 		return commandSwitchUnified
 	case opts.showAPIKey:
 		return commandShowAPIKey
 	case opts.showUnifiedModel:
 		return commandShowUnifiedModel
+	case opts.update:
+		// 对应 docs/CLI.md 优先级表第 6 条：在 --show-unified-model 之后、
+		// --show-address 之前。
+		return commandUpdate
 	case opts.showAddress:
 		return commandShowAddress
 	case opts.showConfig:

@@ -214,6 +214,10 @@ func pythonToGoCommand(action string) (command, bool) {
 		return commandSwitchUnified, false
 	case "check-update":
 		return commandCheckUpdate, false
+	case "update":
+		// 生成器当初把 main.update_latest_version 打桩记成 `update-dropped`（它记的是
+		// 「这个动作被砍了」而不是动作本身）；决策 8 被推翻后改回动作名。
+		return commandUpdate, false
 	case "show-address":
 		return commandShowAddress, false
 	case "show-api-key":
@@ -552,13 +556,17 @@ func TestCLICorpusVersionOutput(t *testing.T) {
 	}
 }
 
-// TestDroppedFlagsAreNotDefined 具名锁定三个被砍掉的 flag。
+// TestDroppedFlagsAreNotDefined 具名锁定两个被砍掉的 flag。
 //
-// 它们只驱动 dashboard/logs_tui（决策 7）与 update.py 的自更新（决策 8），因此 Go 侧
-// **不定义**：解析失败、退出码 2，而不是静默忽略或假装成功。
+// `--show-logs` 只驱动 logs_tui（决策 7）；`--restart-service-after-update` 是 update.py
+// 的自更新收尾开关（决策 8），Go 版改由 `--update-helper` 助手进程自动重启，不再需要它。
+// 两者 Go 侧**不定义**：解析失败、退出码 2，而不是静默忽略或假装成功。
+//
+// `--update` **曾**在这一列里（决策 8「取消自更新」）。该决策已被推翻、功能已恢复，
+// 因此它不再属于「被砍」——语料里对应条目的动作也从 `update-dropped` 改回 `update`。
 func TestDroppedFlagsAreNotDefined(t *testing.T) {
 	corpus := loadCLICorpus(t)
-	want := []string{"--show-logs", "--update", "--restart-service-after-update"}
+	want := []string{"--show-logs", "--restart-service-after-update"}
 	if len(corpus.DroppedFlags) != len(want) {
 		t.Fatalf("语料里的被砍 flag 数 = %d，期望 %d", len(corpus.DroppedFlags), len(want))
 	}
