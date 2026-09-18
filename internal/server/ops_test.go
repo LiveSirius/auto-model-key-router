@@ -102,6 +102,9 @@ type appFixture struct {
 	opsEnabled bool
 	// webUIEnabled 写进配置文件的 webui_enabled。
 	webUIEnabled bool
+	// configText 非空时**整段替换**夹具配置（three-path 占位符 <CAP>/<DB>/<LOG>
+	// 仍会被替换）。给需要夹具里没有的配置段（如 workspaces）的测试用。
+	configText string
 	// mutate 在装配前覆盖 Options（注入桩、覆盖开关）。
 	mutate func(*Options)
 }
@@ -115,7 +118,20 @@ func newTestApp(t *testing.T, dir string, mutate func(*Options)) *App {
 // newTestAppWith 装配一个指向临时目录的 App。
 func newTestAppWith(t *testing.T, dir string, fixture appFixture) *App {
 	t.Helper()
-	path := writeFixture(t, dir, fixture.opsEnabled, fixture.webUIEnabled)
+	var path string
+	if fixture.configText != "" {
+		path = filepath.Join(dir, "router-config.json")
+		text := strings.NewReplacer(
+			"<CAP>", jsonPath(filepath.Join(dir, "endpoint-capabilities.json")),
+			"<DB>", jsonPath(filepath.Join(dir, "metrics.sqlite3")),
+			"<LOG>", jsonPath(filepath.Join(dir, "server.log")),
+		).Replace(fixture.configText)
+		if err := os.WriteFile(path, []byte(text), 0o644); err != nil {
+			t.Fatalf("写入测试配置失败: %v", err)
+		}
+	} else {
+		path = writeFixture(t, dir, fixture.opsEnabled, fixture.webUIEnabled)
+	}
 	loaded, err := config.Load(path)
 	if err != nil {
 		t.Fatalf("载入测试配置失败: %v", err)

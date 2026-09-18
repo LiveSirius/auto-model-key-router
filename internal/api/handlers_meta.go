@@ -116,13 +116,25 @@ func findConfigKey(model *config.ModelConfig, keyName string) (*config.KeyConfig
 }
 
 // findConfigTask 对应 management_api.py:1433 的 _find_task。
-func findConfigTask(cfg *config.RouterConfig, taskName string) (*config.TaskConfig, error) {
+func findConfigTask(cfg *config.RouterConfig, workspace, taskName string) (*config.TaskConfig, error) {
 	for i := range cfg.Tasks {
-		if cfg.Tasks[i].Name == taskName {
+		if cfg.Tasks[i].Name == taskName && cfg.Tasks[i].Workspace == workspace {
 			return &cfg.Tasks[i], nil
 		}
 	}
 	return nil, httpErrorf(404, "任务不存在: %s", taskName)
+}
+
+// taskWorkspace 取本请求要操作的工作空间。
+//
+// 与代理面共用 X-AMKR-Workspace 这一个头：调用方与管理面用同一个概念选空间，
+// 不必记两套机制。缺省即默认工作空间，因此既有的管理调用（都不带这个头）语义
+// 一字未变，全部 22 条任务语料原样通过。
+//
+// 刻意复用 config.NormalizeWorkspace：空白与命名规则必须与运行时一致，否则
+// 「在 A 里建、去 A 里读」会因多一个空格而落空。
+func taskWorkspace(r *http.Request) string {
+	return config.NormalizeWorkspace(r.Header.Get(config.WorkspaceHeader))
 }
 
 // —— GET /api/unified-model ——
@@ -257,9 +269,15 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
+		workspace := taskWorkspace(r)
 		tasks := canonical.NewArray()
+		// 只列本空间的任务。**响应体形状不变**（没有 workspace 字段）：那条
+		// tasks/list 语料逐字节锁定了 {tasks:[{name,model,fallback_model,params}],
+		// config_revision}，加字段就会改掉已发布的接口。
 		for _, task := range cfg.Tasks {
-			tasks.Arr = append(tasks.Arr, taskResponse(task))
+			if task.Workspace == workspace {
+				tasks.Arr = append(tasks.Arr, taskResponse(task))
+			}
 		}
 		return withRevision(data, objectOf(
 			canonical.ObjectPair{Key: "tasks", Value: tasks},
@@ -279,9 +297,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		model := *optString(payload, "model")
 		fallbackModel := optString(payload, "fallback_model")
 		params := taskParamsPayload(payload)
+		workspace := taskWorkspace(r)
 
 		cfg, err := s.updateConfig(r, func(data *canonical.Value) error {
-			_, err := configops.CreateTask(data, name, configops.CreateTaskOptions{
+			_, err := configops.CreateTaskIn(data, workspace, name, configops.CreateTaskOptions{
 				Model:         model,
 				FallbackModel: fallbackModel,
 				Params:        params,
@@ -291,7 +310,7 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		task, err := findConfigTask(cfg, name)
+		task, err := findConfigTask(cfg, workspace, name)
 		if err != nil {
 			return nil, err
 		}
@@ -330,7 +349,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		task, err := findConfigTask(cfg, r.PathValue("task_name"))
+		task, err := findConfigTask(cfg, taskWorkspace(r), r.PathValue("task_name"))
 		if err != nil {
 			return nil, err
 		}
@@ -355,9 +374,10 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		updateFallback := hasKey(payload, "fallback_model")
 		params := taskParamsPayload(payload)
 		updateParams := hasKey(payload, "params")
+		workspace := taskWorkspace(r)
 
 		cfg, err := s.updateConfig(r, func(data *canonical.Value) error {
-			_, err := configops.UpdateTask(data, taskName, configops.UpdateTaskOptions{
+			_, err := configops.UpdateTaskIn(data, workspace, taskName, configops.UpdateTaskOptions{
 				Model:          model,
 				FallbackModel:  fallback,
 				UpdateFallback: updateFallback,
@@ -369,7 +389,7 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		task, err := findConfigTask(cfg, taskName)
+		task, err := findConfigTask(cfg, workspace, taskName)
 		if err != nil {
 			return nil, err
 		}
@@ -395,7 +415,7 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 		}
 		taskName := r.PathValue("task_name")
 		_, err = s.updateConfig(r, func(data *canonical.Value) error {
-			return configops.DeleteTask(data, taskName)
+			return configops.DeleteTaskIn(data, taskWorkspace(r), taskName)
 		}, revision)
 		return nil, err
 	})
