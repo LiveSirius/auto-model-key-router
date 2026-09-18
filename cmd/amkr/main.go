@@ -44,6 +44,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/configservice"
 	"github.com/Sparrived/auto-model-key-router/internal/logfiles"
+	"github.com/Sparrived/auto-model-key-router/internal/pricing"
 	"github.com/Sparrived/auto-model-key-router/internal/server"
 	"github.com/Sparrived/auto-model-key-router/internal/service"
 	"github.com/Sparrived/auto-model-key-router/internal/tui"
@@ -63,6 +64,13 @@ const shutdownTimeout = 10 * time.Second
 
 // checkUpdateTimeout 对应 main.py:88 的 `check_latest_version(timeout=10.0)`。
 const checkUpdateTimeout = 10 * time.Second
+
+// pricingTimeout 是取回 models.dev 价格目录的上限。
+//
+// 比版本检查宽松得多：目录有 4.7 MB，实测冷取 4~35 秒（后者是首次 TLS 握手叠加
+// 4.7 MB 下载的极端情况）。它只作用于**后台**刷新循环，不在任何请求路径上，因此放宽
+// 不会拖慢界面；复验时走条件请求，命中 304 只需约 250 毫秒。
+const pricingTimeout = 90 * time.Second
 
 // defaultUsage 是参数错误时打印的简短用法（argparse 的完整用法文本无法复刻，
 // 语料只对拍退出码，见 cli.go 的差异 4）。
@@ -508,6 +516,9 @@ func serveForeground(configPath string, loaded *config.RouterConfig) int {
 		Config:      loaded,
 		Version:     version,
 		WebUIAssets: amkr.WebUIAssets,
+		// 价格目录（models.dev）走真实网络：只有在这里显式选择，测试才不会被联网
+		// 影响（见 server.Options.PricingFetch）。
+		PricingFetch: pricing.HTTPFetcher(&http.Client{Timeout: pricingTimeout}),
 	}
 	if sink != nil {
 		options.Logger = sink.App

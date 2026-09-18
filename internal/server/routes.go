@@ -59,6 +59,10 @@ func (a *App) buildHandler() http.Handler {
 		// webui.Handler 期望收到**已去掉挂载前缀**的路径（见 internal/webui 的测试
 		// 说明），所以这里显式 StripPrefix。
 		mux.Handle(path+"/", http.StripPrefix(path, handler))
+		// 价格目录挂在同一个前缀下（理由见 pricing.go：这里在所有冻结路由清单之外）。
+		// 它比 "/ui/" 更精确，因此 ServeMux 优先选中它，不会落到静态文件处理器上
+		// 去找一个磁盘上并不存在的 pricing.json。
+		mux.HandleFunc(path+pricingPath, a.handlePricing)
 		a.webuiMounted = true
 	}
 

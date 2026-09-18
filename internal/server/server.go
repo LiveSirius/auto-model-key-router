@@ -19,6 +19,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/health"
 	"github.com/Sparrived/auto-model-key-router/internal/keypool"
 	"github.com/Sparrived/auto-model-key-router/internal/metrics"
+	"github.com/Sparrived/auto-model-key-router/internal/pricing"
 	"github.com/Sparrived/auto-model-key-router/internal/proxy"
 	"github.com/Sparrived/auto-model-key-router/internal/runtime"
 	"github.com/Sparrived/auto-model-key-router/internal/upstream"
@@ -67,6 +68,16 @@ type Options struct {
 	// 测试与语料回放不联网。**UpdateAvailable 由适配器按 latest/current 推导**，
 	// 见 updatecheck.go。
 	CheckUpdate func(timeout float64) api.UpdateCheckResult
+	// PricingFetch 覆盖 models.dev 价格目录的取回。
+	//
+	// **nil 表示完全不出网**，而不是"用真实实现"。价格目录的刷新是进程启动时就起的
+	// 后台循环（用户要求"定期更新"），若默认联网，每个装配 App 的测试都会去打
+	// models.dev——既慢，又让 CI 依赖外网。因此真实性由调用方显式选择：
+	// cmd/amkr 传 pricing.HTTPFetcher(nil)。
+	//
+	// 为 nil 时 /ui/pricing.json 仍然注册（路由不随开关增删），但因为没有目录而回
+	// 503，界面显示"无定价"——这正是"不静默算成 $0"的要求。
+	PricingFetch pricing.Fetcher
 	// Logger 交给 internal/proxy 做结构化日志；nil 时按 AMKR_LOG_FORMAT 选择格式。
 	Logger *slog.Logger
 	// AccessLogger 接收每个 HTTP 请求的访问日志，对应参照实现里 uvicorn 的
@@ -122,6 +133,13 @@ type App struct {
 	webuiEnabled   bool
 	// opsEnabled 对应 app.state.ops_enabled（app.py:146）。
 	opsEnabled bool
+	// pricing 是 models.dev 价格目录（供 WebUI 估算成本）。
+	//
+	// 它是**本项目的扩展**，参照实现没有对应物（Python 版只记 token、不算钱）。
+	// 目录只驻内存，与指标库无关，因此热重载不重建它。
+	pricing *pricing.Catalog
+	// pricingStop 停掉价格目录的定期刷新循环（见 Close）。
+	pricingStop func()
 
 	// reloadMu 对应 app.state.config_reload_lock（app.py:89）。
 	reloadMu sync.Mutex
@@ -228,6 +246,15 @@ func New(options Options) (*App, error) {
 		app.api.CheckUpdate = defaultCheckUpdate(options.Version)
 	}
 
+	// 价格目录（models.dev）：只驻内存，独立于指标库，因此不受热重载影响。
+	// PricingFetch 为 nil 时 Catalog 仍然可用，但没有任何目录 → /ui/pricing.json
+	// 回 503（不联网，见 Options.PricingFetch）。
+	app.pricing = newPricingCatalog(options.PricingFetch)
+	// 定期刷新循环（用户要求"缓存可以，但是需要定期更新"）：立刻预热一次、此后每
+	// TTL 复验一次。**不依赖有人打开界面**，所以冷启动后的首个请求就有价格。
+	// 它在 handler 装配之前起，保证路由生效时目录已经在路上。
+	app.pricingStop = app.pricing.Start()
+
 	// 访问日志包在**整棵树**外面，对应 uvicorn 在协议层为每个请求记一行——它不关心
 	// 请求最终落到哪条路由，404/405 也照样记（历史日志里 404、503 都有 access 行）。
 	app.handler = app.accessLog(app.buildHandler())
@@ -254,6 +281,11 @@ func (a *App) Close() error {
 	var err error
 	a.closeOnce.Do(func() {
 		a.stopMetricsBroadcast()
+		// 停掉价格目录的定期刷新并等它退出：它可能正在读一个 4.7 MB 的响应体，
+		// 不等它结束就返回会让测试进程在 goroutine 仍持有连接时退出。
+		if a.pricingStop != nil {
+			a.pricingStop()
+		}
 		err = a.manager.Close()
 	})
 	return err
