@@ -12,20 +12,9 @@ data/
 
 # 构建产物与缓存
 .git
-.venv
-venv/
-__pycache__/
-*.py[oc]
-build/
 dist/
-*.egg-info
-.release-smoke/
-.pytest_cache/
-.ruff_cache/
-.mypy_cache/
-.dbg/
+*.exe
 
-# 与运行时无关
+# 与运行时无关（注意**不要**排除 webui/：//go:embed webui 在编译期就要它存在）
 docs/
-tests/
 scripts/

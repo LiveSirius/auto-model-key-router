@@ -15,9 +15,9 @@ import (
 )
 
 // assetsDir 是 WebUI 资产在仓库里的相对路径（webui.py:24 的 _ASSET_DIR 对应物）。
-const assetsDir = "auto_model_key_router/webui"
+const assetsDir = "webui"
 
-//go:embed auto_model_key_router/webui
+//go:embed webui
 var embeddedWebUI embed.FS
 
 // WebUIAssets 是**以 WebUI 资产目录为根**的只读文件系统。

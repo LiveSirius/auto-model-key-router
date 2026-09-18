@@ -10,7 +10,7 @@ import path from "node:path";
 
 const MODULE = path.resolve(
   import.meta.dirname,
-  "../auto_model_key_router/webui/chart-math.js",
+  "../chart-math.js",
 );
 
 const m = await import(pathToFileURL(MODULE).href);

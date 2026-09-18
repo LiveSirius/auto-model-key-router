@@ -42,7 +42,7 @@ type Options struct {
 	// WebUIAssets 是**以 WebUI 资产目录为根**的文件系统。
 	//
 	// 做成注入参数而不是在这里 embed：`//go:embed` 的模式不能引用父目录，而资产在
-	// auto_model_key_router/webui 下（见根包的 webui_assets.go）。nil 表示资产缺失
+	// webui/ 下（见根包的 webui_assets.go）。nil 表示资产缺失
 	// （webui.Available 为假，/health 的 webui_available 报 false）。
 	WebUIAssets fs.FS
 	// WebUIEnabled 覆盖配置里的 webui_enabled；nil 表示跟随配置

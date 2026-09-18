@@ -6,7 +6,7 @@ import { pathToFileURL } from "node:url";
 import { readdirSync, statSync } from "node:fs";
 import path from "node:path";
 
-const WEBUI = path.resolve(import.meta.dirname, "../auto_model_key_router/webui");
+const WEBUI = path.resolve(import.meta.dirname, "../webui");
 
 const define = (name, value) =>
   Object.defineProperty(global, name, { value, writable: true, configurable: true });

@@ -1,14 +1,15 @@
 name: CI
 
-# 迁移期测试门禁：AMKR 正从 Python 迁到 Go，两侧代码同仓库共存、逐模块替换。
-# 一旦两边行为漂移而没人发现，兼容性就被静默破坏（配置读写、canonical 序列化、
-# key 选择这些地方出错都不报警，只表现为「偶尔不对」）。
-#
-# release.yml 只在 pyproject.toml 变更时触发，且流程里完全没有测试步骤：
-# 约 485 个 Python 测试与 Go 测试此前只在本地跑。这个工作流补上真正的红绿信号。
+# AMKR 的测试门禁。Python 参照实现已退役，仓库现在只剩 Go 实现 + 前端资产，
+# 因此这里有两个作业：
+#   * go    —— gofmt / go vet / go test。Go 测试会逐一回放 internal/*/testdata/ 与
+#              cmd/amkr/testdata/ 下**冻结的差分语料**（它们由已退役的 Python 参照实现
+#              产出并逐字节保留）。这些语料是兼容性的唯一凭证：配置读写、canonical
+#              序列化、key 选择、代理改写这些地方出错都不报警，只表现为「偶尔不对」。
+#   * webui —— 前端资产的 ES 模块加载检查与三个口径探针。
 #
 # 触发：推送到主分支（master）与所有 PR。刻意不加 paths 过滤 —— 任何文件都可能
-# 引入漂移（改实现没重生成语料、改 Dockerfile 影响打包测试等），漏跑等于没门禁。
+# 引入漂移（改实现影响语料回放、改 Dockerfile 影响打包等），漏跑等于没门禁。
 on:
   push:
     branches: [master]
@@ -24,84 +25,40 @@ permissions:
   contents: read
 
 jobs:
-  python:
-    name: Python 测试、WebUI 检查与语料新鲜度
+  webui:
+    name: WebUI 资产检查（node）
     runs-on: ubuntu-latest
-    # 30 分钟而不是 20：语料新鲜度门禁里有几条**必须重跑 Python 测试或真实 ASGI 应用**
-    # 才拿得到输出，本机实测单条耗时已经不小——
-    #   pytest 约 250s、upstream 交互语料约 150s、management_api 约 240s、
-    #   proxy_handler 约 113s，其余纯函数语料各在秒级。
-    # 合计已接近 13-14 分钟，而托管 runner 通常比开发机慢，20 分钟余量太少。
-    # 后续 dev 语料还会继续增加，故留出余量。
-    timeout-minutes: 30
+    timeout-minutes: 10
 
-    env:
-      # 仓库含大量中文（断言消息、语料内容、脚本提示）。pytest 与各语料脚本都会把
-      # 中文写到 stdout/stderr，编码不对时会抛 UnicodeEncodeError 或输出乱码，
-      # 让日志读不出真正的失败原因。命令里另外统一带 -X utf8 双保险。
-      PYTHONIOENCODING: utf-8
-
-    # 有意不纳入 CI 的两个脚本（都依赖 CI 上不存在的本机环境）：
-    #   * scripts/webui_smoke.ps1 —— 需本机 Chrome/Edge 可执行文件 + 预览服务，
-    #     托管 runner 无浏览器；且只能在 Windows 上跑。
-    #   * scripts/webui_preview_check.py —— 需先拉起预览服务再访问
-    #     127.0.0.1:8813（前台阻塞式服务），属于「依赖本机服务」。
-    # 它们的覆盖意图由上面的 node 探针与 pytest 承担，故不放进 CI。
-
+    # Python 退役后，前端资产（webui/，18 个文件）仍是随包发布的共享资产，它们的
+    # 正确性不能只靠"没改过"来保证。这里用三个独立的 node 探针把它锁住。
+    #
+    # 为什么必须单独跑 module check：探针只 import app.js / api.js / charts.js /
+    # chart-math.js 及其传递依赖，**入口 main.js 不被任何探针加载**——它出错
+    # （拼错导入、语法错）在其它检查里是盲区，而它坏了整站白屏。
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Node
+        uses: actions/setup-node@v4
         with:
-          # 固定到与 pyproject.toml requires-python >=3.12 一致的解释器版本。
-          python-version: "3.12"
-          cache: pip
-          # 仓库没有 requirements.txt。setup-python 的 pip 缓存默认按
-          # **/requirements.txt 算缓存 key，这里显式指向 pyproject.toml，
-          # 缓存 key 才会真正跟随依赖清单变化（否则永远命中同一份缓存）。
-          cache-dependency-path: pyproject.toml
+          # 模块检查依赖 import.meta.dirname，需要 node >= 20.11。
+          node-version: "22"
 
-      - name: 安装依赖
-        # 用 dev 依赖组：除 pytest 外还带 itsdangerous —— 它是 visitor 可选功能的
-        # 唯一标记（visitor.py 靠能否 import 它判断功能是否可用）。只装 [test]
-        # 会让 VISITOR_FEATURE_AVAILABLE 变成 False，与本地/发布环境不一致。
-        # -e 可编辑安装：确保 import 到的是工作区源码，而不是构建产物。
-        run: |
-          python -X utf8 -m pip install --upgrade pip
-          python -X utf8 -m pip install -e ".[dev]"
-
-      - name: Python 单元测试（pytest）
-        # tests/ 下另有 3 个 .mjs 探针（webui_auth_probe / webui_chart_probe /
-        # webui_tip_probe.mjs），都用 DOM 垫片 + 假 fetch，不依赖真实网络或本机
-        # 服务，因此适合进 CI。它们已由 test_webui.py、test_webui_charts.py 通过
-        # subprocess 调度，随本步一起跑，无需再写独立命令。
-        # 注意：这些用例在找不到 node 时会 pytest.skip —— GitHub 托管 runner
-        # 自带 node，故实际会真的执行；换自托管 runner 需自行保证 node 存在。
-        run: python -X utf8 -m pytest
-
-      - name: WebUI 模块加载检查（node）
-        # scripts/webui_module_check.mjs 逐个 import auto_model_key_router/webui
-        # 下的全部 16 个 ES 模块，抓语法错误与 import 图断裂。
-        # 为什么必须单独一条：pytest 的探针只 import app.js / api.js / charts.js
-        # / chart-math.js 及其传递依赖，**入口 main.js 不被任何探针加载**，
-        # 它出错（拼错导入、语法错）在现有测试里是盲区，而它坏了整站白屏。
-        # 该脚本自带浏览器垫片与假 fetch，纯本地文件读取、不碰网络，故适合 CI。
-        # 依赖 import.meta.dirname，需要 node >= 20.11（托管 runner 满足）。
+      - name: ES 模块加载检查
+        # 逐个 import webui/ 下的全部 16 个 ES 模块，抓语法错误与 import 图断裂。
         run: node scripts/webui_module_check.mjs
 
-      # —— 语料新鲜度门禁 ——
-      # 各 gen_*_corpus.py 用 Python 参照实现的真实输出生成语料，Go 测试再逐条
-      # 断言复现同一结果。改了一侧实现却忘了重新生成语料时，对拍就失去意义：
-      # 要么 Go 测试拿旧语料比新实现（失败信息指向 Go，真凶却在 Python），
-      # 要么两侧一起漂移而「自我循环」永远为绿。
-      # --check 不写盘、只逐字节比对现有语料，任一脚本非 0 即整轮红。
-      # 一块语料一个独立 step，失败时一眼能看出是哪一块过期。
+      - name: 图表口径探针
+        # 用 DOM 垫片 + 假 fetch 校验图表数值口径，不依赖真实网络或本机服务。
+        run: node webui/probes/webui_chart_probe.mjs
 
-      # 以下 6 条此前**只存在于本地**：scripts/ 里有 23 个生成器，而 CI 只接了 16 个，
-      # 于是这些模块的语料门禁实际上"没有牙"——本地能跑、CI 不管，漂移了也不会红。
-      # 已逐条实测通过（耗时见注释），总新增约 25s。
+      - name: 提示框探针
+        run: node webui/probes/webui_tip_probe.mjs
+
+      - name: 鉴权探针
+        run: node webui/probes/webui_auth_probe.mjs
 
   go:
     name: Go 静态检查与测试

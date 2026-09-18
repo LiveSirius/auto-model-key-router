@@ -10,7 +10,7 @@
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
-const WEBUI = path.resolve(import.meta.dirname, "../auto_model_key_router/webui");
+const WEBUI = path.resolve(import.meta.dirname, "..");
 
 class FakeNode {
   constructor(tag) {
