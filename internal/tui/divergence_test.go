@@ -155,9 +155,14 @@ func TestMouseWheelModeNoopWhenDisabled(t *testing.T) {
 	if restore := MouseWheelMode(false); restore == nil {
 		t.Fatal("恢复函数不应为 nil")
 	}
-	if restore := PosixInputMode(); restore == nil {
+	// PosixInputMode 返回的恢复函数必须调用：它在 POSIX 上会设置包级标志
+	// posixInputModeActive（tui.py:412），丢掉恢复函数等于让标志永久为真并泄漏给
+	// 后续用例——Windows 上 isWindows() 直接 no-op，所以这个泄漏只在 POSIX 上可见。
+	restoreInputMode := PosixInputMode()
+	if restoreInputMode == nil {
 		t.Fatal("恢复函数不应为 nil")
 	}
+	restoreInputMode()
 	// 关掉鼠标模式时不应写出任何东西。
 	var builder strings.Builder
 	Console.SetOutput(&builder)
