@@ -127,6 +127,44 @@ if (overlay && lineTip) {
   check("line_tip_partial_has_no_null_row", noStrayNull(lineTip), lineTip.textContent);
 }
 
+// —— 缺口桥接 ——
+// 回归：均值型指标在无请求的桶上没有读数（null），若只按"连续非空"画实线，
+// 稀疏流量下一条曲线会碎成几十段 + 一地孤立圆点（真实 1 小时窗口出现过 26 段）。
+// 这里锁定：缺口两侧的实测点必须被一条虚线连起来，孤立点不再单独散落。
+const gapPoints = [
+  { started_at: at(0), requests: 2, total_duration_ms: 20000, complete: true },
+  { started_at: at(1), requests: 0, total_duration_ms: 0, complete: true },
+  { started_at: at(2), requests: 0, total_duration_ms: 0, complete: true },
+  { started_at: at(3), requests: 4, total_duration_ms: 40000, complete: true },
+];
+const gapHost = lineChart({ points: gapPoints, metricId: "latency", bucketSeconds: 60, height: 140, showArea: false });
+const gapSvg = findAll(gapHost, (n) => n.tagName === "svg")[0];
+const gapLines = findAll(gapSvg, (n) => hasClass(n, "series-gap"));
+check("gap_bridge_rendered", gapLines.length === 1, String(gapLines.length));
+// 桥必须真的跨越缺口：两端分别落在 index 0 与 index 3 的 x 上。
+// 几何：宽度 720、left 留白 60、right 留白 16 ⇒ 内宽 644，共 4 点 ⇒ 步长 644/3。
+if (gapLines.length === 1) {
+  const coords = gapLines[0].attrs.points.trim().split(/\s+/)
+    .map((pair) => Number(pair.split(",")[0]));
+  const step = (720 - 60 - 16) / 3;
+  check("gap_bridge_spans_gap",
+    coords.length === 2 && coords[0] === 60 && Math.abs(coords[1] - (60 + 3 * step)) < 0.01,
+    JSON.stringify(coords));
+}
+// 缺口两侧的实测点仍要各画各的：单点段画成圆点（这是原有的孤立点表示），
+// 虚线只是补在中间，不会把它替换掉。
+check("gap_keeps_measured_markers",
+  findAll(gapSvg, (n) => n.tagName === "circle" && n.attrs.class === "point").length === 2,
+  String(findAll(gapSvg, (n) => n.tagName === "circle" && n.attrs.class === "point").length));
+// 0 是真实读数：RPM 的空闲段必须仍是实线，不能被误当作缺口桥掉。
+const zeroHost = lineChart({
+  points: [0, 1, 2, 3].map((i) => ({ started_at: at(i), requests: 0, complete: true })),
+  metricId: "rpm", bucketSeconds: 60, height: 140, showArea: false,
+});
+const zeroSvg = findAll(zeroHost, (n) => n.tagName === "svg")[0];
+check("gap_zero_rpm_has_no_bridge", findAll(zeroSvg, (n) => hasClass(n, "series-gap")).length === 0);
+check("gap_zero_rpm_is_solid_line", findAll(zeroSvg, (n) => hasClass(n, "series-line")).length === 1);
+
 // —— 堆叠柱气泡 ——
 const barPoints = [0, 1, 2].map((i) => ({
   started_at: at(i), prompt_tokens: 100 + i, completion_tokens: 40, complete: true,

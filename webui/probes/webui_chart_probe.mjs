@@ -97,6 +97,33 @@ check("latest_value_finds_last_readable", m.latestValue(partialSeries)?.value ==
 check("latest_value_skips_null", m.latestValue([{ value: 5 }, { value: null }])?.value === 5);
 check("latest_value_empty_is_null", m.latestValue([]) === null);
 
+// —— 缺口桥接 ——
+// 回归：15 秒一桶的稀疏流量下，均值型指标（耗时/首字）在无请求的桶上是 null，
+// 只按"连续非空"切段会让一条 1 小时曲线碎成几十段。缺口必须被桥接起来，
+// 但首尾缺口不能凭空连出去（外面没有可连的读数）。
+const bridged = m.gapBridges([
+  { value: 1 }, { value: null }, { value: null }, { value: 2 }, { value: 3 }, { value: null },
+]);
+check("gap_bridges_single_gap", bridged.length === 1, JSON.stringify(bridged));
+// 用可选链：实现退化时断言应当报"这行不对"，而不是让整个探针抛异常、丢掉其余用例。
+check("gap_bridge_endpoints", bridged[0]?.from === 0 && bridged[0]?.to === 3, JSON.stringify(bridged[0]));
+// 尾部的 null 之后没有可读点 ⇒ 不产生桥；否则会从最后一个实测点画到图外。
+check("gap_no_bridge_without_right_anchor", bridged.every((b) => b.to !== 5));
+// 开头就是缺口时同理：左边没有锚点。
+check("gap_no_bridge_without_left_anchor",
+  m.gapBridges([{ value: null }, { value: 1 }, { value: 2 }]).length === 0);
+// 相邻两个可读点之间没有缺口 ⇒ 不多画一条与实线重叠的虚线。
+check("gap_ignores_adjacent_points", m.gapBridges([{ value: 1 }, { value: 2 }]).length === 0);
+// 0 是真实读数（空闲），不是缺口：不能被桥接，更不该被当成缺失。
+check("gap_zero_is_readable_not_gap",
+  m.gapBridges([{ value: 0 }, { value: 0 }, { value: 0 }]).length === 0);
+check("gap_null_and_zero_differ", m.readable({ value: 0 }) === true && m.readable({ value: null }) === false);
+check("gap_nan_is_not_readable", m.readable({ value: NaN }) === false);
+check("gap_empty_is_empty", m.gapBridges([]).length === 0 && m.gapBridges(null).length === 0);
+// 真实形状：稀疏耗时序列（每三个桶一个读数）必须被桥接成一条连续折线。
+const sparse = Array.from({ length: 30 }, (_, i) => ({ value: i % 3 === 0 ? 100 + i : null }));
+check("gap_sparse_series_bridges_every_gap", m.gapBridges(sparse).length === 9, String(m.gapBridges(sparse).length));
+
 // —— 坐标轴刻度 ——
 const axis = m.axisScale([0, 3, 17, 42]);
 check("axis_max_covers_data", axis.max >= 42, String(axis.max));
