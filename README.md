@@ -17,14 +17,46 @@
 ## 安装
 
 AMKR 是单个 Go 二进制：配置、WebUI 静态资产（`//go:embed`）与 SQLite 驱动的指标库都编在里面，
-运行时不需要 Python、node 或额外的运行时依赖。
+运行时不需要 Python、node 或额外的运行时依赖。推荐从 GitHub Releases 下载预编译二进制，
+安装脚本会校验 sha256 后再落盘。
+
+### 一行安装（Linux / macOS）
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.sh | sh
+```
+
+装到 `/usr/local/bin`（没有写权限时退回 `~/.local/bin`）。指定版本或安装目录：
+
+```bash
+# 安装指定版本
+curl -fsSL https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.sh | sh -s -- --version 5.0.0
+
+# 换一个安装目录
+curl -fsSL https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.sh | INSTALL_DIR="$HOME/bin" sh
+```
+
+脚本会打印它做了什么、装到了哪里；平台或架构没有对应的发布物时会明确报错。
+
+### 一行安装（Windows / PowerShell）
+
+```powershell
+irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 | iex
+```
+
+装到 `%LOCALAPPDATA%\Programs\AutoModelKeyRouter\amkr.exe`，**不需要管理员权限**。指定版本：
+
+```powershell
+irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 -OutFile install.ps1
+.\install.ps1 -Version 5.0.0
+```
 
 ### 从源码构建
 
 需要 Go 1.24+。
 
 ```bash
-git clone https://github.com/sparr68/auto-model-key-router.git
+git clone https://github.com/Sparrived/auto-model-key-router.git
 cd auto-model-key-router
 go build ./cmd/amkr          # 产出 amkr（Windows 上是 amkr.exe）
 ./amkr --version
@@ -43,8 +75,8 @@ docker run -d --name amkr -p 8000:8000 -v amkr-data:/data amkr
 ### 首次运行
 
 ```bash
-./amkr --show-config      # 看一眼当前配置摘要与配置文件路径
-./amkr --serve-foreground # 前台启动（不带参数时也是这个行为）
+amkr --show-config      # 看一眼当前配置摘要与配置文件路径
+amkr --serve-foreground # 前台启动（不带参数时也是这个行为）
 ```
 
 启动后打开 `http://127.0.0.1:<port>/ui` 使用 WebUI 配置供应商、Key 与模型。
@@ -52,15 +84,15 @@ docker run -d --name amkr -p 8000:8000 -v amkr-data:/data amkr
 ### 常用命令
 
 ```bash
-./amkr --show-address          # 查询监听地址与服务地址
-./amkr --show-api-key          # 获取本地授权 Key
-./amkr --status                # 查看后台服务状态
-./amkr --service install-user  # 注册为用户级服务（Windows 计划任务 / systemd user unit）
-./amkr --stop                  # 停止后台服务
-./amkr --check-update          # 检查是否有新版本
+amkr --show-address          # 查询监听地址与服务地址
+amkr --show-api-key          # 获取本地授权 Key
+amkr --status                # 查看后台服务状态
+amkr --service install-user  # 注册为用户级服务（Windows 计划任务 / systemd user unit）
+amkr --stop                  # 停止后台服务
+amkr --check-update          # 检查是否有新版本
 ```
 
-`./amkr --help` 可看到全部参数。
+`amkr --help` 可看到全部参数。从源码构建、没有把二进制放进 PATH 时，把上面的 `amkr` 换成 `./amkr`。
 ### 可选 WebUI
 
 AMKR 自带一套可选的浏览器管理界面。**资产随软件包一起安装，没有单独的安装步骤，也没有额外依赖**，只由开关决定是否启用：
