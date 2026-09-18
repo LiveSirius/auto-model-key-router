@@ -89,10 +89,18 @@ global.document = {
 };
 
 // —— 假的供应商配置：覆盖"认得出品牌"与"认不出"两种情况 ——
+// openai 的 primary 故意让探测结果比绑定结果多一个模型：Key 行下方要显示的是**正在
+// 服务**的模型（模型 targets 里的绑定），而不是上游 /v1/models 广告出来的全部。
 const PROVIDERS = [
-  { id: "openai", base_url: "https://api.openai.com", keys: [{ name: "primary" }] },
+  { id: "openai", base_url: "https://api.openai.com", keys: [{ name: "primary", capabilities: { models: ["gpt-5.5", "unbound-model"], errors: {} } }] },
   { id: "my-deepseek", base_url: "https://api.deepseek.com", keys: [] },
   { id: "local-lab", base_url: "https://gateway.internal.example", keys: [{ name: "a" }, { name: "b" }] },
+];
+
+// 绑定关系：primary 只服务 gpt-5.5，所以 unbound-model 不该出现在 Key 行下方。
+const ROUTES = [
+  { id: "gpt-5.5", targets: [{ provider: "openai", key: "primary", upstream_model: "gpt-5.5" }] },
+  { id: "claude-sonnet-4-5", targets: [{ provider: "local-lab", key: "a", upstream_model: "claude-sonnet-4-5" }] },
 ];
 
 global.fetch = async (url) => {
@@ -100,6 +108,8 @@ global.fetch = async (url) => {
   let payload = {};
   if (target.includes("/api/providers")) {
     payload = { providers: PROVIDERS, config_revision: "rev-000000000000" };
+  } else if (target.includes("/api/routes")) {
+    payload = { routes: ROUTES, config_revision: "rev-000000000000" };
   }
   return { ok: true, status: 200, async text() { return JSON.stringify(payload); } };
 };
@@ -170,6 +180,15 @@ click(items[1]);
 const rail2 = byClass(host, "rail-nav")[0];
 check("switch_updates_current", byClass(rail2, "rail-item")[1]?.attrs["aria-current"] === "true");
 check("switch_repaints_detail", findText(host, "my-deepseek"));
+
+// —— Key 行下方只列「正在服务」的模型 ——
+// 需求：不要把上游探测到的模型全列出来（那可能是几百个），只显示这个 Key 真正在
+// 服务的那些（模型 targets 里的绑定）。探测结果里多出来的 unbound-model 必须消失。
+click(byClass(host, "rail-nav")[0].children[0]);
+const keyTable = byClass(host, "table")[0];
+const keyRowText = byTag(keyTable || new FakeNode("x"), "tr")[1]?.textContent || "";
+check("key_row_lists_bound_model", keyRowText.includes("gpt-5.5"), keyRowText);
+check("key_row_hides_unbound_probe_model", !keyRowText.includes("unbound-model"), keyRowText);
 
 function byTag(root, tag) {
   return findAll(root, (node) => node.tagName === tag);

@@ -15,6 +15,8 @@ const ROUTE_MODES = [
 
 const state = {
   providers: [],
+  // boundModels：`${provider}|${key}` → 该 Key 正在服务的模型 ID（升序）。
+  boundModels: new Map(),
   revision: null,
   active: "",
   loading: true,
@@ -35,13 +37,30 @@ let probeTimer = null;
 let probeGeneration = 0;
 
 export async function reloadProviders() {
-  const data = await api.providers();
+  // routes 与 providers 一起取：Key 行下方要显示的是「这个 Key 正在服务哪些模型」，
+  // 而那是模型 targets 里的绑定关系，只读 providers 看不到。
+  const [data, routes] = await Promise.all([api.providers(), api.routes()]);
   state.providers = data.providers || [];
+  state.boundModels = boundModelsByKey(routes.routes || []);
   state.revision = data.config_revision;
   if (!state.providers.some((provider) => provider.id === state.active)) {
     state.active = state.providers[0]?.id || "";
   }
   return data;
+}
+
+// boundModelsByKey 把路由表反过来索引成 `供应商|Key` → 它服务的模型 ID（升序）。
+function boundModelsByKey(routes) {
+  const index = new Map();
+  for (const route of routes) {
+    for (const target of route.targets || []) {
+      const id = `${target.provider}|${target.key}`;
+      if (!index.has(id)) index.set(id, new Set());
+      index.get(id).add(route.id);
+    }
+  }
+  for (const [id, models] of index) index.set(id, [...models].sort());
+  return index;
 }
 
 function activeProvider() {
@@ -58,11 +77,15 @@ function capabilityBadge(key) {
   return badge("未发现模型", "muted");
 }
 
-function capabilityDetail(key) {
-  const capabilities = key.capabilities;
-  if (!capabilities) return null;
-  const models = capabilities.models || [];
-  const errors = Object.entries(capabilities.errors || {}).filter(([, message]) => message);
+// capabilityDetail 渲染 Key 名称下方的那行模型：只列**这个 Key 正在服务**的模型。
+//
+// 不列探测到的全部模型：上游 /v1/models 常常一次返回几百个，那串字既读不完也不代表
+// 这个 Key 真的对外提供它们——真正生效的是模型 targets 里的绑定。
+// 探测错误仍然照常显示，否则「这个 Key 探测炸了」会因为没绑定模型而看不出来。
+function capabilityDetail(provider, key) {
+  const models = state.boundModels.get(`${provider.id}|${key.name}`) || [];
+  const errors = Object.entries(key.capabilities?.errors || {}).filter(([, message]) => message);
+  if (!models.length && !errors.length) return null;
   return h("div.stack.tight",
     models.length ? h("div.mono", models.join(", ")) : null,
     errors.length ? h("div.muted", errors.map(([mode, message]) => `${mode}: ${message}`).join(" · ")) : null,
@@ -317,7 +340,7 @@ function keyRow(provider, key) {
     h("td", {},
       h("div.stack.tight", {},
         h("strong", key.name),
-        capabilityDetail(key),
+        capabilityDetail(provider, key),
       ),
     ),
     h("td", {}, h("div.stack.tight", {}, capabilityBadge(key),
