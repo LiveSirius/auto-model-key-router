@@ -22,6 +22,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/pricing"
 	"github.com/Sparrived/auto-model-key-router/internal/proxy"
 	"github.com/Sparrived/auto-model-key-router/internal/runtime"
+	"github.com/Sparrived/auto-model-key-router/internal/selfupdate"
 	"github.com/Sparrived/auto-model-key-router/internal/upstream"
 	"github.com/Sparrived/auto-model-key-router/internal/webui"
 	"github.com/Sparrived/auto-model-key-router/internal/wsproxy"
@@ -91,6 +92,19 @@ type Options struct {
 	// MountPrefix 是嵌入到宿主时的挂载前缀（独立运行时为空串）。它只影响 /health
 	// 报出的 webui_path（app.py:418 的 mount_path 语义）。
 	MountPrefix string
+	// SelfUpdate 执行自更新（下载新版 → 校验 → 就地替换 → 启动收尾助手）。
+	//
+	// 与 PricingFetch 一样，**nil 表示不出网、也不提供该能力**，而不是"用真实实现"：
+	// 自更新会真的替换磁盘上的可执行文件并重启服务，绝不能在测试里默认开启。为 nil 时
+	// /ui/update/apply 回 501（响亮失败），/ui/update/status 报 available=false。
+	//
+	// 参数是当前可执行文件路径，返回更新结果。
+	SelfUpdate func(executable string) (selfupdate.Result, error)
+	// RequestShutdown 请求本进程优雅关停（自更新换完文件后由收尾助手接管重启）。
+	//
+	// nil 表示不关停：此时更新只换文件，界面会提示需要手动重启。抽成接缝是为了让
+	// internal/server 不依赖 signal/os.Exit 这类进程级动作。
+	RequestShutdown func()
 }
 
 // App 是一个装配完成、可以开始处理请求的服务实例。
