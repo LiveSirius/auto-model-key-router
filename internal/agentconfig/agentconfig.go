@@ -60,6 +60,14 @@ type ConfigError struct {
 
 func (e *ConfigError) Error() string { return e.Message }
 
+// PyErrorName 返回参照实现里该异常的类名，供上层复刻
+// `f"{type(exc).__name__}: {exc}"`（ops_api.py:265）。
+//
+// 没有它时上层只能退化成 Go 的 `%T`，那会给出 "*agentconfig.ConfigError" 这种带包路径的
+// 形式，与参照实现的 `AgentConfigError: ...` 不同。internal/api 的接缝按这个可选接口取值
+// （见其 pyErrorNamer）。
+func (e *ConfigError) PyErrorName() string { return "AgentConfigError" }
+
 // errf 构造 ConfigError。
 func errf(format string, args ...any) error {
 	return &ConfigError{Message: fmt.Sprintf(format, args...)}
@@ -126,15 +134,29 @@ func TargetPath(baseDir, agent string) (string, error) {
 	if err := validateAgent(agent); err != nil {
 		return "", err
 	}
+	// 空 baseDir 必须解析成**用户主目录**，对应参照实现的 Path.home()。
+	//
+	// 这一条不能省：filepath.Join("", ".claude") 得到的是相对路径 ".claude"，会落到进程的
+	// **当前工作目录**——也就是集成接口会去写 ./.claude/settings.json，而不是 ~/.claude/。
+	// 参照实现没有这个歧义（Path.home() 永远给出绝对路径），所以这里要么给出主目录，要么
+	// 显式报错，绝不能让空串静默变成相对路径。
+	resolvedBase := baseDir
+	if resolvedBase == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", errf("无法确定用户主目录: %v", err)
+		}
+		resolvedBase = home
+	}
 	switch agent {
 	case ClaudeCode:
-		dir := configDirFor("CLAUDE_CONFIG_DIR", baseDir, ".claude")
+		dir := configDirFor("CLAUDE_CONFIG_DIR", resolvedBase, ".claude")
 		return filepath.Join(dir, "settings.json"), nil
 	case PiAgent:
-		dir := configDirFor("PI_CODING_AGENT_DIR", baseDir, ".pi", "agent")
+		dir := configDirFor("PI_CODING_AGENT_DIR", resolvedBase, ".pi", "agent")
 		return filepath.Join(dir, "models.json"), nil
 	default:
-		dir := configDirFor("CODEX_HOME", baseDir, ".codex")
+		dir := configDirFor("CODEX_HOME", resolvedBase, ".codex")
 		return filepath.Join(dir, "config.toml"), nil
 	}
 }

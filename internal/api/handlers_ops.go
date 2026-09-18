@@ -491,8 +491,9 @@ func (s *Server) handleOpsListIntegrations(w http.ResponseWriter, r *http.Reques
 		if src == nil || src.Status == nil {
 			return nil, opsIntegrationsNotWired()
 		}
-		entries := make([]*canonical.Value, 0, len(opsSupportedAgents))
-		for _, agent := range opsSupportedAgents {
+		agents := s.supportedAgents()
+		entries := make([]*canonical.Value, 0, len(agents))
+		for _, agent := range agents {
 			entries = append(entries, opsIntegrationEntry(agent, src))
 		}
 		return objectOf(canonical.ObjectPair{Key: "integrations", Value: canonical.NewArray(entries...)}), nil
@@ -575,10 +576,19 @@ func (s *Server) handleOpsRollbackIntegration(w http.ResponseWriter, r *http.Req
 // opsAgentSupportedAt 复刻 `agent in SUPPORTED_AGENTS`：接缝给了白名单就以它为准，
 // 否则用本包镜像的常量（未接线时也必须能给出正确的 404）。
 func (s *Server) opsAgentSupportedAt(agent string) bool {
+	return containsString(s.supportedAgents(), agent)
+}
+
+// supportedAgents 返回受支持的 Agent 列表：接缝给了就以它为准，否则用本包镜像的常量。
+//
+// **列表与白名单必须同源**：否则接缝方新增一个 Agent 后，POST /api/integrations/<agent>
+// 会被接受，而 GET /api/integrations 的列表里看不到它。参照实现只有一个 SUPPORTED_AGENTS
+// 常量，`agent in SUPPORTED_AGENTS` 与列表天然一致，这里必须自己保证这一点。
+func (s *Server) supportedAgents() []string {
 	if src := s.Integrations; src != nil && len(src.SupportedAgents) > 0 {
-		return containsString(src.SupportedAgents, agent)
+		return src.SupportedAgents
 	}
-	return containsString(opsSupportedAgents, agent)
+	return opsSupportedAgents
 }
 
 // containsString 报告切片里是否含目标字符串。

@@ -218,14 +218,18 @@ func TestOpsRoutesReachableWhenEnabled(t *testing.T) {
 		t.Errorf("/api/tool 的 latest_version = %q，期望注入的桩值 99.0.0", got)
 	}
 
-	// 第三条：集成路由已注册但接缝未接线 —— 响亮失败（500 + 明确文案），不是 404。
+	// 第三条：集成路由**已接线** —— 经接缝返回 200，而不是 500。
+	//
+	// 这里读的是开发机真实的 Agent 配置目录（Options 零值即真实主目录）。本断言只看状态码
+	// 与结构，不看具体内容，因此不依赖机器状态；它同时是"接缝确实接上了"的端到端证据——
+	// 一旦有人摘掉 opsIntegrations()，这里会退回 500 并立刻失败。
 	integrations := serve(app, http.MethodGet, "/api/integrations", fullAuthorization)
-	if integrations.Code != http.StatusInternalServerError {
-		t.Fatalf("GET /api/integrations 状态码 = %d，期望 500（接缝未接线；body=%s）",
+	if integrations.Code != http.StatusOK {
+		t.Fatalf("GET /api/integrations 状态码 = %d，期望 200（接缝已接线；body=%s）",
 			integrations.Code, integrations.Body.String())
 	}
-	if !strings.Contains(integrations.Body.String(), "未接入") {
-		t.Errorf("GET /api/integrations 的响应体应说明接缝未接入，实际 %q",
+	if !strings.Contains(integrations.Body.String(), `"integrations"`) {
+		t.Errorf("GET /api/integrations 的响应体应含 integrations 列表，实际 %q",
 			integrations.Body.String())
 	}
 }

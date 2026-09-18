@@ -207,6 +207,14 @@ func New(options Options) (*App, error) {
 		OpsEnabled:  app.opsEnabled,
 		Version:     options.Version,
 		WebUIStatus: app.webUIStatus,
+		// 以下五处是 internal/api 预留的实现接缝。不接的话对应路由会响亮失败（500 并点名
+		// 接缝），而不是静默成功——但那样这些功能就真的不可用，所以必须在此显式接上。
+		// 全部集中在 ops_seams.go 里说明与做签名断言。
+		RunServiceAction:             runServiceActionForSeam,
+		ProbeKeyCapability:           proberForSeam.ProbeKeyCapability,
+		ProbeProviderKeyCapabilities: proberForSeam.ProbeProviderKeyCapabilities,
+		ProbeKeyAvailability:         proberForSeam.ProbeKeyAvailability,
+		Integrations:                 opsIntegrations(),
 	}
 	if app.api.CheckUpdate == nil {
 		app.api.CheckUpdate = defaultCheckUpdate(options.Version)
