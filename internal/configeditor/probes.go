@@ -496,7 +496,7 @@ func (p Prober) ProbeKeyAvailability(ctx context.Context, routes *canonical.Valu
 		out = append(out, api.ProbeAvailability{
 			Available:  result.Available,
 			URL:        result.URL,
-			DurationMS: float64(result.DurationMS),
+			DurationMS: int64(result.DurationMS),
 			Error:      result.Error,
 		})
 	}

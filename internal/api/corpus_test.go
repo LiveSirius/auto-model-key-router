@@ -422,14 +422,14 @@ func newCorpusServer(configPath string, initial *config.RouterConfig, entry corp
 				return []ProbeAvailability{{
 					Available:  false,
 					URL:        "https://a.example.test/v1/models",
-					DurationMS: 12.5,
+					DurationMS: 250,
 					Error:      entry.patchAvailabilityError,
 				}}, nil
 			}
 			return []ProbeAvailability{{
 				Available:  true,
 				URL:        "https://a.example.test/v1/models",
-				DurationMS: 12.5,
+				DurationMS: 250,
 			}}, nil
 		},
 		CheckUpdate: func(timeout float64) UpdateCheckResult {

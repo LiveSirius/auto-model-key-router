@@ -198,7 +198,7 @@ func (s *Server) runKeyProbe(ctx context.Context, providerID string, provider *c
 				canonical.ObjectPair{Key: "key", Value: canonical.NewString(keyName)},
 				canonical.ObjectPair{Key: "endpoint", Value: canonical.NewString(result.URL)},
 				canonical.ObjectPair{Key: "models", Value: canonical.NewArray(modelValues...)},
-				canonical.ObjectPair{Key: "latency_ms", Value: canonical.NewFloat(result.DurationMS)},
+				canonical.ObjectPair{Key: "latency_ms", Value: canonical.NewIntValue(result.DurationMS)},
 				canonical.ObjectPair{Key: "error", Value: nullableString(result.Error)},
 			))
 		}

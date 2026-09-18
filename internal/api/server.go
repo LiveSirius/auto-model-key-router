@@ -151,9 +151,13 @@ type Server struct {
 
 // ProbeAvailability 是一条探测结果，对应 config_editor 的可用性探测返回值。
 type ProbeAvailability struct {
-	Available  bool
-	URL        string
-	DurationMS float64
+	Available bool
+	URL       string
+	// DurationMS 是**整数**毫秒：参照实现的 config_editor.py:1665 用
+	// `int((monotonic() - started) * 1000)` 取值，字段本身也标注为 `duration_ms: int`
+	// （config_editor.py:80）。因此必须渲染成 JSON 整数——用 float 会得到 `250.0`
+	// 而参照实现是 `250`。这个 int/float 之别原先在接缝类型里丢失了。
+	DurationMS int64
 	Error      string
 }
 

@@ -224,7 +224,7 @@ def patch_dependencies() -> None:
             _FakeAvailability(
                 available=error is None,
                 url="https://a.example.test/v1/models",
-                duration_ms=12.5,
+                duration_ms=250,
                 error=error,
             )
         ]
