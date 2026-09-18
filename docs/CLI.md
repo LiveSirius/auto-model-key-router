@@ -252,24 +252,47 @@ Linux：
 
 | 参数 | 说明 |
 | --- | --- |
-| `--check-update` | 通过 PyPI 检查新版本，失败时回退 GitHub Release |
-| `--update` | 检查并更新到最新版本 |
+| `--check-update` | 通过 GitHub Releases 检查新版本 |
+| `--update` | 检查并自更新到最新版本，然后自动重启服务 |
 
 ```bash
 amkr --check-update
 amkr --config router-config.json --update
 ```
 
-`--check-update` 在加载配置文件前执行。`--update` 会先加载配置，并根据 pip、pipx、uv tool 或 uvx 等安装方式选择更新命令。
+`--check-update` 在加载配置文件前执行。`--update` 会先加载配置，然后：
+
+1. 查 GitHub Releases 拿最新版本；已是最新则直接结束，不做任何改动。
+2. 下载对应平台的产物（`amkr_<版本>_<系统>_<架构>[.exe]`）与 `checksums.txt`。
+3. **校验 SHA-256 通过后才安装**。校验和不符、或 `checksums.txt` 里没有这个产物时，
+   一律拒绝安装——宁可不更新，也不换上来路不明的二进制。
+4. 就地替换可执行文件：先把旧的改名为 `<exe>.old`，再把新的放到原位（Windows 允许
+   重命名正在运行的 exe，因此无需额外的更新器进程）。
+5. 启动一个分离的收尾助手进程（即刚装好的新版本），由它等旧服务让出端口后删除
+   `<exe>.old` 并按当前注册状态重启服务。
+
+因为第 5 步由助手完成，`--update` 执行完就可以退出，服务会自行恢复。
+
+**权限限制**：Windows 上若服务以 SYSTEM 计划任务运行，普通用户既查不到该任务
+（`schtasks /Query` 会返回「拒绝访问」）也停不掉它。此时 `--update` 仍会完成替换，
+但不会启动助手，并明确提示需要以管理员身份执行 `amkr --service restart`，而不会
+谎称「服务将自动重启」。
+
+自更新也可从 WebUI 触发：设置页的「检查更新」发现新版本后会显示「立即更新」按钮
+（对应的端点是 `POST /ui/update/apply`，需要完整权限）。由服务自身发起的更新会在
+替换完成后优雅退出，同样交给收尾助手重启。
 
 ## 内部参数
 
-以下参数不会显示在 `--help` 中，主要由后台进程、系统服务和 Windows 更新器调用，不建议手动使用。
+以下参数不会显示在 `--help` 中，主要由后台进程、系统服务和自更新助手调用，不建议手动使用。
 
 | 参数 | 说明 |
 | --- | --- |
 | `--serve-foreground` | 在当前进程中运行服务（日志追加写入 `log_file_path`） |
-| `--restart-service-after-update` | 更新完成后按现有注册状态恢复服务 |
+| `--update-helper <路径>` | 自更新收尾助手：等待服务停止后清理旧文件并重启服务 |
+| `--update-helper-stop` | 配合 `--update-helper`：要求助手主动停掉旧服务（CLI 更新时使用） |
+
+`--update-helper` 不是给人用的入口，它由 `--update` 自己以分离进程方式启动。
 
 ## 多操作参数优先级
 
@@ -277,23 +300,26 @@ amkr --config router-config.json --update
 
 1. `--version` 或 `--help`（由参数解析器直接处理）
 2. `--check-update`
-3. `--switch-model` / `--switch-key`
-4. `--show-api-key` / `--get-api-key` / `--get-key`
-5. `--show-unified-model`
-6. `--update`
-7. `--restart-service-after-update`
-8. `--show-logs`
-9. `--show-address`
-10. `--show-config`
-11. `--stop`
-12. `--status`
-13. `--install-service`
-14. `--service`
-15. `--serve-foreground`
-16. 无 `--serve` 时进入 Terminal UI
-17. `--serve`
+3. `--update-helper`（自更新收尾，必须早于配置相关分支）
+4. `--switch-model` / `--switch-key`
+5. `--show-api-key` / `--get-api-key` / `--get-key`
+6. `--show-unified-model`
+7. `--update`
+8. `--show-address`
+9. `--show-config`
+10. `--stop`
+11. `--status`
+12. `--install-service`
+13. `--service`
+14. `--serve-foreground`
+15. 无 `--serve` 时进入 Terminal UI
+16. `--serve`
 
 例如同时传入 `--show-config --serve` 时，只显示配置，不会启动服务。
+
+> `--restart-service-after-update` 与 `--show-logs` 已按产品决策移除（不再是参数，
+> 传入会报「flag provided but not defined」并以退出码 2 结束）。前者的职责由
+> `--update-helper` 助手进程承担。
 
 ## 退出状态
 

@@ -70,13 +70,15 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `GET/PUT/DELETE` | `/api/tasks/{task_name}` | 仅本地 | 查询、更新或删除任务路由 |
 | `GET/PUT` | `/api/settings` | 仅本地 | 查询或更新监听、超时和重试设置 |
 | `POST` | `/api/settings/local-api-key` | 仅本地 | 重置本地鉴权 Key；新 Key 仅在本次响应返回 |
-| `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 PyPI/GitHub 版本检查 |
+| `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 GitHub Releases 版本检查 |
 | `POST` | `/api/probes/keys` | 仅本地 | 异步探测指定 Provider 下 Key 的模型列表与各端点可用性（逐 Key 兼容接口） |
 | `GET` | `/api/probes/{probe_id}` | 仅本地 | 查询探测进度和结果 |
 | `POST` | `/api/probes/{probe_id}/cancel` | 仅本地 | 取消探测 |
 | `POST` | `/api/config/export`、`/api/config/import` | 仅本地 | 导出或导入可迁移配置 |
 | `GET` | `/ui/` | 无 | 内置 WebUI（需 `webui_enabled`，未启用或资产缺失时返回 `404`） |
 | `GET` | `/ui/pricing.json` | 无 | models.dev 价格目录快照，用于 WebUI 估算成本（需 `webui_enabled`） |
+| `GET` | `/ui/update/status` | 无 | 报告本构建是否具备自更新能力及当前版本，供 WebUI 决定是否显示「立即更新」 |
+| `POST` | `/ui/update/apply` | 仅本地 | 执行自更新：下载并校验新版、就地替换、启动收尾助手重启服务 |
 | `GET` | `/api/logs` | 仅本地 | 读取日志文件尾部（默认最后 64 KiB） |
 | `GET` | `/api/tool` | 仅本地 | 查询版本、可用更新与 WebUI 状态 |
 | `POST` | `/api/tool/webui` | 仅本地 | 启用或关闭 WebUI（写入配置，需重启服务生效） |
@@ -84,6 +86,19 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `GET` | `/api/integrations` | 仅本地 | 查询 Claude Code / Codex / Pi Agent 的集成状态 |
 | `POST` | `/api/integrations/{agent}` | 仅本地 | 以 `unified-model` 或 `native` 模式接管该 Agent 配置 |
 | `POST` | `/api/integrations/{agent}/rollback` | 仅本地 | 回退该 Agent 到备份配置 |
+
+### 为什么自更新挂在 `/ui/` 而不是新增 `/api/` 路由
+
+管理面的 47 条与运维面的 7 条路由被逐字节语料锁定，那些语料由已退役的 Python 参照
+实现产出，是本项目兼容性的唯一凭证。自更新是 Go 版**新增**的能力，Python 侧没有对应
+实现，给它手写一条 `/api` 语料等于伪造兼容性证据。因此与价格目录一样挂在 `/ui/` 前缀
+下——那里不在任何冻结清单之内。
+
+与 `/ui/pricing.json` 的区别是**鉴权**：价格目录是公开只读数据，自更新会替换磁盘上的
+可执行文件并重启服务，因此 `/ui/update/apply` 要求完整权限（访客 key 一律 401），
+只有 `/ui/update/status` 不鉴权（它只回答「这个构建有没有自更新能力」）。
+
+`/api/update/check` 保持不变，仍用于「只检查、不安装」。
 
 ## 代理接口通用参数
 
