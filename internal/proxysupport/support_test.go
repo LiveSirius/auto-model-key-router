@@ -278,6 +278,8 @@ func TestUpstreamHeadersMatchesPython(t *testing.T) {
 		"Content-Type":      {"application/json"},
 		"X-Custom":          {"keep"},
 		"User-Agent":        {"ua"},
+		// AMKR 自己的路由头，不该外泄（Go 侧新增，参照实现没有）。
+		"X-Amkr-Workspace": {"teamA"},
 	}
 	got := UpstreamHeaders(client, "up-key")
 	want := map[string]string{
@@ -296,7 +298,7 @@ func TestUpstreamHeadersMatchesPython(t *testing.T) {
 		}
 	}
 	// 剔除是大小写不敏感的。
-	for _, blocked := range []string{"Host", "Content-Length", "X-Api-Key", "Anthropic-Version", "Anthropic-Beta", "Destination-Addr"} {
+	for _, blocked := range []string{"Host", "Content-Length", "X-Api-Key", "Anthropic-Version", "Anthropic-Beta", "Destination-Addr", "X-Amkr-Workspace"} {
 		if _, exists := got[blocked]; exists {
 			t.Errorf("头部 %q 应被剔除", blocked)
 		}

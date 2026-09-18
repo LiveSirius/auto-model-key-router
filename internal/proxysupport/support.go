@@ -137,12 +137,16 @@ func JoinURL(baseURL, path string) string {
 //
 // 移植 proxy_support.py:308。先剔除一批头部再补两个：
 //
-//   - 被剔除的 8 个键各有原因：authorization/x-api-key 要换成上游凭据；
+//   - 被剔除的键各有原因：authorization/x-api-key 要换成上游凭据；
 //     host/content-length 由 HTTP 客户端重算（照抄会出错）；destination-addr 是
 //     Cloudflare Workers 的私有头，不该外泄；accept-encoding 强制改写为 identity
 //     以便自行处理编码；anthropic-version/anthropic-beta 属于下游方言，上游可能是
 //     OpenAI 端点，照抄会误导上游。
 //   - 补 Authorization 与 Accept-Encoding: identity。
+//
+// x-amkr-workspace 是 Go 侧新增的：**有意增补**，参照实现没有工作空间概念。它是
+// AMKR 自己的路由状态，上游既看不懂也不该看到——与 x-api-key 同类，因此一并剔除。
+// 剔除它不会改变任何既有语料的结果（那些请求根本不带这个头）。
 //
 // 注意 `request.headers.items()` 在 Python 里对同名头只给出一个值（Starlette 按
 // 逗号合并），Go 侧由调用方在传入前完成合并；本函数按 Go 的 map 语义处理。
@@ -156,6 +160,7 @@ func UpstreamHeaders(clientHeaders map[string][]string, apiKey string) map[strin
 		"x-api-key":         true,
 		"anthropic-version": true,
 		"anthropic-beta":    true,
+		"x-amkr-workspace":  true,
 	}
 	headers := make(map[string]string, len(clientHeaders)+2)
 	for key, values := range clientHeaders {
