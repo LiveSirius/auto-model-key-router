@@ -91,6 +91,33 @@ func ClearTerminalHistory() {
 	Console.Write("\033[2J\033[3J\033[H")
 }
 
+// openWithSystem 用系统默认程序打开 URL 或文件。
+//
+// textEditor 为真时在 macOS 上走 `open -t`（文本编辑器）而不是默认程序——参照实现的
+// open_config_file 就是 `open -t`，两者不能混用。
+func openWithSystem(target string, textEditor bool) error {
+	var command *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		// os.startfile 的等价物：cmd /c start 会立刻返回。
+		command = exec.Command("cmd", "/c", "start", "", target)
+	case "darwin":
+		if textEditor {
+			command = exec.Command("open", "-t", target)
+		} else {
+			command = exec.Command("open", target)
+		}
+	default:
+		command = exec.Command("xdg-open", target)
+	}
+	command.Stdout = nil
+	command.Stderr = nil
+	return command.Start()
+}
+
+// OpenURL 用系统默认浏览器打开 URL。
+func OpenURL(url string) error { return openWithSystem(url, false) }
+
 // OpenConfigFile 用系统默认程序打开配置文件（tui.py:899-912）。
 //
 // 返回给用户看的中文提示，与 Python 的三种分支文案一致。
@@ -99,19 +126,7 @@ func OpenConfigFile(configPath string) string {
 	if err != nil || info.IsDir() {
 		return "配置文件不存在: " + configPath
 	}
-	var command *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		// os.startfile 的等价物：cmd /c start 会立刻返回。
-		command = exec.Command("cmd", "/c", "start", "", configPath)
-	case "darwin":
-		command = exec.Command("open", "-t", configPath)
-	default:
-		command = exec.Command("xdg-open", configPath)
-	}
-	command.Stdout = nil
-	command.Stderr = nil
-	if err := command.Start(); err != nil {
+	if err := openWithSystem(configPath, true); err != nil {
 		return "无法打开配置文件: " + err.Error()
 	}
 	return "已使用默认文本编辑器打开: " + configPath

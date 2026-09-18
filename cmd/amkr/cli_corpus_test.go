@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -378,6 +379,8 @@ func TestCLICorpusExitCodes(t *testing.T) {
 				served = true
 				return 0
 			},
+			// 不注入的话会走真实实现：轮询 /health 后**真的弹出浏览器**。测试必须替换它。
+			launchWebUI: func(*config.RouterConfig, io.Writer) {},
 			switchUnified: func(string, *options) (*config.RouterConfig, error) {
 				loaded, err := config.Load(configPath)
 				return loaded, err

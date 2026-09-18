@@ -134,8 +134,10 @@ func (c command) String() string {
 // options 是解析后的参数集合，字段与 main.py 的 argparse 命名空间一一对应。
 type options struct {
 	configPath string
-	host       string
-	port       int
+	// noOpen 关闭「无参数启动后自动打开 WebUI」。
+	noOpen bool
+	host   string
+	port   int
 	// hostSet / portSet 对应 Python 的 `if args.host:` / `if args.port:`：**假值不覆盖**
 	// （因此 `--port 0` 与 `--host ""` 都不会生效，main.py:129-132）。这个反直觉行为
 	// 由语料锁定。
@@ -221,6 +223,7 @@ func parseOptions(argv []string, errOut io.Writer) (*options, error) {
 	flags.Var(triFlag{target: &opts.webui, value: false}, "no-webui", "关闭 WebUI")
 	flags.Var(triFlag{target: &opts.ops, value: false}, "no-ops", "关闭运维接口")
 	flags.BoolVar(&opts.serveForeground, "serve-foreground", false, "前台启动服务（内部参数）")
+	flags.BoolVar(&opts.noOpen, "no-open", false, "启动后不自动打开浏览器")
 	flags.BoolVar(&opts.stop, "stop", false, "停止后台服务")
 	flags.BoolVar(&opts.status, "status", false, "查看后台服务状态")
 	flags.BoolVar(&opts.installService, "install-service", false, "注册为 Windows/Linux 内置服务")

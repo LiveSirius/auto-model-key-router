@@ -66,8 +66,11 @@ const checkUpdateTimeout = 10 * time.Second
 // 语料只对拍退出码，见 cli.go 的差异 4）。
 const defaultUsage = `用法: amkr [选项]
 
+不带任何选项时：启动服务并自动打开 WebUI（若服务已在运行，则只打开 WebUI）。
+
 常用选项:
   --config PATH            配置文件路径（默认 $AMKR_CONFIG 或用户配置目录）
+  --no-open                启动后不自动打开浏览器（无桌面环境时用）
   --serve                  后台启动服务（默认前台启动）
   --stop / --status        停止 / 查看后台服务
   --show-config            展示配置摘要
@@ -98,6 +101,74 @@ type cliEnv struct {
 	switchUnified func(configPath string, opts *options) (*config.RouterConfig, error)
 	// serveForeground 前台启动服务，返回退出码（默认真的监听端口）。
 	serveForeground func(configPath string, cfg *config.RouterConfig) int
+	// launchWebUI 在服务就绪后用系统默认浏览器打开 WebUI（测试注入记录桩，
+	// 免得跑测试时真的弹出浏览器）。
+	launchWebUI func(cfg *config.RouterConfig, out io.Writer)
+}
+
+// webUIPath 是 WebUI 的挂载路径（internal/webui 的 MountPath 对应物）。
+const webUIPath = "/ui"
+
+// openWebUIWhenReady 等服务真正开始监听后再打开浏览器。
+//
+// 为什么要等：先开浏览器再起服务时，浏览器往往比服务慢，多数情况没问题——但用户点了刷新
+// 却发现连不上，就会以为坏了。这里轮询 /health，最多等 10 秒。
+//
+// 打开失败**不算错误**：可能是无桌面环境（SSH、容器）或没装 xdg-open。此时把地址打印出来
+// 让用户手动访问，比直接失败更合理。
+func openWebUIWhenReady(cfg *config.RouterConfig, out io.Writer) {
+	url := webUIURL(cfg)
+	if waitForHealth(cfg, 10*time.Second) {
+		if err := tui.OpenURL(url); err != nil {
+			fmt.Fprintf(out, "amkr: 无法自动打开浏览器（%v），请手动访问 %s\n", err, url)
+			return
+		}
+		fmt.Fprintf(out, "amkr: 已在浏览器中打开 %s\n", url)
+		return
+	}
+	fmt.Fprintf(out, "amkr: 服务未在预期时间内就绪，请手动访问 %s\n", url)
+}
+
+// webUIURL 拼出 WebUI 地址。
+//
+// host 为 0.0.0.0 / :: 这类「监听全部」的地址时换成 127.0.0.1：浏览器打不开 0.0.0.0。
+func webUIURL(cfg *config.RouterConfig) string {
+	host := cfg.Host
+	if host == "" || host == "0.0.0.0" || host == "::" || host == "[::]" {
+		host = "127.0.0.1"
+	}
+	if strings.Contains(host, ":") && !strings.HasPrefix(host, "[") {
+		host = "[" + host + "]"
+	}
+	return fmt.Sprintf("http://%s:%d%s", host, cfg.Port, webUIPath)
+}
+
+// serviceHealthy 报告本地服务是否已经在跑。
+//
+// 只探测一次、超时 500ms：这是一个"是否已有实例"的快速判定，不是健康检查。
+func serviceHealthy(cfg *config.RouterConfig) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port))
+	if err != nil {
+		return false
+	}
+	_ = response.Body.Close()
+	return true
+}
+
+// waitForHealth 轮询 /health 直到有响应或超时。
+func waitForHealth(cfg *config.RouterConfig, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	client := &http.Client{Timeout: time.Second}
+	for time.Now().Before(deadline) {
+		response, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/health", cfg.Port))
+		if err == nil {
+			_ = response.Body.Close()
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
 }
 
 // defaultManualUpdateCommand 是 Go 版分发方式下的手动更新命令（决策 8）。
@@ -148,6 +219,9 @@ func runCLI(argv []string, stdout, stderr io.Writer, overrides *cliEnv) int {
 	}
 	if ctx.serveForeground == nil {
 		ctx.serveForeground = serveForeground
+	}
+	if ctx.launchWebUI == nil {
+		ctx.launchWebUI = openWebUIWhenReady
 	}
 
 	opts, err := parseOptions(argv[1:], ctx.err)
@@ -247,6 +321,25 @@ func runCLI(argv []string, stdout, stderr io.Writer, overrides *cliEnv) int {
 		terminal.Print(panel)
 		return 0
 	default: // commandForeground
+		// 无参数默认动作：把服务跑起来，并**打开 WebUI**——终端界面已随 Python 版退役，
+		// WebUI 是唯一的界面，用户敲一条 `amkr` 就该看到它。
+		//
+		// 显式 `--serve-foreground` 不打开浏览器：那是服务注册（Windows 计划任务 /
+		// systemd unit）调用的路径，既没有桌面会话，弹浏览器也毫无意义。
+		// 服务**已经在跑**（例如已注册为系统服务）时，`amkr` 只负责打开 WebUI：
+		// 不再去抢端口——用户敲这条命令要的是界面，不是一次注定失败的绑定。
+		if !opts.serveForeground && serviceHealthy(loaded) {
+			url := webUIURL(loaded)
+			if opts.noOpen {
+				fmt.Fprintln(ctx.out, url)
+			} else if err := tui.OpenURL(url); err != nil {
+				fmt.Fprintf(ctx.out, "amkr: 无法打开浏览器（%v），请手动访问 %s\n", err, url)
+			}
+			return 0
+		}
+		if !opts.serveForeground && !opts.noOpen {
+			go ctx.launchWebUI(loaded, ctx.out)
+		}
 		// main.py:108-109：后台启动会带 AMKR_LOG_ARCHIVED=1，避免二次归档。
 		if _, _, err := ctx.service.ArchiveLogForForeground(loaded); err != nil {
 			fmt.Fprintf(ctx.err, "amkr: 归档日志失败: %v\n", err)

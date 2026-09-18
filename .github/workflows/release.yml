@@ -1,0 +1,132 @@
+name: Release
+
+# 发布流水线：打一个 `v*` tag 就会走完「测试门禁 -> 交叉编译 -> 校验和 -> GitHub Release」。
+#
+# 为什么需要它：v5.0.0 是我手工 `go build` 六个平台再 `gh release create` 传上去的。手工步骤
+# 既容易漏平台、也没有门禁前置——tag 打在一个测试不通过的提交上也没人拦。
+#
+# 与 Python 时代的区别：那时 release.yml 读 pyproject、`python -m build`、`twine check`、
+# 冒烟 wheel，产物是 PyPI 包；现在是交叉编译的二进制 + GitHub Release。publish-pypi.yml 已删除。
+on:
+  push:
+    tags: ["v*"]
+  # 允许手动触发以便演练：workflow_dispatch 不建 Release，只跑构建与校验。
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ---- 门禁：tag 上的代码必须先是绿的 ----
+  verify:
+    name: 发布前门禁
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: gofmt 格式检查
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "以下文件未格式化："
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Go 测试（go test）
+        # 回放仓库里**冻结的差分语料**（internal/*/testdata、cmd/amkr/testdata），
+        # 它们是兼容性的唯一凭证，不做任何网络访问。
+        run: go test ./...
+
+      - name: WebUI 资产检查（node）
+        # 前端资产经 //go:embed 编进二进制，源码正确性仍单独验一遍。
+        run: |
+          node scripts/webui_module_check.mjs
+          node webui/probes/webui_chart_probe.mjs
+          node webui/probes/webui_tip_probe.mjs
+          node webui/probes/webui_auth_probe.mjs
+
+  # ---- 构建与发布 ----
+  release:
+    name: 交叉编译并发布
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24"
+          cache: true
+
+      - name: 解析版本号
+        id: version
+        # tag 形如 v5.0.0；去掉 v 得到版本号。工作流手动触发时用提交短哈希占位，
+        # 这样构建步骤在演练时也能跑通。
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 交叉编译
+        # CGO_ENABLED=0：SQLite 用的是纯 Go 的 modernc.org/sqlite，关掉 cgo 才能得到
+        # 静态链接的二进制，也才能在任意平台上直接运行。
+        #
+        # 注意 webui/ 目录必须在构建上下文里：//go:embed webui 在编译期就要求它存在。
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mkdir -p dist
+          for target in \
+            "windows amd64 .exe" \
+            "windows arm64 .exe" \
+            "linux amd64 " \
+            "linux arm64 " \
+            "darwin amd64 " \
+            "darwin arm64 "
+          do
+            set -- $target
+            GOOS="$1" GOARCH="$2" EXT="$3" CGO_ENABLED=0 \
+              go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+              -o "dist/amkr_${VERSION}_$1_$2${EXT}" ./cmd/amkr
+          done
+          ls -la dist
+
+      - name: 生成校验和
+        # sha256 供用户校验下载物；`sha256sum -c` 可直接使用。
+        working-directory: dist
+        run: sha256sum amkr_* > checksums.txt && cat checksums.txt
+
+      - name: 上传构建产物（便于手动检查）
+        uses: actions/upload-artifact@v4
+        with:
+          name: amkr-binaries
+          path: dist/
+
+      - name: 创建 GitHub Release
+        if: steps.version.outputs.is_release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF#refs/tags/}" \
+            --title "${GITHUB_REF#refs/tags/}" \
+            --generate-notes \
+            dist/amkr_* dist/checksums.txt
