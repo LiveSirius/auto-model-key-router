@@ -62,6 +62,41 @@ var columnUpgrades = [...]struct{ Name, Definition string }{
 	{"duration_ms", "INTEGER NOT NULL DEFAULT 0"},
 }
 
+// createWorkspaceTableSQL 是工作空间旁挂表的建表语句。
+//
+// **本包唯一有意新增的库对象**（参照实现没有工作空间），因此不对应 metrics.py 的
+// 任何一行。放成旁挂表而不是给 request_metrics 加一列，理由是兼容成本：
+//
+//   - request_metrics 的建表原文、列序与索引定义被 schema.jsonl 逐字节锁定
+//     （TestSchemaMatchesPython），那是整条兼容链的根。而 ALTER TABLE ADD COLUMN
+//     **会重写 sqlite_master.sql**（实测：即便在全新库上也会把新列以
+//     ", workspace TEXT NOT NULL DEFAULT ”" 的形式追加到原文末尾），加列必然
+//     打破那条语料，且语料生成器已随 Python 退役、无法重生成。
+//   - 旁挂表让 request_metrics 自身保持逐字节不变，只在 sqlite_master 里多出一条
+//     **新表**的条目，差异面从「表定义被改写」缩小到「多了一张表」。
+//   - 旧二进制打开新库时只是看不到这张表，仍能正常读写指标；加列则会遇到它不认识
+//     的列序（SELECT * 与 table_info 的输出都会变）。
+//
+// request_id 就是 request_metrics.id（同库自增主键），INTEGER PRIMARY KEY 让它
+// 成为 rowid 别名：一对一约束与查询索引同时到手，且**不会**在 sqlite_master 里
+// 多出一条索引条目（实测条目数只 +1）。
+//
+// workspace 恒为非空：写入方（internal/proxy 与装配层）已经过
+// config.NormalizeWorkspace 归一化。**没有归属的行不写这张表**（历史行、以及不走
+// proxy 的 runtime 接缝），查询端把它们算进 unattributed——不能在这里兜底成
+// default，那会把升级前的旧账算到默认工作空间头上。
+const createWorkspaceTableSQL = `
+            CREATE TABLE IF NOT EXISTS request_workspace (
+                request_id INTEGER PRIMARY KEY,
+                workspace TEXT NOT NULL
+            )
+            `
+
+// insertWorkspaceSQL 写入一行工作空间归属，对应每次 record() 的第二次写入。
+const insertWorkspaceSQL = `
+        INSERT OR REPLACE INTO request_workspace (request_id, workspace) VALUES (?, ?)
+        `
+
 // createIndexStatements 对应 metrics.py:929-947 的 7 条索引。
 //
 // requested_model_id / caller / provider / upstream_model 四类维度是后加的，

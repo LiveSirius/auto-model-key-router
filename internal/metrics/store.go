@@ -73,6 +73,10 @@ type Store struct {
 //
 // 用指针表达 Python 的可选参数（status_code / provider_id / pool_name /
 // upstream_model_id），因为空字符串是有效取值，不能与 None 混同。
+//
+// Workspace 是**有意增补**的字段（参照实现没有工作空间）：它不落在
+// request_metrics 里，而是写进 request_workspace 旁挂表。空串表示「没有归属」——
+// 写入方不写旁挂表，该行因此不会被任何工作空间统计到（升级前的历史行同样如此）。
 type RecordParams struct {
 	ModelID          string
 	KeyName          string
@@ -87,6 +91,7 @@ type RecordParams struct {
 	ProviderID       *string
 	PoolName         *string
 	UpstreamModelID  *string
+	Workspace        string
 }
 
 // Open 打开（必要时创建）指标库，对应 MetricsStore.__init__。
@@ -228,6 +233,12 @@ func (s *Store) initSchema() error {
 			return err
 		}
 	}
+	// 工作空间旁挂表（本包唯一有意新增的库对象，理由见 schema.go）。
+	// 放在索引之后：它不触碰 request_metrics 的任何既有对象，顺序对旧库升级无影响，
+	// 新建库与旧库升级因此得到同一份结构。
+	if _, err := s.writeDB.Exec(createWorkspaceTableSQL); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -321,7 +332,7 @@ func (s *Store) recordSync(
 	if durationMS < 0 {
 		durationMS = 0
 	}
-	_, err := s.writeDB.Exec(
+	result, err := s.writeDB.Exec(
 		insertSQL,
 		// 必须走 formatISO：直接 .Format("2006-01-02T15:04:05") 会**丢掉微秒**，
 		// 而 Python 的 isoformat() 在有微秒时保留 6 位。丢微秒不只是精度问题：
@@ -347,6 +358,24 @@ func (s *Store) recordSync(
 		firstTokenMS,
 		durationMS,
 	)
+	if err != nil {
+		return err
+	}
+	// 工作空间归属写进旁挂表。**必须在 writeMu 内**（调用方已持锁）：LastInsertId
+	// 是连接级状态，writeDB 恰好只有一条连接（SetMaxOpenConns(1)），因此这里读到
+	// 的就是刚插入的那一行——换连接池就会读到别的连接的上一次插入。
+	//
+	// 用 INSERT OR REPLACE 而非 INSERT：request_id 是主键，重放同一行（测试里的
+	// 重复写入）不应炸掉，且替换语义与"归属只有一份"一致。
+	if params.Workspace == "" {
+		// 没有归属就不写：历史行与不走 proxy 的写入路径都不会凭空获得一个工作空间。
+		return nil
+	}
+	requestID, err := result.LastInsertId()
+	if err != nil {
+		return err
+	}
+	_, err = s.writeDB.Exec(insertWorkspaceSQL, requestID, params.Workspace)
 	return err
 }
 

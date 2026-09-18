@@ -152,12 +152,16 @@ func TestSchemaMatchesPython(t *testing.T) {
 			}
 
 			// 逐项比对，报出第一处差异的完整文本，方便直接定位字符。
-			if len(actual.Master) != len(expected.Master) {
-				t.Fatalf("sqlite_master 条目数不同: Go=%d Python=%d",
-					len(actual.Master), len(expected.Master))
+			//
+			// 先摘掉白名单里的新增对象：语料是参照实现的输出，而参考实现的库结构
+			// 契约仍然要守住，两者之差必须恰好是白名单那一份（见 extraMasterEntries）。
+			master := dropExtraMaster(t, actual.Master)
+			if len(master) != len(expected.Master) {
+				t.Fatalf("sqlite_master 条目数不同: Go=%d Python=%d（已排除白名单新增对象）",
+					len(master), len(expected.Master))
 			}
 			for i := range expected.Master {
-				got, want := actual.Master[i], expected.Master[i]
+				got, want := master[i], expected.Master[i]
 				if got.Type != want.Type || got.Name != want.Name || got.TblName != want.TblName {
 					t.Errorf("master[%d] 标识不同:\n Go=%+v\n Py=%+v", i, got, want)
 				}
@@ -193,6 +197,60 @@ func TestSchemaMatchesPython(t *testing.T) {
 			}
 		})
 	}
+}
+
+// extraMasterEntries 是本实现**有意**超出参照实现的那一个库对象。
+//
+// 语料 schema.jsonl / legacy.jsonl 是 Python 实现的真实输出，且生成器
+// （gen_metrics_corpus.py）已随 Python 退役移除，无法重生成，因此这里不改语料，
+// 而是把差异显式列出来——测试的职责从"完全一致"变成"除了这一条，完全一致"。
+//
+// 为什么只有一个：工作空间旁挂表 request_workspace 是唯一新增对象，且它刻意用
+// INTEGER PRIMARY KEY（rowid 别名）表达一对一，因此不会额外产生索引条目。
+// 一旦有人再往库里加第二个对象，这里会立刻失败——这正是想要的约束：兼容分歧
+// 必须是白名单式的、被逐条审视的，而不是无声增长。
+//
+// SQL 原文是 **SQLite 归一化后**的样子，不是 schema.go 里的原文：sqlite_master
+// 会丢掉 IF NOT EXISTS 并去掉首尾空白。所以这里存实测值，而不是把
+// createWorkspaceTableSQL 抄一遍——抄一遍会在归一化规则变化时给出误导性的失败。
+var extraMasterEntries = []masterRow{{
+	Type:    "table",
+	Name:    "request_workspace",
+	TblName: "request_workspace",
+	SQL: ptr("CREATE TABLE request_workspace (\n" +
+		"                request_id INTEGER PRIMARY KEY,\n" +
+		"                workspace TEXT NOT NULL\n" +
+		"            )"),
+}}
+
+// ptr 取字符串地址，用于构造 masterRow.SQL（它是 *string，NULL 表示自动生成的对象）。
+func ptr(value string) *string { return &value }
+
+// dropExtraMaster 从 Go 侧结果里摘掉白名单中的对象，返回剩余条目。
+//
+// 先按键（type, name）找到并校验 SQL 原文，再删除；找不到就原样返回，让条数断言
+// 去报错（失败信息与原来一致，不会掩盖问题）。
+func dropExtraMaster(t *testing.T, actual []masterRow) []masterRow {
+	t.Helper()
+	remaining := append([]masterRow{}, actual...)
+	for _, extra := range extraMasterEntries {
+		index := -1
+		for i, entry := range remaining {
+			if entry.Type == extra.Type && entry.Name == extra.Name {
+				index = i
+				break
+			}
+		}
+		if index < 0 {
+			continue
+		}
+		if !equalSQL(remaining[index].SQL, extra.SQL) {
+			t.Errorf("库对象 %s 的建表原文与白名单不符:\n Go=%s\n 白名单=%s",
+				extra.Name, renderSQL(remaining[index].SQL), renderSQL(extra.SQL))
+		}
+		remaining = append(remaining[:index], remaining[index+1:]...)
+	}
+	return remaining
 }
 
 func equalSQL(a, b *string) bool {
@@ -258,15 +316,17 @@ func TestLegacyDatabaseUpgrade(t *testing.T) {
 						i, renderColumn(actual.Columns[i]), renderColumn(expected.Columns[i]))
 				}
 			}
-			if len(actual.Master) != len(expected.Master) {
-				t.Fatalf("升级后 master 条目数不同: Go=%d Python=%d",
-					len(actual.Master), len(expected.Master))
+			// 旧库升级后同样只允许出现白名单里的那一个新增对象（见 extraMasterEntries）。
+			master := dropExtraMaster(t, actual.Master)
+			if len(master) != len(expected.Master) {
+				t.Fatalf("升级后 master 条目数不同: Go=%d Python=%d（已排除白名单新增对象）",
+					len(master), len(expected.Master))
 			}
 			for i := range expected.Master {
-				if !equalSQL(actual.Master[i].SQL, expected.Master[i].SQL) {
+				if !equalSQL(master[i].SQL, expected.Master[i].SQL) {
 					t.Errorf("升级后 master[%d] (%s) SQL 不同:\n Go=%s\n Py=%s",
 						i, expected.Master[i].Name,
-						renderSQL(actual.Master[i].SQL), renderSQL(expected.Master[i].SQL))
+						renderSQL(master[i].SQL), renderSQL(expected.Master[i].SQL))
 				}
 			}
 			compareRows(t, actual.Rows, expected.Rows)
