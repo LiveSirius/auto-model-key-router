@@ -1,16 +1,7 @@
-# Python-generated files
-__pycache__/
-*.py[oc]
-build/
+# 构建产物
 dist/
 wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-venv/
-env/
-.release-smoke/
+build/
 
 # Local configuration
 router-config.json
@@ -18,11 +9,7 @@ router-config.json
 .env
 .env.*
 
-# Tooling caches
-.pytest_cache/
-.coverage
-.ruff_cache/
-.mypy_cache/
+# 工具缓存
 .dbg/
 
 # IDE
