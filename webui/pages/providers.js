@@ -2,6 +2,7 @@
 
 import { h, errorText } from "../dom.js";
 import { api } from "../api.js";
+import { PROVIDER_PRESETS, providerIcon, brandIcon } from "../brand-icons.js";
 import { card, cardHead, notice, badge, empty, loading, table, render, toast, buttonNode, toggle, input, field, dialog, confirmDialog, kv } from "../ui.js";
 
 const ROUTE_MODES = [
@@ -69,10 +70,44 @@ function capabilityDetail(key) {
 }
 
 // —— 添加供应商 ——
+//
+// 常见供应商预置：点一下把名称与地址填进表单，用户仍可改。预置只填不提交，
+// 所以万一地址不对，用户也看得见（就摆在输入框里），不会静默生效。
+function presetPicker({ onPick, currentUrl }) {
+  const nodes = [];
+  // 高亮已匹配的那一个：说明"当前填的就是这家"，也避免用户重复点。
+  const mark = () => {
+    const current = String(currentUrl() || "").replace(/\/+$/, "").toLowerCase();
+    PROVIDER_PRESETS.forEach((preset, index) => {
+      nodes[index].setAttribute("aria-pressed", String(preset.baseUrl.toLowerCase() === current));
+    });
+  };
+  for (const preset of PROVIDER_PRESETS) {
+    nodes.push(h("button.preset", {
+      type: "button",
+      title: `${preset.label} · ${preset.baseUrl}`,
+      "aria-label": `使用 ${preset.label} 预置`,
+      onClick: () => { onPick(preset); mark(); },
+    },
+      brandIcon(preset.brand, { size: 24 }),
+      h("span.preset-label", preset.label),
+    ));
+  }
+  mark();
+  return h("div.preset-grid", { role: "group", "aria-label": "常见供应商" }, nodes);
+}
+
 function openCreateProvider() {
   const nameInput = input({ placeholder: "例如 openai", required: true });
   const urlInput = input({ type: "url", placeholder: "https://api.example.com", required: true });
   const errorHost = h("div");
+  const presets = presetPicker({
+    currentUrl: () => urlInput.value,
+    onPick: (preset) => {
+      nameInput.value = preset.id;
+      urlInput.value = preset.baseUrl;
+    },
+  });
   let ref = null;
   const submit = async () => {
     const id = nameInput.value.trim();
@@ -91,6 +126,9 @@ function openCreateProvider() {
     }
   };
   const body = h("div.stack", {},
+    // 不用 field()：它渲染的是 <label>，而一个 label 只能标注一个控件，
+    // 里面塞一排按钮会让点按语义变得含混（辅助技术也读不出这是什么）。
+    h("div.field", {}, h("span", "常见供应商"), presets),
     field("名称", nameInput),
     field("地址", urlInput),
     errorHost,
@@ -577,6 +615,38 @@ export function renderProviders(context) {
   return host;
 }
 
+// 供应商导航：竖向排在详情左侧。
+//
+// 为什么竖排而不是沿用顶部的横向标签页：供应商数量随使用增长，十几家很常见。
+// 横排标签页要么换行、要么横向滚动，把页头撑成两三行；竖排只占一列，再多也只是
+// 这一列变长，右侧详情的位置始终不变。
+//
+// 语义用 nav + aria-current，不用 role="tab"：真正的 tab 需要配套的
+// role="tabpanel" 与方向键 roving tabindex，这里没有实现，标成 tab 属于空头承诺。
+function providerRail() {
+  return h("nav.provider-rail", { "aria-label": "供应商列表" },
+    state.providers.map((item) => {
+      const count = (item.keys || []).length;
+      return h("button.rail-item", {
+        type: "button",
+        "aria-current": item.id === state.active ? "true" : null,
+        onClick: () => {
+          state.active = item.id;
+          state.editing = null;
+          state.modelEditor = null;
+          draw();
+        },
+      },
+        providerIcon(item.id, item.base_url, { size: 20, class: "rail-icon" }),
+        h("span.rail-text", {},
+          h("span.rail-name", item.id),
+          h("span.rail-meta", count ? `${count} Key` : "无 Key"),
+        ),
+      );
+    }),
+  );
+}
+
 function draw() {
   if (!host) return;
   const provider = activeProvider();
@@ -593,21 +663,19 @@ function draw() {
     children.push(notice(`无法读取或写入供应商配置: ${state.error}`, "error"));
   }
   if (!state.providers.length) {
-    children.push(empty("尚未配置供应商。"));
+    children.push(empty("尚未配置供应商。", {
+      icon: "providers",
+      hint: "点右上角「添加供应商」，从常见供应商里挑一个，或手动填名称与地址。",
+      action: buttonNode("添加供应商", { onClick: openCreateProvider }),
+    }));
     render(host, children);
     return;
   }
-
-  children.push(h("div.tabs", { role: "tablist" }, state.providers.map((item) => h("button.tab", {
-    type: "button",
-    role: "tab",
-    "aria-selected": String(item.id === state.active),
-    onClick: () => { state.active = item.id; state.editing = null; state.modelEditor = null; draw(); },
-  }, `${item.id} · ${(item.keys || []).length} Key`))));
-
   if (!provider) { render(host, children); return; }
 
-  children.push(state.editing === provider.id
+  const detail = [];
+
+  detail.push(state.editing === provider.id
     ? card(providerForm(provider))
     : card(
         cardHead(provider.id,
@@ -621,7 +689,7 @@ function draw() {
       ));
 
   const keys = provider.keys || [];
-  children.push(h("div.card", {},
+  detail.push(h("div.card", {},
     cardHead(`Key（${keys.length}）`, buttonNode("添加 Key", { small: true, onClick: () => openCreateKey(provider) })),
     keys.length
       ? h("table.table", {},
@@ -634,8 +702,13 @@ function draw() {
   const editorKey = state.modelEditor && state.modelEditor.provider === provider.id
     ? keys.find((key) => key.name === state.modelEditor.key)
     : null;
-  if (editorKey) children.push(card(modelEditor(provider, editorKey)));
+  if (editorKey) detail.push(card(modelEditor(provider, editorKey)));
 
-  children.push(probePanel(provider));
+  detail.push(probePanel(provider));
+
+  children.push(h("div.provider-split", {},
+    providerRail(),
+    h("div.provider-detail", {}, detail),
+  ));
   render(host, children);
 }

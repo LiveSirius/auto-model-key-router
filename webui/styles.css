@@ -609,7 +609,8 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 /* 焦点环统一：键盘用户必须能看清当前位置 */
 .btn:focus-visible, .input:focus-visible, .select:focus-visible, .textarea:focus-visible,
 .nav-item:focus-visible, .tab:focus-visible, .chip:focus-visible, .toggle:focus-visible,
-.segment:focus-visible, .th-sort:focus-visible, .icon-btn:focus-visible, .card:focus-visible {
+.segment:focus-visible, .th-sort:focus-visible, .icon-btn:focus-visible, .card:focus-visible,
+.rail-item:focus-visible, .preset:focus-visible {
   outline: 2px solid var(--md-primary-variant);
   outline-offset: 2px;
 }
@@ -711,6 +712,45 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .segment[aria-pressed="true"] { background: var(--md-primary); color: #fff; }
 .segment[aria-pressed="true"]:hover { background: var(--md-primary-variant); color: #fff; }
 
+/* ══ 供应商：左侧竖向导航 + 右侧详情 ══
+   供应商数量随使用增长，横排标签页会换行或横向滚动、把页头撑高；竖排只占一列，
+   再多也只是这一列变长，右侧详情的位置始终不动。 */
+.provider-split {
+  display: grid;
+  grid-template-columns: minmax(180px, 216px) minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: start;
+}
+.provider-rail {
+  display: flex; flex-direction: column; gap: 2px;
+  position: sticky; top: var(--sp-2);
+  max-height: calc(100vh - var(--sp-6));
+  overflow-y: auto;
+  padding: var(--sp-1);
+  border-radius: var(--radius-lg);
+  background: var(--md-surface);
+  box-shadow: var(--dp1);
+}
+.rail-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0; border-radius: var(--radius);
+  background: transparent; color: var(--md-on-surface-variant);
+  font: inherit; font-size: 13px; text-align: left;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease), transform var(--dur) var(--ease);
+}
+.rail-item .brand-icon, .rail-item .icon { flex: none; }
+.rail-item:hover { background: rgba(98, 0, 238, 0.06); color: var(--md-primary); }
+.rail-item:active { transform: scale(0.98); }
+.rail-item[aria-current="true"] { background: rgba(98, 0, 238, 0.1); color: var(--md-primary); font-weight: 500; }
+.rail-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.rail-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rail-meta { font-size: 11px; font-weight: 400; color: var(--md-on-surface-variant); }
+.rail-item[aria-current="true"] .rail-meta { color: var(--md-primary); opacity: 0.8; }
+.provider-detail { display: flex; flex-direction: column; gap: var(--sp-2); min-width: 0; }
+
 .toolbar {
   display: flex; align-items: center; gap: var(--sp-1);
   flex-wrap: wrap;
@@ -733,6 +773,33 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .chip:hover { box-shadow: var(--dp2); }
 .chip:active { transform: scale(0.98); }
 .chip[aria-pressed="true"] { background: var(--md-primary); border-color: var(--md-primary); color: #fff; }
+
+/* ══ 常见供应商预置（添加供应商对话框）══ */
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--sp-1);
+}
+.preset {
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 10px 6px;
+  border: 1px solid var(--md-outline);
+  border-radius: var(--radius);
+  background: var(--md-surface);
+  color: var(--md-on-surface-variant);
+  font: inherit; font-size: 11px;
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), border-color var(--dur) var(--ease),
+    box-shadow var(--dur) var(--ease), transform var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+.preset:hover { box-shadow: var(--dp2); color: var(--md-primary); }
+.preset:active { transform: scale(0.98); }
+.preset[aria-pressed="true"] {
+  background: rgba(98, 0, 238, 0.08);
+  border-color: var(--md-primary);
+  color: var(--md-primary);
+}
+.preset-label { text-align: center; line-height: 1.3; overflow-wrap: anywhere; }
 .chip.probe-missing { border-color: #f9a825; background: #fff8e1; color: var(--tone-warn); }
 .chip.probe-missing[aria-pressed="true"] { background: #f9a825; border-color: #f9a825; color: #3d2b00; }
 
@@ -1049,6 +1116,7 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   :root { --nav-w: 200px; }
   .col-3, .col-4, .col-5 { grid-column: span 6; }
   .col-7, .col-8 { grid-column: span 12; }
+  .provider-split { grid-template-columns: minmax(160px, 184px) minmax(0, 1fr); }
 }
 @media (max-width: 860px) {
   :root { --nav-w: 100%; }
@@ -1066,6 +1134,16 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   .nav-foot { display: none; }
   .content { padding: var(--sp-2); gap: var(--sp-2); }
   .col-3, .col-4, .col-5, .col-6 { grid-column: span 12; }
+  /* 窄屏不再左右分栏：左侧 180px 的栏会把右侧的 Key 表挤到没法看。
+   * 改成横向滚动条，与上面 .nav 在同一断点的退化方式一致。 */
+  .provider-split { grid-template-columns: minmax(0, 1fr); }
+  .provider-rail {
+    position: static; max-height: none;
+    flex-direction: row; overflow-x: auto; overflow-y: hidden;
+    gap: 4px;
+  }
+  .rail-item { width: auto; white-space: nowrap; }
+  .rail-text { flex-direction: row; align-items: baseline; gap: 6px; }
   .app-bar .brand small { display: none; }
   .live-pill .live-metrics { display: none; }
   .stat-value { font-size: 23px; }
@@ -1089,7 +1167,8 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
     animation-iteration-count: 1 !important;
   }
   .card.is-lift:hover, .card.is-lift:active,
-  .btn:active, .nav-item:active, .tab:active, .chip:active, .toggle:active, .segment:active {
+  .btn:active, .nav-item:active, .tab:active, .chip:active, .toggle:active, .segment:active,
+  .rail-item:active, .preset:active {
     transform: none !important;
   }
   .skel { background: #eee; }
