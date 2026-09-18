@@ -1,32 +1,31 @@
-// Command amkr 是 AMKR 的**最小可运行入口**。
+// Command amkr 是 AMKR 的入口：完整 CLI + 前台服务。
 //
-// 它只做四件事：解析少量参数、载入配置、装配 internal/server、监听并在中断时干净
-// 退出。这是「Go 版可以顶替 Python 作为服务运行」的最后一块拼图。
+// 参数解析与分支决策在 cli.go（可脱离副作用对拍），本文件负责装配与执行：
+// 载入配置、装配 internal/server、监听并在中断时干净退出；以及把 CLI 动作分派给
+// internal/service（后台启停、系统服务注册）与 internal/unifiedmodel（统一模型切换）。
 //
-// # 明确未实现（后续任务）
+// # 与参照实现（main.py，202 行）的关系
 //
-//   - **完整 CLI**：参照实现的 `amkr` 有 24 个 flag（--host/--port/--webui/
-//     --no-webui/--ops/--log-level/--print-config/...），本入口只有一个 -config 与
-//     -version。参数解析、优先级（CLI > 环境变量 > 配置文件）都留待后续。
-//   - **service.py**：守护进程化、Windows 计划任务、systemd/launchd 注册、日志轮转、
-//     单实例锁，全部未移植。连带后果：运维面的 `POST /api/service/{action}` 未接线
-//     （返回 500 + 明确文案，不会假装成功）。
-//   - **Agent 集成**：`/api/integrations*` 三条路由的接缝（api.Server.Integrations）
-//     未接线。internal/agentconfig 已经就绪，装配它属于后续任务。
-//   - **WebSocket**（/ws/events 与 /v1/{path} 的升级）：前端改为轮询，本任务不含。
-//   - **自更新**：产品决策已砍掉（见 internal/updatecheck 的说明）。
+// 24 个 flag 的处置、被砍掉的三个 flag、以及默认动作的开放决策都写在 cli.go 的文件头。
+// 本文件只补充执行层的差异：
+//
+//   - **--check-update 的可手动更新命令**。参照实现给的是 pip/uv 命令（update.py），
+//     Go 版按决策 8 由 `go install` 分发，因此给的是 go install 命令。渲染函数把命令
+//     作为参数，语料用参照实现的命令文本喂进去逐行对拍（见 versionCheckLines）。
+//   - **--show-config 不含 quick_metrics_items**（要直查 metrics.db 的原始 SQL，
+//     internal/metrics 没有等价接口），见 cli.go 的说明。
 //
 // # 退出码
 //
-//	0    正常退出（服务被关停且没有错误）
-//	1    启动失败（配置读不出来、指标库打不开、端口被占用等）
+//	0    正常退出（含所有只读子命令）
+//	1    失败（配置读不出来、切换失败、启动失败等）
+//	2    参数错误（与 argparse 一致）
 //	130  Ctrl+C / SIGINT（128 + 2，与参照实现被键盘中断时的退出码一致）
 package main
 
 import (
 	"context"
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -34,12 +33,19 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	amkr "github.com/Sparrived/auto-model-key-router"
+	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
+	"github.com/Sparrived/auto-model-key-router/internal/configservice"
 	"github.com/Sparrived/auto-model-key-router/internal/server"
+	"github.com/Sparrived/auto-model-key-router/internal/service"
+	"github.com/Sparrived/auto-model-key-router/internal/tui"
+	"github.com/Sparrived/auto-model-key-router/internal/unifiedmodel"
+	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
 
 // version 与 pyproject.toml 的 project.version 保持一致；发布时可用
@@ -52,40 +58,329 @@ var version = "4.1.0"
 // 这里取同一个量级：流式响应不会被强杀，但也不会让关停无限期挂着。
 const shutdownTimeout = 10 * time.Second
 
-func main() {
-	var (
-		configPath  string
-		showVersion bool
-	)
-	flag.StringVar(&configPath, "config", "",
-		"配置文件路径；留空则依次尝试 $AMKR_CONFIG 与默认用户配置目录")
-	flag.BoolVar(&showVersion, "version", false, "打印版本号后退出")
-	flag.Parse()
+// checkUpdateTimeout 对应 main.py:88 的 `check_latest_version(timeout=10.0)`。
+const checkUpdateTimeout = 10 * time.Second
 
-	if showVersion {
-		fmt.Println(version)
-		return
-	}
-	os.Exit(run(configPath))
+// defaultUsage 是参数错误时打印的简短用法（argparse 的完整用法文本无法复刻，
+// 语料只对拍退出码，见 cli.go 的差异 4）。
+const defaultUsage = `用法: amkr [选项]
+
+常用选项:
+  --config PATH            配置文件路径（默认 $AMKR_CONFIG 或用户配置目录）
+  --serve                  后台启动服务（默认前台启动）
+  --stop / --status        停止 / 查看后台服务
+  --show-config            展示配置摘要
+  --show-address           展示监听地址
+  --show-api-key           打印本地授权 Key
+  --check-update           检查最新版本
+  --version                打印版本号
+  --install-service        注册为系统服务
+  --service ACTION         管理系统服务（install/start/stop/restart/status/...）
+`
+
+// cliEnv 是执行层的外部依赖接缝：CLI 测试注入它以免真的起服务、连网络或改配置。
+type cliEnv struct {
+	// out / err 是标准输出与错误输出。
+	out io.Writer
+	err io.Writer
+	// argv0 用于 --version 的程序名（对应 sys.argv[0]）。
+	argv0 string
+	// clearHistory 对应 main.py:86 的 clear_terminal_history。
+	clearHistory func()
+	// service 是服务管理接缝（internal/service 的 Env）。
+	service *service.Env
+	// checkUpdate 对应 update.check_latest_version(timeout=10.0)。
+	checkUpdate func() updatecheck.Result
+	// manualUpdateCommand 是 --check-update 展示的可手动更新命令。
+	manualUpdateCommand string
+	// switchUnified 执行统一模型切换（测试注入记录桩）。
+	switchUnified func(configPath string, opts *options) (*config.RouterConfig, error)
+	// serveForeground 前台启动服务，返回退出码（默认真的监听端口）。
+	serveForeground func(configPath string, cfg *config.RouterConfig) int
 }
 
-// run 装配并运行服务，返回进程退出码。
-func run(configPath string) int {
-	// 路径解析与参照实现的 config.resolve_config_path 同源：显式路径 > AMKR_CONFIG
-	// > 默认路径（并处理旧版 router-config.json 的迁移）。
-	resolved, err := config.ResolveConfigPath(configPath)
+// defaultManualUpdateCommand 是 Go 版分发方式下的手动更新命令（决策 8）。
+const defaultManualUpdateCommand = "go install github.com/Sparrived/auto-model-key-router/cmd/amkr@latest"
+
+func main() {
+	os.Exit(runCLI(os.Args, os.Stdout, os.Stderr, nil))
+}
+
+// runCLI 是 main.py 的 main() 等价物，返回进程退出码。
+//
+// overrides 非 nil 时用于测试注入（nil 表示真实依赖）。
+func runCLI(argv []string, stdout, stderr io.Writer, overrides *cliEnv) int {
+	ctx := overrides
+	if ctx == nil {
+		ctx = &cliEnv{}
+	}
+	if ctx.out == nil {
+		ctx.out = stdout
+	}
+	if ctx.err == nil {
+		ctx.err = stderr
+	}
+	if ctx.argv0 == "" {
+		if len(argv) > 0 {
+			ctx.argv0 = argv[0]
+		} else {
+			ctx.argv0 = "amkr"
+		}
+	}
+	if ctx.clearHistory == nil {
+		ctx.clearHistory = tui.ClearTerminalHistory
+	}
+	if ctx.service == nil {
+		ctx.service = service.DefaultEnv()
+	}
+	if ctx.checkUpdate == nil {
+		ctx.checkUpdate = func() updatecheck.Result {
+			fetch := updatecheck.HTTPFetcher(&http.Client{Timeout: checkUpdateTimeout})
+			return updatecheck.CheckLatestVersion(fetch, version, checkUpdateTimeout)
+		}
+	}
+	if ctx.manualUpdateCommand == "" {
+		ctx.manualUpdateCommand = defaultManualUpdateCommand
+	}
+	if ctx.switchUnified == nil {
+		ctx.switchUnified = switchUnified
+	}
+	if ctx.serveForeground == nil {
+		ctx.serveForeground = serveForeground
+	}
+
+	opts, err := parseOptions(argv[1:], ctx.err)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "amkr: 解析配置路径失败: %v\n", err)
+		fmt.Fprintf(ctx.err, "%s: %v\n%s", progName(ctx.argv0), err, defaultUsage)
+		return 2
+	}
+	if opts.showVersion {
+		fmt.Fprintf(ctx.out, "%s %s\n", progName(ctx.argv0), version)
+		return 0
+	}
+	// main.py:85-86：机器可读的 key 输出不能混入终端控制序列。
+	if !opts.showAPIKey {
+		ctx.clearHistory()
+	}
+	terminal := newTerminal(ctx.out)
+	command := selectCommand(opts)
+
+	if command == commandCheckUpdate {
+		terminal.Print(versionCheckPanel(ctx.checkUpdate(), ctx.manualUpdateCommand))
+		return 0
+	}
+
+	resolved, err := config.ResolveConfigPath(opts.configPath)
+	if err != nil {
+		printErrorPanel(terminal, err, "配置加载失败")
 		return 1
 	}
+	// WebUI/运维开关是持久化设置：三个启动路径（前台/后台/系统服务）都读同一份
+	// 配置，写成配置项才能保证 --webui 对后台启动也生效（main.py:95-103）。
+	if opts.webui != nil {
+		if err := updateConfigFlag(resolved, "webui_enabled", *opts.webui); err != nil {
+			printErrorPanel(terminal, err, "配置写入失败")
+			return 1
+		}
+	}
+	if opts.ops != nil {
+		if err := updateConfigFlag(resolved, "ops_enabled", *opts.ops); err != nil {
+			printErrorPanel(terminal, err, "配置写入失败")
+			return 1
+		}
+	}
+
 	loaded, err := config.Load(resolved)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "amkr: 载入配置失败: %v\n", err)
+		printErrorPanel(terminal, err, "配置加载失败")
 		return 1
+	}
+	loaded = opts.configOverrides(loaded)
+
+	switch command {
+	case commandSwitchUnified:
+		updated, err := ctx.switchUnified(resolved, opts)
+		if err != nil {
+			printErrorPanel(terminal, err, "统一模型切换失败")
+			return 1
+		}
+		terminal.Print(unifiedModelPanel(updated, "统一模型已切换", "green"))
+		return 0
+	case commandShowAPIKey:
+		fmt.Fprintln(ctx.out, loaded.LocalAPIKey)
+		return 0
+	case commandShowUnifiedModel:
+		terminal.Print(unifiedModelPanel(loaded, "统一模型", "cyan"))
+		return 0
+	case commandShowAddress:
+		terminal.Print(tui.SectionPanel(routerAddressText(loaded), "AMKR 地址", "cyan"))
+		return 0
+	case commandShowConfig:
+		printConfigSummary(terminal, loaded)
+		return 0
+	case commandStop:
+		terminal.Print(ctx.service.StopBackground(loaded))
+		return 0
+	case commandStatus:
+		terminal.Print(ctx.service.BackgroundStatusPanel(loaded, resolved))
+		return 0
+	case commandInstallService, commandManageService:
+		action := opts.serviceArgument()
+		if action == "status" {
+			terminal.Print(ctx.service.ServiceStatusPanel(loaded, resolved))
+			return 0
+		}
+		panel, err := ctx.service.ManageSystemService(resolved, action)
+		if err != nil {
+			printErrorPanel(terminal, err, "系统服务操作失败")
+			return 1
+		}
+		terminal.Print(panel)
+		return 0
+	case commandBackground:
+		panel, err := ctx.service.StartBackground(resolved, loaded)
+		if err != nil {
+			printErrorPanel(terminal, err, "后台服务启动失败")
+			return 1
+		}
+		terminal.Print(panel)
+		return 0
+	default: // commandForeground
+		// main.py:108-109：后台启动会带 AMKR_LOG_ARCHIVED=1，避免二次归档。
+		if _, _, err := ctx.service.ArchiveLogForForeground(loaded); err != nil {
+			fmt.Fprintf(ctx.err, "amkr: 归档日志失败: %v\n", err)
+		}
+		return ctx.serveForeground(resolved, loaded)
+	}
+}
+
+// newTerminal 构造一个写到 out 的终端（宽度沿用 COLUMNS，与 tui.Console 同规则）。
+func newTerminal(out io.Writer) *tui.Terminal {
+	terminal := tui.NewTerminal()
+	terminal.SetOutput(out)
+	return terminal
+}
+
+// updateConfigFlag 走 ConfigService 的读-改-写路径（与 Python 同一把按路径锁）。
+func updateConfigFlag(configPath, key string, value bool) error {
+	_, err := configservice.New(configPath).Update(func(data *canonical.Value) error {
+		data.SetKey(key, canonical.NewBool(value))
+		return nil
+	})
+	return err
+}
+
+// switchUnified 对应 main.py:134-142 的统一模型切换。
+//
+// key 传 "auto" 时用 nil 表示「恢复自动路由」（main.py:140）。
+func switchUnified(configPath string, opts *options) (*config.RouterConfig, error) {
+	var keyName *string
+	if opts.switchKey != nil {
+		if *opts.switchKey != "auto" {
+			keyName = opts.switchKey
+		}
+	}
+	return unifiedmodel.SwitchUnifiedTarget(
+		configPath, opts.unifiedTarget, opts.switchModel, keyName, opts.switchKey != nil)
+}
+
+// printErrorPanel 复刻 main.py:126 的错误面板（红色，标题为场景名）。
+func printErrorPanel(terminal *tui.Terminal, err error, title string) {
+	terminal.Print(tui.SectionPanel(fmt.Sprintf("[red]%s[/red]", err.Error()), title, "red"))
+}
+
+// unifiedModelPanel 渲染统一模型摘要面板。
+//
+// 参照实现用 dashboard.unified_model_status_panel（已按决策 7 砍掉）；这里是等价纯文本。
+func unifiedModelPanel(cfg *config.RouterConfig, title, color string) tui.Renderable {
+	return tui.SectionPanel(strings.Join(unifiedModelSummaryLines(cfg), "\n"), title, color)
+}
+
+// printConfigSummary 是 --show-config 的输出：运行概览 + 公网风险 + 模型配置表。
+func printConfigSummary(terminal *tui.Terminal, cfg *config.RouterConfig) {
+	healthy := service.DefaultEnv().IsServiceHealthy(cfg.Host, cfg.Port, true)
+	width, _ := terminal.Size()
+	summary := configSummaryLine(cfg, healthy, true, width)
+	terminal.Print(tui.SectionPanel(summary, "运行概览", "cyan"))
+	if cfg.Host == "0.0.0.0" {
+		terminal.Print(tui.SectionPanel(publicWarningText, "公网开放风险", "red"))
+	}
+	rows := configModelRows(cfg)
+	cells := make([][]string, 0, len(rows))
+	for _, row := range rows {
+		cells = append(cells, row)
+	}
+	terminal.Print(tui.SectionPanel(tui.Table{
+		Columns: []tui.TableColumn{{Width: 28}, {Width: 24}, {Width: 24}, {Width: 8}, {Width: 6}},
+		Rows:    cells,
+	}, "模型配置", "blue"))
+}
+
+// versionCheckPanel 渲染版本检查结果（update.py:557 的 render_version_check_result）。
+func versionCheckPanel(result updatecheck.Result, manualCommand string) tui.Renderable {
+	lines, style := versionCheckLines(result, manualCommand)
+	return tui.SectionPanel(strings.Join(lines, "\n"), "版本检查", style)
+}
+
+// versionCheckLines 是版本检查面板的纯行文本。
+//
+// manualCommand 作为参数：参照实现给的是 pip/uv 命令，Go 版给的是 go install 命令
+// （决策 8），对拍时用参照实现的命令文本喂入即可逐行比较其余内容。
+func versionCheckLines(result updatecheck.Result, manualCommand string) ([]string, string) {
+	if result.Error != nil {
+		return []string{
+			fmt.Sprintf("当前版本: [bold]%s[/bold]", escapeMarkup(result.CurrentVersion)),
+			fmt.Sprintf("检查失败: [red]%s[/red]", escapeMarkup(*result.Error)),
+			fmt.Sprintf("GitHub Releases: [bold]%s[/bold]", updatecheck.GitHubReleasesURL),
+		}, "red"
+	}
+	latest := "-"
+	if result.LatestVersion != nil && *result.LatestVersion != "" {
+		latest = *result.LatestVersion
+	}
+	lines := []string{
+		fmt.Sprintf("当前版本: [bold]%s[/bold]", escapeMarkup(result.CurrentVersion)),
+		fmt.Sprintf("最新版本: [bold]%s[/bold]", escapeMarkup(latest)),
+	}
+	if result.Source != nil && *result.Source != "" {
+		lines = append(lines, fmt.Sprintf("检查来源: [bold]%s[/bold]", escapeMarkup(*result.Source)))
+	}
+	if result.FallbackError != nil && *result.FallbackError != "" {
+		lines = append(lines, fmt.Sprintf("PyPI 回退原因: [yellow]%s[/yellow]", escapeMarkup(*result.FallbackError)))
+	}
+	if result.ReleaseURL != nil && *result.ReleaseURL != "" {
+		lines = append(lines, fmt.Sprintf("发布页面: [bold]%s[/bold]", escapeMarkup(*result.ReleaseURL)))
+	}
+	if result.UpdateAvailable() {
+		lines = append(lines,
+			"状态: [yellow]发现新版本，可手动更新。[/yellow]",
+			"手动更新命令:",
+			fmt.Sprintf("[bold]%s[/bold]", escapeMarkup(manualCommand)),
+		)
+		return lines, "yellow"
+	}
+	lines = append(lines, "状态: [green]当前已是最新版本。[/green]")
+	return lines, "green"
+}
+
+// escapeMarkup 对应 rich.markup.escape：把值里的方括号转义，避免被当标记吞掉。
+func escapeMarkup(value string) string {
+	return strings.ReplaceAll(value, "[", `\[`)
+}
+
+// serveForeground 写 PID 文件后监听端口（原 main.go 的 run，加上了 PID/日志处理）。
+func serveForeground(configPath string, loaded *config.RouterConfig) int {
+	env := service.DefaultEnv()
+	cleanup, err := env.ForegroundPIDHook(loaded)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "amkr: 写 PID 文件失败: %v\n", err)
+	}
+	if cleanup != nil {
+		defer cleanup()
 	}
 
 	app, err := server.New(server.Options{
-		ConfigPath:  resolved,
+		ConfigPath:  configPath,
 		Config:      loaded,
 		Version:     version,
 		WebUIAssets: amkr.WebUIAssets,

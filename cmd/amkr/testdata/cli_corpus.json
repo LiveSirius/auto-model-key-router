@@ -1,0 +1,1340 @@
+{
+  "corpus_version": 1,
+  "version": "4.1.0",
+  "dropped_flags": [
+    "--show-logs",
+    "--update",
+    "--restart-service-after-update"
+  ],
+  "flags": [
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--serve"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-start"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 0
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--serve-foreground"
+      ],
+      "exit": 0,
+      "actions": [
+        "foreground"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 1
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--stop"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-stop"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 2
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 3
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--install-service"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "install",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 4
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "install"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "install",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 5
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "install-user"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "install-user",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 6
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "uninstall"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "uninstall",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 7
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "start"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "start",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 8
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "stop"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "stop",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 9
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "restart"
+      ],
+      "exit": 0,
+      "actions": [
+        "system-service"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": "restart",
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 10
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "status"
+      ],
+      "exit": 0,
+      "actions": [
+        "service-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 11
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--check-update"
+      ],
+      "exit": 0,
+      "actions": [
+        "check-update"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 12
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-address"
+      ],
+      "exit": 0,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 13
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-api-key"
+      ],
+      "exit": 0,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "amkr-cli-corpus-key\n",
+      "id": 14
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--get-api-key"
+      ],
+      "exit": 0,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "amkr-cli-corpus-key\n",
+      "id": 15
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--get-key"
+      ],
+      "exit": 0,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "amkr-cli-corpus-key\n",
+      "id": 16
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-config"
+      ],
+      "exit": 0,
+      "actions": [
+        "show-config"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 17
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-unified-model"
+      ],
+      "exit": 0,
+      "actions": [
+        "show-unified-model"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 18
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--switch-model",
+        "gpt-4o-mini"
+      ],
+      "exit": 0,
+      "actions": [
+        "switch-unified",
+        "show-unified-model"
+      ],
+      "config": null,
+      "switch": {
+        "target": "default.primary",
+        "model": "gpt-4o-mini",
+        "key": null,
+        "update_key": false
+      },
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 19
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--switch-key",
+        "auto"
+      ],
+      "exit": 0,
+      "actions": [
+        "switch-unified",
+        "show-unified-model"
+      ],
+      "config": null,
+      "switch": {
+        "target": "default.primary",
+        "model": null,
+        "key": null,
+        "update_key": true
+      },
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 20
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--switch-key",
+        "main"
+      ],
+      "exit": 0,
+      "actions": [
+        "switch-unified",
+        "show-unified-model"
+      ],
+      "config": null,
+      "switch": {
+        "target": "default.primary",
+        "model": null,
+        "key": "main",
+        "update_key": true
+      },
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 21
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--switch-model",
+        "gpt-4o-mini",
+        "--unified-target",
+        "image.primary"
+      ],
+      "exit": 0,
+      "actions": [
+        "switch-unified",
+        "show-unified-model"
+      ],
+      "config": null,
+      "switch": {
+        "target": "image.primary",
+        "model": "gpt-4o-mini",
+        "key": null,
+        "update_key": false
+      },
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 22
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG"
+      ],
+      "exit": 0,
+      "actions": [
+        "terminal-ui"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 23
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--host",
+        "0.0.0.0"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "0.0.0.0",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [
+        {
+          "host": "0.0.0.0"
+        }
+      ],
+      "stdout": "",
+      "id": 24
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--port",
+        "9000"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 9000,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [
+        {
+          "port": 9000
+        }
+      ],
+      "stdout": "",
+      "id": 25
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--port",
+        "0"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 26
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--host",
+        ""
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 27
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "9000"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "0.0.0.0",
+        "port": 9000,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [
+        {
+          "host": "0.0.0.0"
+        },
+        {
+          "port": 9000
+        }
+      ],
+      "stdout": "",
+      "id": 28
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--webui"
+      ],
+      "exit": 0,
+      "actions": [
+        "config-update",
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [
+        {
+          "webui_enabled": true
+        }
+      ],
+      "replacements": [],
+      "stdout": "",
+      "id": 29
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--no-webui"
+      ],
+      "exit": 0,
+      "actions": [
+        "config-update",
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [
+        {
+          "webui_enabled": false
+        }
+      ],
+      "replacements": [],
+      "stdout": "",
+      "id": 30
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--no-ops"
+      ],
+      "exit": 0,
+      "actions": [
+        "config-update",
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [
+        {
+          "ops_enabled": false
+        }
+      ],
+      "replacements": [],
+      "stdout": "",
+      "id": 31
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--webui",
+        "--no-ops"
+      ],
+      "exit": 0,
+      "actions": [
+        "config-update",
+        "config-update",
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [
+        {
+          "webui_enabled": true
+        },
+        {
+          "ops_enabled": false
+        }
+      ],
+      "replacements": [],
+      "stdout": "",
+      "id": 32
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status",
+        "--no-webui",
+        "--webui"
+      ],
+      "exit": 0,
+      "actions": [
+        "config-update",
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [
+        {
+          "webui_enabled": true
+        }
+      ],
+      "replacements": [],
+      "stdout": "",
+      "id": 33
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--stop",
+        "--status"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-stop"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 34
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-config",
+        "--show-address"
+      ],
+      "exit": 0,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 35
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--serve",
+        "--serve-foreground"
+      ],
+      "exit": 0,
+      "actions": [
+        "foreground"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 36
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--switch-model",
+        "m",
+        "--show-api-key"
+      ],
+      "exit": 0,
+      "actions": [
+        "switch-unified",
+        "show-unified-model"
+      ],
+      "config": null,
+      "switch": {
+        "target": "default.primary",
+        "model": "m",
+        "key": null,
+        "update_key": false
+      },
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 37
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--check-update",
+        "--status"
+      ],
+      "exit": 0,
+      "actions": [
+        "check-update"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 38
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--nope"
+      ],
+      "exit": 2,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 39
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--port",
+        "abc",
+        "--status"
+      ],
+      "exit": 2,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 40
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--service",
+        "bogus"
+      ],
+      "exit": 2,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 41
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--unified-target",
+        "bogus",
+        "--switch-model",
+        "m"
+      ],
+      "exit": 2,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 42
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--switch-model"
+      ],
+      "exit": 2,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 43
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-logs"
+      ],
+      "exit": 0,
+      "actions": [
+        "show-config",
+        "show-logs"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 44
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--show-logs",
+        "5"
+      ],
+      "exit": 0,
+      "actions": [
+        "show-config",
+        "show-logs"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 45
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--update"
+      ],
+      "exit": 0,
+      "actions": [
+        "update-dropped"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 46
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--restart-service-after-update"
+      ],
+      "exit": 0,
+      "actions": [
+        "restart-after-update"
+      ],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 47
+    },
+    {
+      "argv": [
+        "--version"
+      ],
+      "exit": 0,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "amkr 4.1.0\n",
+      "id": 48
+    },
+    {
+      "argv": [
+        "--status"
+      ],
+      "exit": 0,
+      "actions": [
+        "background-status"
+      ],
+      "config": {
+        "host": "127.0.0.1",
+        "port": 8123,
+        "local_api_key": "amkr-cli-corpus-key"
+      },
+      "switch": null,
+      "system_action": null,
+      "load_error": false,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 49
+    },
+    {
+      "argv": [
+        "--config",
+        "$CONFIG",
+        "--status"
+      ],
+      "exit": 1,
+      "actions": [],
+      "config": null,
+      "switch": null,
+      "system_action": null,
+      "load_error": true,
+      "updates": [],
+      "replacements": [],
+      "stdout": "",
+      "id": 50
+    }
+  ],
+  "address_text": [
+    {
+      "host": "127.0.0.1",
+      "port": 8123,
+      "expected": "监听 IP: [bold]127.0.0.1[/bold]\n监听端口: [bold]8123[/bold]\n服务地址: [bold]http://127.0.0.1:8123[/bold]"
+    },
+    {
+      "host": "0.0.0.0",
+      "port": 80,
+      "expected": "监听 IP: [bold]0.0.0.0[/bold]\n监听端口: [bold]80[/bold]\n服务地址: [bold]http://0.0.0.0:80[/bold]"
+    },
+    {
+      "host": "::1",
+      "port": 8123,
+      "expected": "监听 IP: [bold]::1[/bold]\n监听端口: [bold]8123[/bold]\n服务地址: [bold]http://[::1]:8123[/bold]"
+    },
+    {
+      "host": "[::1]",
+      "port": 9000,
+      "expected": "监听 IP: [bold][::1][/bold]\n监听端口: [bold]9000[/bold]\n服务地址: [bold]http://[::1]:9000[/bold]"
+    },
+    {
+      "host": "localhost",
+      "port": 8000,
+      "expected": "监听 IP: [bold]localhost[/bold]\n监听端口: [bold]8000[/bold]\n服务地址: [bold]http://localhost:8000[/bold]"
+    }
+  ],
+  "config_summary": [
+    {
+      "name": "example",
+      "config_json": "{\"config_version\": 4, \"host\": \"127.0.0.1\", \"port\": 8000, \"request_timeout\": 60, \"stream_first_byte_timeout\": 60, \"stream_idle_timeout\": 60, \"max_retries\": 2, \"key_failure_threshold\": 2, \"key_cooldown_seconds\": 60, \"endpoint_capabilities_path\": \"\", \"metrics_db_path\": \"\", \"log_file_path\": \"C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_cli_corpus\\\\router-config.json\", \"local_api_key\": \"amkr-generated-local-api-key\", \"providers\": {\"openai\": {\"base_url\": \"https://api.openai.com\", \"routes\": {\"openai\": \"v1/chat/completions\", \"responses\": \"v1/responses\", \"images\": \"v1/images/generations\", \"embeddings\": \"v1/embeddings\"}, \"keys\": {\"main\": {\"api_key\": \"sk-your-first-key\", \"capabilities\": {\"models\": [\"gpt-4o-mini\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}, \"backup\": {\"api_key\": \"sk-your-second-key\", \"allow_visitor\": true, \"capabilities\": {\"models\": [\"gpt-4o-mini\", \"gpt-4o\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}}}}, \"models\": {\"gpt-4o-mini\": {\"aliases\": [\"gpt-4o-mini-display\", \"fast-mini\"], \"hidden_aliases\": [\"mini-latest\"], \"routing_mode\": \"round_robin\", \"reasoning_effort\": \"medium\", \"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"gpt-4o-mini-2024-07-18\"}]}, \"text-embedding-3-small\": {\"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"text-embedding-3-small\"}]}}, \"unified_model\": {\"default\": {\"primary\": {\"model\": \"gpt-4o-mini\", \"key\": null}}, \"embeddings\": {\"primary\": {\"model\": \"text-embedding-3-small\", \"key\": null}}}, \"tasks\": {\"TASK_000001\": {\"model\": \"gpt-4o-mini\", \"fallback_model\": null, \"params\": {\"temperature\": 0.2, \"top_p\": 0.9, \"reasoning_effort\": \"high\"}}}}",
+      "healthy": false,
+      "visitor_installed": true,
+      "summary_lines": [
+        "监听 127.0.0.1:8000  服务 ○  鉴权 ✓  模型 2  Key 2  上游 1  访客Key amkr-visitor  访客可用 0"
+      ],
+      "model_rows": [
+        [
+          "gpt-4o-mini",
+          "gpt-4o-mini-display\nfas…",
+          "mini-latest +1 自动",
+          "分流",
+          "1"
+        ],
+        [
+          "text-embedding-3-small",
+          "-",
+          "-",
+          "分流",
+          "1"
+        ]
+      ],
+      "has_warning": false
+    },
+    {
+      "name": "zero-host",
+      "config_json": "{\"config_version\": 4, \"host\": \"0.0.0.0\", \"port\": 8000, \"request_timeout\": 60, \"stream_first_byte_timeout\": 60, \"stream_idle_timeout\": 60, \"max_retries\": 2, \"key_failure_threshold\": 2, \"key_cooldown_seconds\": 60, \"endpoint_capabilities_path\": \"\", \"metrics_db_path\": \"\", \"log_file_path\": \"C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_cli_corpus\\\\router-config.json\", \"local_api_key\": \"amkr-generated-local-api-key\", \"providers\": {\"openai\": {\"base_url\": \"https://api.openai.com\", \"routes\": {\"openai\": \"v1/chat/completions\", \"responses\": \"v1/responses\", \"images\": \"v1/images/generations\", \"embeddings\": \"v1/embeddings\"}, \"keys\": {\"main\": {\"api_key\": \"sk-your-first-key\", \"capabilities\": {\"models\": [\"gpt-4o-mini\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}, \"backup\": {\"api_key\": \"sk-your-second-key\", \"allow_visitor\": true, \"capabilities\": {\"models\": [\"gpt-4o-mini\", \"gpt-4o\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}}}}, \"models\": {\"gpt-4o-mini\": {\"aliases\": [\"gpt-4o-mini-display\", \"fast-mini\"], \"hidden_aliases\": [\"mini-latest\"], \"routing_mode\": \"round_robin\", \"reasoning_effort\": \"medium\", \"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"gpt-4o-mini-2024-07-18\"}]}, \"text-embedding-3-small\": {\"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"text-embedding-3-small\"}]}}, \"unified_model\": {\"default\": {\"primary\": {\"model\": \"gpt-4o-mini\", \"key\": null}}, \"embeddings\": {\"primary\": {\"model\": \"text-embedding-3-small\", \"key\": null}}}, \"tasks\": {\"TASK_000001\": {\"model\": \"gpt-4o-mini\", \"fallback_model\": null, \"params\": {\"temperature\": 0.2, \"top_p\": 0.9, \"reasoning_effort\": \"high\"}}}}",
+      "healthy": false,
+      "visitor_installed": true,
+      "summary_lines": [
+        "监听 0.0.0.0:8000  服务 ○  鉴权 ✓  模型 2  Key 2  上游 1  访客Key amkr-visitor  访客可用 0"
+      ],
+      "model_rows": [
+        [
+          "gpt-4o-mini",
+          "gpt-4o-mini-display\nfas…",
+          "mini-latest +1 自动",
+          "分流",
+          "1"
+        ],
+        [
+          "text-embedding-3-small",
+          "-",
+          "-",
+          "分流",
+          "1"
+        ]
+      ],
+      "has_warning": true
+    },
+    {
+      "name": "no-models",
+      "config_json": "{\"config_version\": 4, \"host\": \"127.0.0.1\", \"port\": 8000, \"request_timeout\": 60, \"stream_first_byte_timeout\": 60, \"stream_idle_timeout\": 60, \"max_retries\": 2, \"key_failure_threshold\": 2, \"key_cooldown_seconds\": 60, \"endpoint_capabilities_path\": \"\", \"metrics_db_path\": \"\", \"log_file_path\": \"C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_cli_corpus\\\\router-config.json\", \"local_api_key\": \"amkr-generated-local-api-key\", \"providers\": {\"openai\": {\"base_url\": \"https://api.openai.com\", \"routes\": {\"openai\": \"v1/chat/completions\", \"responses\": \"v1/responses\", \"images\": \"v1/images/generations\", \"embeddings\": \"v1/embeddings\"}, \"keys\": {\"main\": {\"api_key\": \"sk-your-first-key\", \"capabilities\": {\"models\": [\"gpt-4o-mini\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}, \"backup\": {\"api_key\": \"sk-your-second-key\", \"allow_visitor\": true, \"capabilities\": {\"models\": [\"gpt-4o-mini\", \"gpt-4o\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}}}}, \"models\": {}, \"tasks\": {}}",
+      "healthy": false,
+      "visitor_installed": true,
+      "summary_lines": [
+        "监听 127.0.0.1:8000  服务 ○  鉴权 ✓  模型 0  Key 0  上游 0  访客Key amkr-visitor  访客可用 0"
+      ],
+      "model_rows": [
+        [
+          "未配置",
+          "-",
+          "-",
+          "-",
+          "0"
+        ]
+      ],
+      "has_warning": false
+    }
+  ],
+  "version_check": [
+    {
+      "result": {
+        "current_version": "4.1.0",
+        "latest_version": "4.2.0",
+        "latest_tag": null,
+        "release_url": "https://pypi.org/project/auto-model-key-router/4.2.0/",
+        "source": "pypi",
+        "fallback_error": null,
+        "error": null,
+        "update_available": true
+      },
+      "content": "当前版本: [bold]4.1.0[/bold]\n最新版本: [bold]4.2.0[/bold]\n检查来源: [bold]pypi[/bold]\n发布页面: [bold]https://pypi.org/project/auto-model-key-router/4.2.0/[/bold]\n状态: [yellow]发现新版本，可手动更新。[/yellow]\n手动更新命令:\n[bold]C:\\Users\\Sparr\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pip install --upgrade auto-model-key-router[/bold]",
+      "manual_command": "C:\\Users\\Sparr\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pip install --upgrade auto-model-key-router"
+    },
+    {
+      "result": {
+        "current_version": "4.1.0",
+        "latest_version": "4.1.0",
+        "latest_tag": "v4.1.0",
+        "release_url": null,
+        "source": "github",
+        "fallback_error": null,
+        "error": null,
+        "update_available": false
+      },
+      "content": "当前版本: [bold]4.1.0[/bold]\n最新版本: [bold]4.1.0[/bold]\n检查来源: [bold]github[/bold]\n状态: [green]当前已是最新版本。[/green]",
+      "manual_command": null
+    },
+    {
+      "result": {
+        "current_version": "4.1.0",
+        "latest_version": null,
+        "latest_tag": null,
+        "release_url": null,
+        "source": null,
+        "fallback_error": null,
+        "error": "PyPI 与 GitHub 都不可达",
+        "update_available": false
+      },
+      "content": "当前版本: [bold]4.1.0[/bold]\n检查失败: [red]PyPI 与 GitHub 都不可达[/red]\nGitHub Releases: [bold]https://github.com/Sparrived/auto-model-key-router/releases[/bold]",
+      "manual_command": null
+    },
+    {
+      "result": {
+        "current_version": "4.1.0",
+        "latest_version": "4.2.0",
+        "latest_tag": "v4.2.0",
+        "release_url": null,
+        "source": "github",
+        "fallback_error": "HTTP 404",
+        "error": null,
+        "update_available": true
+      },
+      "content": "当前版本: [bold]4.1.0[/bold]\n最新版本: [bold]4.2.0[/bold]\n检查来源: [bold]github[/bold]\nPyPI 回退原因: [yellow]HTTP 404[/yellow]\n状态: [yellow]发现新版本，可手动更新。[/yellow]\n手动更新命令:\n[bold]C:\\Users\\Sparr\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pip install --upgrade auto-model-key-router[/bold]",
+      "manual_command": "C:\\Users\\Sparr\\AppData\\Local\\Programs\\Python\\Python312\\python.exe -m pip install --upgrade auto-model-key-router"
+    },
+    {
+      "result": {
+        "current_version": "4.1.0",
+        "latest_version": null,
+        "latest_tag": null,
+        "release_url": null,
+        "source": null,
+        "fallback_error": null,
+        "error": null,
+        "update_available": false
+      },
+      "content": "当前版本: [bold]4.1.0[/bold]\n最新版本: [bold]-[/bold]\n状态: [green]当前已是最新版本。[/green]",
+      "manual_command": null
+    }
+  ],
+  "version_output": {
+    "stdout": "amkr $VERSION\n",
+    "exit": 0
+  }
+}
