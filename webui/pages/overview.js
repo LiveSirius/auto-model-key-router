@@ -22,6 +22,10 @@ import {
   rank, statusGroups, formatPercentValue, formatCompactNumber, formatNumber,
   trend as computeTrend,
 } from "../chart-math.js";
+// 成本是派生读数：目录拿不到时 KPI 与排行卡显示"—"，其余看板不受影响。
+import {
+  loadPricing, currentIndex, lookupPrice, aggregateCost, sumCost, formatCost,
+} from "../pricing.js";
 
 // 热力图固定看 7 天：它的价值就在于"周内节律"（工作日 vs 周末、白天 vs 夜间），
 // 跟着页头的 1h/6h 窗口走就没有可比性了。桶宽固定半小时，正好一格一个桶
@@ -153,7 +157,43 @@ function kpiTiles(metrics, points, bucketSeconds) {
       `${formatCount(metrics.active_requests ?? 0)} 个请求进行中`, {
         iconName: "activity",
       }),
+    costTile(metrics),
   );
+}
+
+// costTile 是"估算成本"KPI。
+//
+// 放在最后而不是嵌进上面几项之间：它是本项目的扩展读数（参照实现只记 token），
+// 且口径与其余 KPI 不同——金额由 models.dev 的外部单价折算，会随目录更新而变。
+//
+// 三个"不撒谎"的规则：
+//   - 目录没就绪 → 显示 "—"，不显示 $0；
+//   - 一个上游模型都没匹配到 → 显示 "—"，并把无定价的原因写进 hint；
+//   - 部分匹配 → 显示金额，但 hint 里明确"x/y 项有定价"，让人知道这不是全量。
+function costTile(metrics) {
+  const index = currentIndex();
+  const upstream = metrics.upstream_models || {};
+  const names = Object.keys(upstream);
+  if (!index) {
+    return stat("估算成本", "—", "价格目录尚未就绪（models.dev）", {
+      iconName: "cost",
+    });
+  }
+  const priced = names.filter((name) => lookupPrice(index, name)).length;
+  const { total: amount } = sumCost(index, upstream);
+  if (!priced) {
+    return stat("估算成本", "—",
+      names.length ? `${names.length} 个上游模型都没有匹配到单价` : "窗口内无请求", {
+        iconName: "cost",
+      });
+  }
+  const hint = priced === names.length
+    ? `${rangeLabel()} · 全部 ${priced} 个上游模型已计价`
+    : `${rangeLabel()} · 仅 ${priced}/${names.length} 个上游模型有定价`;
+  return stat("估算成本", formatCost(amount), hint, {
+    iconName: "cost",
+    tone: priced === names.length ? "good" : "warn",
+  });
 }
 
 // —— 主趋势图 ——
@@ -321,6 +361,43 @@ function rankingCard(title, entries, keyLabel, options = {}) {
   );
 }
 
+// costRankingCard 是"模型成本排行"。
+//
+// 按 upstream_models 计价（model_id 是本地路由名，价格表里没有它），用金额排序而不是
+// 请求数或 token 数——便宜模型跑一万次也可能不如贵模型跑十次花钱多，这正是这张卡要
+// 暴露的信息。无定价的条目不计入也不显示为 $0。
+function costRankingCard(metrics) {
+  const index = currentIndex();
+  const upstream = metrics.upstream_models || {};
+  if (!index) {
+    return card(
+      cardHead("模型成本排行", badge("无定价", "muted")),
+      empty("价格目录尚未就绪。", { icon: "cost", hint: "服务端会定期从 models.dev 刷新目录。" }),
+    );
+  }
+  const rows = [];
+  for (const [name, stats] of Object.entries(upstream)) {
+    const cost = aggregateCost(index, name, stats);
+    if (cost === null || cost <= 0) continue;
+    rows.push({ name, stats, value: cost });
+  }
+  rows.sort((a, b) => b.value - a.value);
+  const unpriced = Object.keys(upstream).length - rows.length;
+  return card(
+    cardHead("模型成本排行",
+      badge(`${rows.length} 项`, "muted"),
+      unpriced > 0 ? badge(`${unpriced} 项无定价`, "warn") : null),
+    barList(rows.slice(0, 6), {
+      tone: "primary",
+      emptyText: "窗口内没有匹配到单价的用量。",
+      format: (row) => formatCost(row.value),
+    }),
+    unpriced > 0
+      ? h("div.card-foot", {}, `有 ${unpriced} 个上游模型未匹配到 models.dev 单价，未计入。`)
+      : null,
+  );
+}
+
 // —— 统一模型入口卡 ——
 function unifiedCard() {
   const { store, navigate } = xtxRef;
@@ -433,6 +510,9 @@ export function renderOverview(context) {
   if (!state.snapshot && !state.loading) state.loading = true;
   if (state.seriesHours !== state.hours) loadWindow();
   loadHeatmap();
+  // 价格目录只拉一次（见 webui/pricing.js），失败不阻断看板：成本 KPI 与排行卡
+  // 会退化成"—"/空态，其余卡片照常。
+  loadPricing(() => api.pricing()).then(draw).catch(() => {});
   // 指标轮询时刷新本页窗口数据（快照 + 序列一起，保持同屏口径一致）。
   // 热力图有自己的 60 秒 TTL，force 会绕过它 —— 但那时桶内容其实没变，
   // 所以只在窗口数据真正变化时顺带刷新，避免每 10 秒重画 336 个格子。
@@ -515,6 +595,7 @@ function draw(firstPaint = false) {
       tone: "secondary",
       format: (row) => `${formatCompact(row.value)} Token`,
     })),
+    h("div.col-4", {}, costRankingCard(metrics)),
     h("div.col-8", {}, tokenBreakdownCard(points, bucketSeconds)),
     h("div.col-4", {}, runtimeCard()),
   ));

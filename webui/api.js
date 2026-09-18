@@ -104,6 +104,11 @@ export const api = {
   },
   logs: () => request("/api/logs"),
 
+  // 价格目录（models.dev）：由服务端缓存并定期刷新，挂在 WebUI 前缀下。
+  // **不鉴权**——内容是 models.dev 的公开数据，静态资源本身也是公开的。
+  // 服务端还没取到目录时回 503，由 webui/pricing.js 吞掉并降级成"无定价"。
+  pricing: () => request("/ui/pricing.json", { auth: false }),
+
   tool: () => request("/api/tool"),
   setWebui: (enabled) => request("/api/tool/webui", { method: "POST", body: { enabled } }),
   runService: (action) => request(`/api/service/${action}`, { method: "POST" }),

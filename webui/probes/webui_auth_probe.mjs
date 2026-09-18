@@ -107,6 +107,11 @@ const server = {
   // 任务路由探针用的假数据与写入记录。
   tasks: [],
   writes: [],
+  // 成本页探针用：价格目录（null = 服务端尚未就绪，应回 503）与该窗口的上游用量。
+  pricing: null,
+  pricingStatus: 200,
+  upstreamModels: {},
+  providers: {},
 };
 
 function respond(status, payload) {
@@ -136,6 +141,13 @@ global.fetch = async (url, options = {}) => {
       local_auth_enabled: server.authEnabled,
     });
   }
+  // 价格目录（models.dev）：由服务端缓存后挂在 WebUI 前缀下，且**不鉴权**——它是
+  // models.dev 的公开数据。因此必须排在**鉴权分支之前**：放到后面就永远拿不到，
+  // 而未鉴权时拿不到目录正是成本列该显示 "—" 的场景之一。
+  if (path === "/ui/pricing.json") {
+    if (!server.pricing) return respond(server.pricingStatus, { detail: "价格目录尚不可用" });
+    return respond(200, server.pricing);
+  }
   if (server.authEnabled && !server.accepted.has(bearer)) {
     return respond(401, { detail: "本地 API key 验证失败" });
   }
@@ -159,11 +171,12 @@ global.fetch = async (url, options = {}) => {
       total: { requests: 3, successes: 3, failures: 0, retries: 0, prompt_tokens: 30, completion_tokens: 10, total_tokens: 40, cached_tokens: 0 },
       caller_types: {},
       models: {},
-      providers: {},
-      upstream_models: {},
+      providers: server.providers,
+      upstream_models: server.upstreamModels,
       unattributed: {},
     });
   }
+
   if (path.startsWith("/api/settings")) {
     return respond(200, {
       config_revision: "rev-1",
@@ -266,6 +279,50 @@ const setup = {
     global.location.hash = "#/tasks";
     storage.set("amkr.apiKey", "good-key");
     server.tasks = [];
+  },
+  // 成本页（有价格目录）：KPI、排行与逐条成本都必须画出来。
+  // 目录与用量都给真实形状，这样断言的是"算出来的钱对不对"，而不是"页面没崩"。
+  cost_page_renders_with_pricing: () => {
+    global.location.hash = "#/cost";
+    storage.set("amkr.apiKey", "good-key");
+    server.pricing = {
+      version: 1,
+      source: "https://models.dev/api.json",
+      updated_at: "2026-01-02T03:04:05Z",
+      error: null,
+      models: { "gpt-4o": { input: 2.5, output: 10, cache_read: 1.25 } },
+    };
+    server.upstreamModels = {
+      "gpt-4o": { requests: 2, successes: 2, failures: 0, retries: 0, prompt_tokens: 1000000, completion_tokens: 0, total_tokens: 1000000, cached_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+    };
+  },
+  // 成本页（目录可用，但该上游模型**不在**目录里）：这是"无定价"最真实的样子——
+  // 目录是好的，只是没这个模型的价。此处必须显示 "—"，且绝不能退化成 $0。
+  cost_page_unmatched_model_shows_dash: () => {
+    global.location.hash = "#/cost";
+    storage.set("amkr.apiKey", "good-key");
+    server.pricing = {
+      version: 1,
+      source: "https://models.dev/api.json",
+      updated_at: "2026-01-02T03:04:05Z",
+      error: null,
+      models: { "gpt-4o": { input: 2.5, output: 10, cache_read: 1.25 } },
+    };
+    // 名字与目录里任何一条都对不上（且没有日期后缀可剥）。
+    server.upstreamModels = {
+      "totally-unknown-model-xyz": { requests: 2, successes: 2, failures: 0, retries: 0, prompt_tokens: 1000000, completion_tokens: 500000, total_tokens: 1500000, cached_tokens: 0 },
+    };
+  },
+  // 成本页（目录尚未就绪 → 服务端 503）：必须显示"无定价"，**绝不能**显示 $0。
+  // 这是整条链路最要命的失败模式：把"不知道"渲染成"免费"。
+  cost_page_without_pricing_shows_dash: () => {
+    global.location.hash = "#/cost";
+    storage.set("amkr.apiKey", "good-key");
+    server.pricing = null;
+    server.pricingStatus = 503;
+    server.upstreamModels = {
+      "gpt-4o": { requests: 2, successes: 2, failures: 0, retries: 0, prompt_tokens: 1000, completion_tokens: 100, total_tokens: 1100, cached_tokens: 0 },
+    };
   },
   // 概览页二次进入：模块级 state 已有缓存时，进入必须**同步**画出内容。
   // 曾经的缺陷：renderOverview 先建好尚未挂载的 host 再调 draw()，而 draw() 用
@@ -473,6 +530,42 @@ if (scenario === "stale_key_prompts_login") {
   checks.writeHasModel = write?.model === "model-a";
   // 没填的参数不该被写进配置。
   checks.writeOmitsBlankParams = write !== undefined && !("temperature" in (write.params || {}));
+} else if (scenario === "cost_page_renders_with_pricing") {
+  await settle();
+  // 页面骨架与四张卡都在。
+  checks.hasStatGrid = byClass("stat-grid").length === 1;
+  checks.hasCostList = byClass("cost-row").length === 0 || byClass("cost-list").length === 1;
+  const body = text();
+  // 1M 输入 token × $2.5/1M = $2.50：金额必须真的算出来，而不是只画了壳。
+  checks.showsComputedAmount = body.includes("$2.50");
+  checks.showsCoverage = body.includes("计价覆盖率");
+  checks.showsPriceDetail = body.includes("$2.5");
+  // 中文标题确认渲染的是成本页而不是别的页。
+  checks.isCostPage = body.includes("成本") && body.includes("models.dev");
+  // 目录已就绪时不应出现"无定价"降级提示。
+  checks.noUnavailableNotice = !body.includes("价格目录尚不可用");
+  checks.requestedPricing = server.requests.some((r) => r.url === "/ui/pricing.json");
+} else if (scenario === "cost_page_unmatched_model_shows_dash") {
+  await settle();
+  const body = text();
+  // 目录是好的，所以**不该**出现"目录尚不可用"；该出现的是"没匹配到单价"。
+  checks.noUnavailableNotice = !body.includes("价格目录尚不可用");
+  checks.showsUnmatched = body.includes("没有匹配到单价") || body.includes("无定价") || body.includes("未匹配");
+  // 关键：1.5M token 的用量在没有任何单价时**绝不能**变成 $0。
+  checks.neverShowsZeroDollars = !body.includes("$0");
+  // 覆盖率必须显示为 0%，把"一分钱都没算进来"讲明白。
+  checks.showsZeroCoverage = body.includes("0%");
+  checks.requestedPricing = server.requests.some((r) => r.url === "/ui/pricing.json");
+} else if (scenario === "cost_page_without_pricing_shows_dash") {
+  await settle();
+  const body = text();
+  // 目录不可用 → 明确说明，且**任何位置都不出现 $0**。
+  checks.showsUnavailable = body.includes("无定价") || body.includes("价格目录尚不可用");
+  checks.neverShowsZeroDollars = !body.includes("$0");
+  // 用量仍然可见（页面降级但不空转）。
+  checks.stillShowsTokens = body.includes("Token 用量");
+  // 即便目录拿不到，也必须真的去请求过（否则"没显示 $0"只是因为压根没刷新）。
+  checks.requestedPricing = server.requests.some((r) => r.url === "/ui/pricing.json");
 } else if (scenario === "overview_reentry_paints_immediately") {
   // 首次进入：等异步数据落地，确认首页确实画出了 KPI 瓦片。
   await settle();

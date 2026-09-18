@@ -794,7 +794,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .stream { display: flex; flex-direction: column; }
 .stream-row {
   display: grid;
-  grid-template-columns: 4px 66px minmax(0, 1fr) 78px 74px;
+  grid-template-columns: 4px 66px minmax(0, 1fr) 78px 74px 78px;
   gap: 10px; align-items: center;
   padding: 8px 4px;
   border-bottom: 1px solid var(--md-outline);
@@ -817,6 +817,27 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   text-align: right; font-variant-numeric: tabular-nums; color: var(--md-on-surface-variant);
 }
 .stream-empty { padding: var(--sp-3) 0; text-align: center; color: var(--md-on-surface-variant); font-size: 13px; }
+/* 成本列：金额右对齐并用等宽数字，否则 $0.0012 与 $12.34 混排时小数点对不齐。 */
+.stream-row .stream-cost {
+  text-align: right; font-variant-numeric: tabular-nums; color: var(--md-on-surface-variant);
+}
+
+/* 成本页的逐条成本列表：与请求流同构，但省掉状态条与耗时（这里只看钱）。 */
+.cost-list { display: flex; flex-direction: column; }
+.cost-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px 84px;
+  gap: 10px; align-items: center;
+  padding: 7px 4px;
+  border-bottom: 1px solid var(--md-outline);
+  font-size: 12px;
+}
+.cost-row:last-child { border-bottom: 0; }
+.cost-row .cost-model { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-row .cost-tokens, .cost-row .cost-amount {
+  text-align: right; font-variant-numeric: tabular-nums; color: var(--md-on-surface-variant);
+}
+.cost-row .cost-amount { color: var(--md-on-surface); }
 
 /* ══ 空态 / 骨架 / 进度 ══ */
 /* 卡片内没有数据时，空态撑满剩余空间并把内容居中 —— 否则它只有一行高，
@@ -1019,6 +1040,8 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   .stat-value { font-size: 23px; }
   .stream-row { grid-template-columns: 4px 58px minmax(0, 1fr) 64px; }
   .stream-row .stream-latency { display: none; }
+  .cost-row { grid-template-columns: minmax(0, 1fr) 64px; }
+  .cost-row .cost-tokens { display: none; }
 }
 @media (max-width: 560px) {
   .app-bar { gap: 8px; padding: 0 8px; }

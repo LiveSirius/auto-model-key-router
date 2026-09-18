@@ -11,6 +11,7 @@ import { icon } from "./icons.js";
 
 import { renderOverview } from "./pages/overview.js";
 import { renderActivity } from "./pages/activity.js";
+import { renderCost } from "./pages/cost.js";
 import { renderProviders } from "./pages/providers.js";
 import { renderRouting } from "./pages/routing.js";
 import { renderUnified } from "./pages/unified.js";
@@ -22,6 +23,7 @@ export const PAGES = [
   { group: "监控", items: [
     { id: "overview", label: "概览", icon: "overview", render: renderOverview },
     { id: "activity", label: "实时活动", icon: "activity", render: renderActivity },
+    { id: "cost", label: "成本", icon: "cost", render: renderCost },
   ]},
   { group: "配置", items: [
     { id: "providers", label: "供应商", icon: "providers", render: renderProviders },

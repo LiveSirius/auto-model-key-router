@@ -19,6 +19,10 @@ import {
   TIME_RANGES, pickBucketSeconds, bucketLabel, rank, statusGroups,
   formatPercentValue, formatCompactNumber, formatNumber, formatDurationValue,
 } from "../chart-math.js";
+// 成本是附加读数：目录拿不到时这一列显示 "—"，不影响请求流本身。
+import {
+  loadPricing, currentIndex, lookupPrice, requestCost, formatCost, formatPrice,
+} from "../pricing.js";
 
 const state = {
   hours: 1,
@@ -232,7 +236,29 @@ function streamRow(item) {
     ),
     h("span.stream-tokens", {}, item.total_tokens ? formatCompact(item.total_tokens) : "—"),
     h("span.stream-latency", {}, formatDuration(item.duration_ms)),
+    h("span.stream-cost", { title: costTitle(item) }, costText(item)),
   );
+}
+
+// costText 给出该条请求的估算成本。
+//
+// 拿不到价格时显示 "—" 而不是 "$0"：0 会被读成"这次请求免费"，而事实是"不知道"。
+// 目录尚未加载（首屏）时同样显示 "—"，避免先闪一堆 $0 再变成真实值。
+function costText(item) {
+  const index = currentIndex();
+  if (!index) return "—";
+  return formatCost(requestCost(index, item));
+}
+
+// costTitle 是成本列的悬停说明：把匹配到的单价写出来，方便核对匹配是否正确。
+function costTitle(item) {
+  const index = currentIndex();
+  const name = item.upstream_model_id;
+  if (!index) return "价格目录尚未就绪";
+  if (!name) return "该请求没有 upstream_model 归因，无法匹配价格";
+  const entry = lookupPrice(index, name);
+  if (!entry) return `${name} 未在 models.dev 目录中匹配到价格`;
+  return `${name} · 输入 ${formatPrice(entry.input)} / 输出 ${formatPrice(entry.output)} USD per 1M token`;
 }
 
 // —— 分解表 ——
@@ -396,6 +422,8 @@ export function renderActivity(context) {
     loadSeries();
   }
   loadRequests().then(draw);
+  // 价格目录只拉一次，之后复用（见 webui/pricing.js）；失败也不阻断请求流。
+  loadPricing(() => api.pricing()).then(draw).catch(() => {});
   // 每次进入页面都重新起日志轮询并重新注册订阅：上一次离开时已经把它们清掉了。
   startLogPolling();
   context.onTick?.(() => { loadRequests().then(draw); });
