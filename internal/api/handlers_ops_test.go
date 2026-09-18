@@ -658,16 +658,19 @@ func TestOpsIntegrationEntryErrorText(t *testing.T) {
 
 // TestOpsToolUsesUpdatecheckWhenSeamAbsent 证明接缝为 nil 时走的是真实实现。
 //
-// 不联网：用 UpdateFetcher 注入假取回器，覆盖 PyPI 命中与两个源都失败两条路径，
+// 不联网：用 UpdateFetcher 注入假取回器，覆盖「GitHub 命中」与「网络失败」两条路径，
 // 从而把 internal/updatecheck 的返回值到 HTTP 响应体的映射一并验证。
+//
+// 走 GitHub 而非 PyPI：Python 退役后 CheckLatestVersion 只查 GitHub Releases
+// （原 PyPI 优先会在 PyPI 冻结后永远不回退 GitHub）。
 func TestOpsToolUsesUpdatecheckWhenSeamAbsent(t *testing.T) {
 	server, _ := newOpsTestServer(t, func(s *Server) {
 		s.Version = "1.2.3"
 		s.UpdateFetcher = func(url string, headers map[string]string, timeout time.Duration) (*canonical.Value, error) {
-			if !strings.Contains(url, "pypi.org") {
+			if !strings.Contains(url, "api.github.com") {
 				return nil, errors.New("offline")
 			}
-			return canonical.ParseString(`{"info":{"version":"1.3.0","release_url":"https://example.test/1.3.0"},"urls":[]}`)
+			return canonical.ParseString(`{"tag_name":"v1.3.0","html_url":"https://example.test/1.3.0"}`)
 		}
 	})
 	recorder := opsRequest(t, server, "GET", "/api/tool", nil, "full")
@@ -675,7 +678,7 @@ func TestOpsToolUsesUpdatecheckWhenSeamAbsent(t *testing.T) {
 		t.Fatalf("状态码: %d %s", got, recorder.Body.String())
 	}
 	want := `{"version":"1.2.3","latest_version":"1.3.0","update_available":true,` +
-		`"release_url":"https://example.test/1.3.0","source":"PyPI","error":null,` +
+		`"release_url":"https://example.test/1.3.0","source":"GitHub","error":null,` +
 		`"webui_available":false,"webui_enabled":false,"webui_mounted":false,"webui_path":null}`
 	if got := recorder.Body.String(); got != want {
 		t.Errorf("响应体不一致:\n got=%s\nwant=%s", got, want)
@@ -692,7 +695,7 @@ func TestOpsToolUsesUpdatecheckWhenSeamAbsent(t *testing.T) {
 	body := recorder.Body.String()
 	if !strings.Contains(body, `"latest_version":null`) ||
 		!strings.Contains(body, `"update_available":false`) ||
-		!strings.Contains(body, `"error":"PyPI 检查失败: offline；GitHub 检查失败: offline"`) {
+		!strings.Contains(body, `"error":"offline"`) {
 		t.Errorf("离线响应体不符: %s", body)
 	}
 }

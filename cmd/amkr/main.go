@@ -346,9 +346,6 @@ func versionCheckLines(result updatecheck.Result, manualCommand string) ([]strin
 	if result.Source != nil && *result.Source != "" {
 		lines = append(lines, fmt.Sprintf("检查来源: [bold]%s[/bold]", escapeMarkup(*result.Source)))
 	}
-	if result.FallbackError != nil && *result.FallbackError != "" {
-		lines = append(lines, fmt.Sprintf("PyPI 回退原因: [yellow]%s[/yellow]", escapeMarkup(*result.FallbackError)))
-	}
 	if result.ReleaseURL != nil && *result.ReleaseURL != "" {
 		lines = append(lines, fmt.Sprintf("发布页面: [bold]%s[/bold]", escapeMarkup(*result.ReleaseURL)))
 	}

@@ -27,14 +27,13 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
 
-// 与 update.py:28-33 一致的常量。
+// 常量。
+//
+// **只保留 GitHub 一组**：Python 版已退役，PyPI 上那个包停在最后一个 Python 版本、不会
+// 再更新，因此版本检查只查 GitHub Releases。原先"先 PyPI、失败再 GitHub"的顺序在退役后
+// 变成错误行为——PyPI 返回的是陈旧但**成功**的响应，于是永远不回退 GitHub，用户跑着 Go
+// 新版却一直被告知"已是最新"（详见 CheckLatestVersion）。
 const (
-	// PackageName 是 PyPI 上的项目名。
-	PackageName = "auto-model-key-router"
-	// PyPIProjectURL 是 PyPI 项目页。
-	PyPIProjectURL = "https://pypi.org/project/" + PackageName + "/"
-	// PyPIJSONAPI 是 PyPI 的 JSON 接口。
-	PyPIJSONAPI = "https://pypi.org/pypi/" + PackageName + "/json"
 	// GitHubRepository 是源码仓库。
 	GitHubRepository = "Sparrived/auto-model-key-router"
 	// GitHubReleasesURL 是发布列表页（拿不到单次发布页时的兜底）。
@@ -63,7 +62,6 @@ type Result struct {
 	Source         *string
 	ArtifactURL    *string
 	ArtifactSHA256 *string
-	FallbackError  *string
 	Error          *string
 }
 
@@ -211,77 +209,6 @@ func (notJSONObjectError) Error() string { return "响应不是 JSON 对象。" 
 
 var errNotJSONObject = notJSONObjectError{}
 
-// CheckLatestPyPI 对应 update.py:89。
-func CheckLatestPyPI(fetch Fetcher, currentVersion string, timeout time.Duration) Result {
-	result := Result{CurrentVersion: currentVersion}
-	data, err := fetch(PyPIJSONAPI, map[string]string{
-		"Accept":     "application/json",
-		"User-Agent": "auto-model-key-router/" + currentVersion,
-	}, timeout)
-	if err != nil {
-		result.Error = stringPtr(err.Error())
-		return result
-	}
-
-	info := data.Lookup("info")
-	if !info.IsObject() {
-		result.Error = stringPtr("PyPI 响应中缺少 info。")
-		return result
-	}
-	latestVersion := strings.TrimSpace(pyStringOrEmpty(info.Lookup("version")))
-	if latestVersion == "" {
-		result.Error = stringPtr("PyPI 响应中缺少 version。")
-		return result
-	}
-	// PyPI 同时给出项目页与具体版本页，优先后者，这样更新结果指向确切版本。
-	releaseURL := strings.TrimSpace(pyStringOrEmpty(info.Lookup("release_url")))
-	if releaseURL == "" {
-		projectURL := strings.TrimRight(firstTruthyString(
-			info.Lookup("package_url"), info.Lookup("project_url"), canonical.NewString(PyPIProjectURL),
-		), "/")
-		releaseURL = projectURL + "/" + latestVersion + "/"
-	}
-
-	wheel := findPy3Wheel(data.Lookup("urls"))
-	var artifactURL, artifactSHA256 *string
-	if wheel != nil {
-		if url := pyStringOrEmpty(wheel.Lookup("url")); url != "" {
-			artifactURL = stringPtr(url)
-		}
-		if digests := wheel.Lookup("digests"); digests.IsObject() {
-			if sha := pyStringOrEmpty(digests.Lookup("sha256")); sha != "" {
-				artifactSHA256 = stringPtr(sha)
-			}
-		}
-	}
-
-	result.LatestVersion = stringPtr(latestVersion)
-	result.ReleaseURL = stringPtr(releaseURL)
-	result.Source = stringPtr("PyPI")
-	result.ArtifactURL = artifactURL
-	result.ArtifactSHA256 = artifactSHA256
-	return result
-}
-
-// findPy3Wheel 找出第一个纯 py3 wheel，对应 update.py:115-123 的生成器表达式。
-func findPy3Wheel(urls *canonical.Value) *canonical.Value {
-	if !urls.IsArray() {
-		return nil
-	}
-	for _, item := range urls.Items() {
-		if !item.IsObject() {
-			continue
-		}
-		if pyStringOrEmpty(item.Lookup("packagetype")) != "bdist_wheel" {
-			continue
-		}
-		if strings.HasSuffix(pyStringOrEmpty(item.Lookup("filename")), "-py3-none-any.whl") {
-			return item
-		}
-	}
-	return nil
-}
-
 // CheckLatestRelease 对应 update.py:137。
 func CheckLatestRelease(fetch Fetcher, currentVersion string, timeout time.Duration) Result {
 	result := Result{CurrentVersion: currentVersion}
@@ -312,30 +239,17 @@ func CheckLatestRelease(fetch Fetcher, currentVersion string, timeout time.Durat
 	return result
 }
 
-// CheckLatestVersion 对应 update.py:159：先 PyPI，失败再 GitHub。
+// CheckLatestVersion 检查最新版本：**只查 GitHub Releases**。
 //
-// 两个都失败时错误文案把两者拼起来；PyPI 失败但 GitHub 成功时，PyPI 的错误落到
-// FallbackError（对调用方可见，用于解释"为什么走了兜底"）。
+// 这里与参照实现（update.py:159 的"先 PyPI、失败再 GitHub"）**故意不同**，原因不是偏好：
+// Python 版退役后 PyPI 上那个包会冻结在最后一个 Python 版本，而发布改在 GitHub。
+// 若沿用"PyPI 优先"，PyPI 会返回一个陈旧但**成功**的响应，于是永远不回退 GitHub——
+// 用户跑着 Go 新版本，界面上却一直显示"当前已是最新版本"，且完全静默（无报错、无日志）。
+// 因此退役时删掉 PyPI 分支，只以 GitHub Releases 为准。
+//
+// 直接委托 CheckLatestRelease：不再有"兜底"的概念，故 Result.FallbackError 也已移除。
 func CheckLatestVersion(fetch Fetcher, currentVersion string, timeout time.Duration) Result {
-	pypi := CheckLatestPyPI(fetch, currentVersion, timeout)
-	if pypi.Error == nil {
-		return pypi
-	}
-	github := CheckLatestRelease(fetch, currentVersion, timeout)
-	if github.Error != nil {
-		return Result{
-			CurrentVersion: currentVersion,
-			Error:          stringPtr("PyPI 检查失败: " + *pypi.Error + "；GitHub 检查失败: " + *github.Error),
-		}
-	}
-	return Result{
-		CurrentVersion: currentVersion,
-		LatestVersion:  github.LatestVersion,
-		LatestTag:      github.LatestTag,
-		ReleaseURL:     github.ReleaseURL,
-		Source:         github.Source,
-		FallbackError:  pypi.Error,
-	}
+	return CheckLatestRelease(fetch, currentVersion, timeout)
 }
 
 // pyStringOrEmpty 复刻 Python 的 `str(value or "")`：假值一律得到空串。

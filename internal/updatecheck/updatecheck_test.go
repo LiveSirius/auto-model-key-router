@@ -42,7 +42,6 @@ type resultRow struct {
 	Source         *string `json:"source"`
 	ArtifactURL    *string `json:"artifact_url"`
 	ArtifactSHA256 *string `json:"artifact_sha256"`
-	FallbackError  *string `json:"fallback_error"`
 	Error          *string `json:"error"`
 	UpdateAvail    bool    `json:"update_available"`
 }
@@ -50,9 +49,8 @@ type resultRow struct {
 type httpRow struct {
 	Name   string      `json:"name"`
 	Route  string      `json:"route"`
-	Pypi   payloadDesc `json:"pypi"`
 	Github payloadDesc `json:"github"`
-	// LanguageSpecificError 为真时，error/fallback_error 的**文本**来自 JSON 解析器，
+	// LanguageSpecificError 为真时，error 的**文本**来自 JSON 解析器，
 	// Python 的 json.JSONDecodeError 与 Go 的 encoding/json 文案必然不同，故只断言
 	// 「有错」而不比文本。
 	LanguageSpecificError bool      `json:"language_specific_error"`
@@ -79,7 +77,7 @@ func loadCorpus(t *testing.T) corpusFile {
 	if err := json.Unmarshal(raw, &corpus); err != nil {
 		t.Fatalf("解析语料失败: %v", err)
 	}
-	if len(corpus.Versions) < 30 || len(corpus.HTTP) < 20 {
+	if len(corpus.Versions) < 30 || len(corpus.HTTP) < 9 {
 		t.Fatalf("语料不完整：versions=%d http=%d", len(corpus.Versions), len(corpus.HTTP))
 	}
 	return corpus
@@ -139,9 +137,6 @@ func TestIsNewerVersionMatchesPython(t *testing.T) {
 func TestSourceConstantsMatchPython(t *testing.T) {
 	corpus := loadCorpus(t)
 	want := map[string]string{
-		"package_name":              PackageName,
-		"pypi_project_url":          PyPIProjectURL,
-		"pypi_json_api":             PyPIJSONAPI,
 		"github_repository":         GitHubRepository,
 		"github_releases_url":       GitHubReleasesURL,
 		"github_latest_release_api": GitHubLatestReleaseAPI,
@@ -157,7 +152,7 @@ func TestSourceConstantsMatchPython(t *testing.T) {
 //
 // 它刻意复刻 fetch_json 的语义：解析失败即错误、解析成功但非对象也错误
 // （后者文案与 Python 一致，故可逐字比对）。
-func corpusFetcher(t *testing.T, pypi, github payloadDesc, seenURLs *[]string, seenHeaders *[]map[string]string) Fetcher {
+func corpusFetcher(t *testing.T, github payloadDesc, seenURLs *[]string, seenHeaders *[]map[string]string) Fetcher {
 	t.Helper()
 	return func(url string, headers map[string]string, timeout time.Duration) (*canonical.Value, error) {
 		_ = timeout
@@ -168,9 +163,6 @@ func corpusFetcher(t *testing.T, pypi, github payloadDesc, seenURLs *[]string, s
 			*seenHeaders = append(*seenHeaders, headers)
 		}
 		chosen := github
-		if strings.Contains(url, "pypi.org") {
-			chosen = pypi
-		}
 		switch chosen.Kind {
 		case "none":
 			// 文案与生成器注入的 OSError 一致，便于逐字比对。
@@ -227,13 +219,8 @@ func assertResult(t *testing.T, got Result, want resultRow, languageSpecific boo
 		if (got.Error == nil) != (want.Error == nil) {
 			t.Errorf("error 有无不一致: got=%v want=%v", renderPtr(got.Error), renderPtr(want.Error))
 		}
-		if (got.FallbackError == nil) != (want.FallbackError == nil) {
-			t.Errorf("fallback_error 有无不一致: got=%v want=%v",
-				renderPtr(got.FallbackError), renderPtr(want.FallbackError))
-		}
 	} else {
 		comparePtr("error", got.Error, want.Error)
-		comparePtr("fallback_error", got.FallbackError, want.FallbackError)
 	}
 	if got.UpdateAvailable() != want.UpdateAvail {
 		t.Errorf("update_available = %v，期望 %v", got.UpdateAvailable(), want.UpdateAvail)
@@ -253,16 +240,9 @@ func TestHTTPChecksMatchPython(t *testing.T) {
 	corpus := loadCorpus(t)
 	for _, row := range corpus.HTTP {
 		t.Run(row.Name, func(t *testing.T) {
-			fetch := corpusFetcher(t, row.Pypi, row.Github, nil, nil)
-			var got Result
-			switch row.Route {
-			case "pypi":
-				got = CheckLatestPyPI(fetch, "4.1.0", 3*time.Second)
-			case "github":
-				got = CheckLatestRelease(fetch, "4.1.0", 3*time.Second)
-			default:
-				got = CheckLatestVersion(fetch, "4.1.0", 3*time.Second)
-			}
+			fetch := corpusFetcher(t, row.Github, nil, nil)
+			// 语料现在只含 route=github 的用例：PyPI 分支已随 Python 退役删除。
+			got := CheckLatestRelease(fetch, "4.1.0", 3*time.Second)
 			assertResult(t, got, row.Result, row.LanguageSpecificError)
 		})
 	}
@@ -274,26 +254,12 @@ func TestHTTPChecksMatchPython(t *testing.T) {
 // GitHub API 会拒绝（缺 Accept/User-Agent 时返回 403）。
 func TestRequestContractMatchesPython(t *testing.T) {
 	row := httpRow{
-		Pypi:   payloadDesc{Kind: "json", Value: json.RawMessage(`{"info":{"version":"1.0.0"}}`)},
 		Github: payloadDesc{Kind: "json", Value: json.RawMessage(`{"tag_name":"v1.0.0"}`)},
 	}
 	var urls []string
 	var headers []map[string]string
-	fetch := corpusFetcher(t, row.Pypi, row.Github, &urls, &headers)
+	fetch := corpusFetcher(t, row.Github, &urls, &headers)
 
-	CheckLatestPyPI(fetch, "4.1.0", time.Second)
-	if len(urls) != 1 || urls[0] != PyPIJSONAPI {
-		t.Fatalf("PyPI URL = %v，期望 [%s]", urls, PyPIJSONAPI)
-	}
-	if headers[0]["Accept"] != "application/json" {
-		t.Errorf("PyPI Accept = %q", headers[0]["Accept"])
-	}
-	if headers[0]["User-Agent"] != "auto-model-key-router/4.1.0" {
-		t.Errorf("PyPI User-Agent = %q", headers[0]["User-Agent"])
-	}
-
-	urls, headers = nil, nil
-	fetch = corpusFetcher(t, row.Pypi, row.Github, &urls, &headers)
 	CheckLatestRelease(fetch, "4.1.0", time.Second)
 	if len(urls) != 1 || urls[0] != GitHubLatestReleaseAPI {
 		t.Fatalf("GitHub URL = %v，期望 [%s]", urls, GitHubLatestReleaseAPI)
@@ -306,20 +272,28 @@ func TestRequestContractMatchesPython(t *testing.T) {
 	}
 }
 
-// TestCheckLatestVersionCallsPyPIFirst 锁定「PyPI 成功就不再查 GitHub」。
+// TestCheckLatestVersionQueriesGitHubOnly 锁定「版本检查只查 GitHub」。
 //
-// 用 github 载荷为 none（会报错）作为绊线：若先查了 GitHub，结果不可能仍是 PyPI。
-func TestCheckLatestVersionCallsPyPIFirst(t *testing.T) {
-	pypi := payloadDesc{Kind: "json", Value: json.RawMessage(`{"info":{"version":"5.0.0"}}`)}
-	github := payloadDesc{Kind: "none"}
+// 这是与参照实现**故意**不同的地方：Python 版先查 PyPI、失败才回退 GitHub；而 Python 退役后
+// PyPI 上那个包冻结在最后一个 Python 版本，若沿用旧顺序，PyPI 会返回一个陈旧但**成功**的响应，
+// 于是永远不回退 GitHub——用户跑着 Go 新版本却一直被告知"已是最新"。
+//
+// 断言两件事：只发出一次请求，且打的是 GitHub 的接口（绝不碰 pypi.org）。
+func TestCheckLatestVersionQueriesGitHubOnly(t *testing.T) {
+	github := payloadDesc{Kind: "json", Value: json.RawMessage(`{"tag_name":"v5.0.0"}`)}
 	var urls []string
-	fetch := corpusFetcher(t, pypi, github, &urls, nil)
+	fetch := corpusFetcher(t, github, &urls, nil)
 	got := CheckLatestVersion(fetch, "4.1.0", time.Second)
-	if got.Source == nil || *got.Source != "PyPI" {
-		t.Fatalf("应走 PyPI，实际 source=%v", renderPtr(got.Source))
+	if got.Source == nil || *got.Source != "GitHub" {
+		t.Fatalf("应走 GitHub，实际 source=%v", renderPtr(got.Source))
 	}
-	if len(urls) != 1 {
-		t.Fatalf("PyPI 成功时不应再查 GitHub，实际请求 %v", urls)
+	if len(urls) != 1 || urls[0] != GitHubLatestReleaseAPI {
+		t.Fatalf("应只请求 GitHub 接口一次，实际 %v", urls)
+	}
+	for _, url := range urls {
+		if strings.Contains(url, "pypi.org") {
+			t.Fatalf("不应再查询 PyPI，实际请求 %s", url)
+		}
 	}
 }
 

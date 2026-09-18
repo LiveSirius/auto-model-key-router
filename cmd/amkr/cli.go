@@ -215,7 +215,7 @@ func parseOptions(argv []string, errOut io.Writer) (*options, error) {
 	flags.StringVar(&opts.unifiedTarget, "unified-target", defaultUnifiedTarget, "选择要修改的 unified 路由目标")
 	flags.BoolVar(&opts.showUnifiedModel, "show-unified-model", false, "查看统一模型当前指向")
 	flags.BoolVar(&opts.showVersion, "version", false, "打印版本号后退出")
-	flags.BoolVar(&opts.checkUpdate, "check-update", false, "通过 PyPI/GitHub 检查最新版本")
+	flags.BoolVar(&opts.checkUpdate, "check-update", false, "通过 GitHub Releases 检查最新版本")
 	flags.BoolVar(&opts.serve, "serve", false, "跳过 Terminal UI，后台启动服务")
 	flags.Var(triFlag{target: &opts.webui, value: true}, "webui", "启用随包发布的 WebUI")
 	flags.Var(triFlag{target: &opts.webui, value: false}, "no-webui", "关闭 WebUI")

@@ -9,21 +9,21 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
 
-// pypiFetcher 返回一个只认 PyPI JSON 接口的假取回器。
+// githubFetcher 返回一个只认 GitHub「最新发布」接口的假取回器。
 //
 // 用它而不是真实的 updatecheck.HTTPFetcher：这条测试要证明的是**装配层的推导**，
-// 不能联网，也不能依赖 PyPI/GitHub 当前发布的是什么版本。
-func pypiFetcher(version string) updatecheck.Fetcher {
+// 不能联网，也不能依赖 GitHub 当前发布的是什么版本。
+//
+// 注意这里走的是 GitHub 而非 PyPI：Python 退役后 CheckLatestVersion 只查 GitHub Releases
+// （原标题为 pypiFetcher，随该改动一并更名）。
+func githubFetcher(version string) updatecheck.Fetcher {
 	return func(url string, _ map[string]string, _ time.Duration) (*canonical.Value, error) {
-		if url != updatecheck.PyPIJSONAPI {
+		if url != updatecheck.GitHubLatestReleaseAPI {
 			return nil, &unexpectedURLError{url: url}
 		}
-		info := canonical.NewObject()
-		info.SetKey("version", canonical.NewString(version))
-		info.SetKey("release_url", canonical.NewString("https://example.test/"+version+"/"))
 		root := canonical.NewObject()
-		root.SetKey("info", info)
-		root.SetKey("urls", canonical.NewArray())
+		root.SetKey("tag_name", canonical.NewString("v"+version))
+		root.SetKey("html_url", canonical.NewString("https://example.test/"+version))
 		return root, nil
 	}
 }
@@ -61,7 +61,7 @@ func TestUpdateCheckDerivesUpdateAvailable(t *testing.T) {
 				// 装配层的适配器必须自己推导 UpdateAvailable；这里刻意让 CheckUpdate
 				// 走真实适配器（只把取回器换成桩），而不是注入一个填好字段的假结果。
 				options.Version = testCase.current
-				options.CheckUpdate = newUpdateCheck(testCase.current, pypiFetcher(testCase.latest))
+				options.CheckUpdate = newUpdateCheck(testCase.current, githubFetcher(testCase.latest))
 			})
 
 			recorder := serve(app, http.MethodPost, "/api/update/check", fullAuthorization)
@@ -118,7 +118,7 @@ func TestUpdateCheckAdapterMapsOptionalFields(t *testing.T) {
 
 // TestUpdateCheckAdapterVersionRoundTrip 断言 CurrentVersion 来自装配层注入的版本号。
 func TestUpdateCheckAdapterVersionRoundTrip(t *testing.T) {
-	adapter := newUpdateCheck("7.7.7", pypiFetcher("7.8.0"))
+	adapter := newUpdateCheck("7.7.7", githubFetcher("7.8.0"))
 	if got := adapter(3.0).CurrentVersion; got != "7.7.7" {
 		t.Errorf("CurrentVersion = %q，期望 7.7.7", got)
 	}

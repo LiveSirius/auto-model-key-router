@@ -519,7 +519,6 @@ func TestCLICorpusVersionCheck(t *testing.T) {
 			LatestTag:      entry.Result.LatestTag,
 			ReleaseURL:     entry.Result.ReleaseURL,
 			Source:         entry.Result.Source,
-			FallbackError:  entry.Result.FallbackError,
 			Error:          entry.Result.Error,
 		}
 		if result.UpdateAvailable() != entry.Result.UpdateAvailable {
