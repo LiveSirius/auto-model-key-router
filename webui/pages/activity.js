@@ -163,7 +163,7 @@ function latencyChartCard(points, bucketSeconds) {
       panel("平均耗时", "latency"),
       panel("平均首字延迟", "firstToken"),
     ),
-    h("div.card-foot", {}, "两项都按桶内请求数加权，而不是对桶平均值再取平均。"),
+    h("div.card-foot", {}, "两项都按桶内请求数加权，而不是对桶平均值再取平均；无请求的桶没有均值可算，跨过它的虚线只表示走势延续。"),
   );
 }
 

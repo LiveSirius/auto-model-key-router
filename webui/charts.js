@@ -11,6 +11,7 @@ import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
   heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_SLOTS, HEAT_LEVELS,
   slotLabel,
+  readable, gapBridges,
   formatNumber, formatCompactNumber, formatPercentValue, formatDurationValue,
 } from "./chart-math.js";
 
@@ -73,7 +74,7 @@ function segments(points) {
   const out = [];
   let current = null;
   points.forEach((point, index) => {
-    if (point.value === null || point.value === undefined || !Number.isFinite(point.value)) {
+    if (!readable(point)) {
       current = null;
       return;
     }
@@ -81,6 +82,23 @@ function segments(points) {
     current.push(index);
   });
   return out;
+}
+
+// 缺口桥：用虚线把"两侧都有读数、中间缺采样"的两点连起来。
+//
+// 均值型指标（耗时、首字、成功率）在无请求的桶上没有读数，而 15 秒一桶的稀疏
+// 流量下这种空桶非常密集 —— 不桥接的话曲线会碎成几十段加一地孤立圆点，读起来
+// 像图表坏了，而不是"这些时刻没有请求"。虚线是刻意的：它表示这一段没有采样，
+// 只是示意走势延续，与实线的实测段、以及"累加中"的尾桶虚线都不是一回事。
+function appendGapBridges(node, series, x, y) {
+  for (const bridge of gapBridges(series)) {
+    const from = [x(bridge.from), y(series[bridge.from].value)];
+    const to = [x(bridge.to), y(series[bridge.to].value)];
+    node.append(svg("polyline", {
+      class: "series-gap",
+      points: `${from[0].toFixed(2)},${from[1].toFixed(2)} ${to[0].toFixed(2)},${to[1].toFixed(2)}`,
+    }));
+  }
 }
 
 // —— 折线 / 面积图 ——
@@ -139,6 +157,9 @@ export function lineChart({
 
     const baseline = PAD.top + innerH;
     const runs = segments(series);
+
+    // 先画缺口桥再接实测段：实线叠在虚线之上，"哪一段是真的"一眼可辨。
+    appendGapBridges(node, series, x, y);
 
     for (const run of runs) {
       const coords = run.map((index) => [x(index), y(series[index].value)]);
@@ -359,7 +380,16 @@ export function sparkline({ points, metricId = "rpm", bucketSeconds = 60, width 
     width, height, viewBox: `0 0 ${width} ${height}`, class: `spark tone-${tone}`,
     "aria-hidden": "true", focusable: "false",
   });
-  for (const run of segments(values.map((value, index) => ({ value, index })))) {
+  const sparse = values.map((value, index) => ({ value, index }));
+  // 与主折线同一口径：稀疏指标的缺口用虚线桥接，否则迷你图会被切成碎点。
+  for (const bridge of gapBridges(sparse)) {
+    node.append(svg("polyline", {
+      class: "spark-gap",
+      points: `${x(bridge.from).toFixed(1)},${y(values[bridge.from]).toFixed(1)} ` +
+        `${x(bridge.to).toFixed(1)},${y(values[bridge.to]).toFixed(1)}`,
+    }));
+  }
+  for (const run of segments(sparse)) {
     const coords = run.map((index) => `${x(index).toFixed(1)},${y(values[index]).toFixed(1)}`);
     if (coords.length === 1) {
       node.append(svg("circle", { class: "point", cx: x(run[0]), cy: y(values[run[0]]), r: 1.6 }));

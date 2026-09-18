@@ -179,6 +179,34 @@ export function completeOnly(points) {
   return (points || []).filter((point) => point.complete !== false);
 }
 
+// 一个系列点是否有真实读数：null / undefined / NaN 都算缺失。
+//
+// 均值型指标（耗时、首字延迟）在无请求的桶上返回 null 而不是 0 ——
+// "0 次请求的平均耗时"没有意义。所以"缺口"与"空闲（0 次/分）"是两件事：
+// 前者没有读数，后者是有读数的 0。判定逻辑集中在这里，避免图表各处各写一遍。
+export function readable(point) {
+  const value = point?.value;
+  return value !== null && value !== undefined && Number.isFinite(value);
+}
+
+// 缺口桥接：相邻两个可读点之间隔了缺失的桶时，给出这对下标。
+//
+// 为什么需要：稀疏流量下（15 秒一桶、偶尔才有请求）耗时曲线会被缺口切成几十段
+// 碎片，看上去像"图表坏了"而不是"这段没有请求"。图表用虚线跨越缺口连接，
+// 折线因此读起来是连续的，而虚线又说明这一段没有采样、不是实测值。
+export function gapBridges(seriesPoints) {
+  const out = [];
+  let previous = -1;
+  (seriesPoints || []).forEach((point, index) => {
+    if (!readable(point)) return;
+    // 首尾的缺口没有可连的另一端，前面的 previous < 0 与末尾不再有可读点
+    // 都自然落在条件之外：只桥接"两侧都有读数"的缺口。
+    if (previous >= 0 && index > previous + 1) out.push({ from: previous, to: index });
+    previous = index;
+  });
+  return out;
+}
+
 // —— 坐标轴刻度 ——
 // 标准 1/2/2.5/5/10 阶梯，保证刻度值是"人能读"的整数而不是数据最大值。
 export function niceStep(rough) {

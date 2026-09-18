@@ -381,6 +381,12 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 }
 /* 未完成的桶用虚线：它天然偏低，实线会被误读成"流量掉下来了"。 */
 .chart .series-line.is-partial { stroke-dasharray: 3 4; opacity: 0.75; }
+/* 缺口桥：相邻两个实测点之间没有采样。比实测线更细、更淡且虚得更疏，
+   才能与"累加中的尾桶"（密虚线、同为实测色）区分开——那一段是有读数的。 */
+.chart .series-gap {
+  fill: none; stroke: var(--md-on-surface-variant); stroke-width: 1.25;
+  stroke-dasharray: 2 5; opacity: 0.55; stroke-linecap: round;
+}
 .chart .area { fill: rgba(98, 0, 238, 0.1); stroke: none; }
 .chart .point { fill: var(--md-primary); }
 .chart .crosshair { stroke: var(--md-primary-variant); stroke-width: 1; stroke-dasharray: 3 3; }
@@ -420,6 +426,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 
 .spark { display: block; overflow: visible; }
 .spark .spark-line { fill: none; stroke: var(--md-primary); stroke-width: 1.5; stroke-linejoin: round; }
+.spark .spark-gap { fill: none; stroke: var(--md-on-surface-variant); stroke-width: 1; stroke-dasharray: 1.5 3; opacity: 0.5; }
 .spark .point { fill: var(--md-primary); }
 .spark.tone-secondary .spark-line, .spark.tone-secondary .point { stroke: var(--md-secondary-variant); fill: var(--md-secondary-variant); }
 .spark-empty { height: 28px; }
