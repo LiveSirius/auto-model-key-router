@@ -608,7 +608,7 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 
 /* 焦点环统一：键盘用户必须能看清当前位置 */
 .btn:focus-visible, .input:focus-visible, .select:focus-visible, .textarea:focus-visible,
-.nav-item:focus-visible, .tab:focus-visible, .chip:focus-visible, .toggle:focus-visible,
+.nav-item:focus-visible, .chip:focus-visible, .toggle:focus-visible,
 .segment:focus-visible, .th-sort:focus-visible, .icon-btn:focus-visible, .card:focus-visible,
 .rail-item:focus-visible, .preset:focus-visible {
   outline: 2px solid var(--md-primary-variant);
@@ -677,18 +677,9 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .th-sort:hover { color: var(--md-primary); }
 .table th.is-sorted .th-sort { color: var(--md-primary); }
 
-/* ══ 标签页 / 分段控件 ══ */
-.tabs { display: flex; gap: var(--sp-1); flex-wrap: wrap; border-bottom: 1px solid var(--md-outline); }
-.tab {
-  padding: 10px 16px;
-  border: 0; border-bottom: 2px solid transparent;
-  background: transparent; color: var(--md-on-surface-variant);
-  font: inherit; font-size: 13px; cursor: pointer;
-  transition: color var(--dur) var(--ease), border-color var(--dur) var(--ease), transform var(--dur) var(--ease);
-}
-.tab:hover { color: var(--md-primary); }
-.tab:active { transform: scale(0.98); }
-.tab[aria-selected="true"] { color: var(--md-primary); border-color: var(--md-primary); font-weight: 500; }
+/* ══ 分段控件 ══ */
+/* 横排标签页（.tabs / .tab）随供应商页与模型路由页改用左侧竖排导航而删除：
+   它最后两个使用者都不再产生这种结构，留着只会让下一个人以为还有页面在用。 */
 
 .segmented {
   display: inline-flex;
@@ -1169,7 +1160,7 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
     animation-iteration-count: 1 !important;
   }
   .card.is-lift:hover, .card.is-lift:active,
-  .btn:active, .nav-item:active, .tab:active, .chip:active, .toggle:active, .segment:active,
+  .btn:active, .nav-item:active, .chip:active, .toggle:active, .segment:active,
   .rail-item:active, .preset:active {
     transform: none !important;
   }
