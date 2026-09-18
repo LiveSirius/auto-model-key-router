@@ -11,6 +11,7 @@ import { icon } from "./icons.js";
 
 import { renderOverview } from "./pages/overview.js";
 import { renderActivity } from "./pages/activity.js";
+import { renderLogs } from "./pages/logs.js";
 import { renderCost } from "./pages/cost.js";
 import { renderProviders } from "./pages/providers.js";
 import { renderRouting } from "./pages/routing.js";
@@ -22,7 +23,8 @@ import { renderSettings } from "./pages/settings.js";
 export const PAGES = [
   { group: "监控", items: [
     { id: "overview", label: "概览", icon: "overview", render: renderOverview },
-    { id: "activity", label: "实时活动", icon: "activity", render: renderActivity },
+    { id: "activity", label: "用量统计", icon: "activity", render: renderActivity },
+    { id: "logs", label: "服务日志", icon: "logs", render: renderLogs },
     { id: "cost", label: "成本", icon: "cost", render: renderCost },
   ]},
   { group: "配置", items: [
@@ -35,8 +37,8 @@ export const PAGES = [
   { group: "系统", items: [{ id: "settings", label: "设置", icon: "settings", render: renderSettings }] },
 ];
 
-// 指标轮询节奏（毫秒）：监控页要看趋势，配置页没必要跟着刷。
-const METRICS_INTERVAL = { overview: 10000, activity: 5000, default: 30000 };
+// 指标轮询节奏（毫秒）：概览/用量统计要看趋势，日志页自己管轮询，其余放慢。
+const METRICS_INTERVAL = { overview: 10000, activity: 15000, default: 30000 };
 const HEALTH_INTERVAL = 5000;
 
 export const store = {

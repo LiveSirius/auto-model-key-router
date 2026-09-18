@@ -822,6 +822,37 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   text-align: right; font-variant-numeric: tabular-nums; color: var(--md-on-surface-variant);
 }
 
+/* 实时脉搏：四个等宽小倍数图。
+ * auto-fit + minmax 让窄屏自动落成 2×2 或 1×4，不需要写断点：
+ * 每格最小 150px（读数 + 迷你图的舒适下限），能塞几列就塞几列。 */
+.pulse-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--sp-2);
+}
+.pulse-cell {
+  display: flex; flex-direction: column; gap: 6px;
+  min-width: 0; padding: var(--sp-2);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--radius);
+  background: var(--md-surface);
+}
+.pulse-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.pulse-label {
+  font-size: 12px; color: var(--md-on-surface-variant);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pulse-value { font-size: 16px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.pulse-value.tone-warn { color: #f9a825; }
+.pulse-value.tone-secondary { color: var(--md-secondary-variant); }
+/* 迷你图按容器宽度等比缩放。
+ * 用 width:100% + height:auto 而不是固定高：svg 带 viewBox，等比缩放填满宽度后
+ * 高度按比例跟随，描边不会被压扁（这正是 charts.js 顶部注释里避免的拉伸）。
+ * 若改成固定高度 + width:100%，就会落进 preserveAspectRatio 的留白分支，
+ * 宽屏上迷你图缩在中间、两侧空白。 */
+.pulse-spark .spark { display: block; width: 100%; height: auto; }
+.pulse-foot { font-size: 11px; color: var(--md-on-surface-variant); font-variant-numeric: tabular-nums; }
+
 /* 成本页的逐条成本列表：与请求流同构，但省掉状态条与耗时（这里只看钱）。 */
 .cost-list { display: flex; flex-direction: column; }
 .cost-row {

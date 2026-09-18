@@ -8,7 +8,7 @@
 
 import {
   h, errorText, copyText, formatCount, formatCompact, formatDuration,
-  formatPercent, formatRate,
+  formatPercent, formatRate, formatClockSeconds,
 } from "../dom.js";
 import { api } from "../api.js";
 import {
@@ -16,7 +16,7 @@ import {
   buttonNode, segmented, freshness, progressBar, toast,
 } from "../ui.js";
 import { icon } from "../icons.js";
-import { lineChart, stackedBars, donut, barList, legend, chartSummary, heatmap } from "../charts.js";
+import { lineChart, stackedBars, donut, barList, legend, chartSummary, heatmap, sparkline } from "../charts.js";
 import {
   TIME_RANGES, pickBucketSeconds, bucketLabel, METRIC_MAP, HEATMAP_METRICS,
   rank, statusGroups, formatPercentValue, formatCompactNumber, formatNumber,
@@ -24,7 +24,8 @@ import {
 } from "../chart-math.js";
 // 成本是派生读数：目录拿不到时 KPI 与排行卡显示"—"，其余看板不受影响。
 import {
-  loadPricing, currentIndex, lookupPrice, aggregateCost, sumCost, formatCost,
+  loadPricing, currentIndex, lookupPrice, aggregateCost, sumCost, formatCost, formatPrice,
+  requestCost,
 } from "../pricing.js";
 
 // 热力图固定看 7 天：它的价值就在于"周内节律"（工作日 vs 周末、白天 vs 夜间），
@@ -58,14 +59,37 @@ const state = {
   heatError: null,
   heatAt: null,
   heatToken: 0,
+  // 请求流：从「实时活动」移到这里，因为它回答的正是"此刻正在发生什么"。
+  // 跟随概览的 1h/6h/24h 窗口，但只取最近若干条明细。
+  requests: null,
+  requestsError: null,
+  requestsAt: null,
+  streamFilter: "all",
 };
 
 let host = null;
 let xtxRef = null;
 let windowToken = 0;
+let streamToken = 0;
 
 function rangeLabel() {
   return TIME_RANGES.find((range) => range.hours === state.hours)?.label || `${state.hours} 小时`;
+}
+
+// 请求明细：与窗口同一 hours，保证"图上是 1 小时、列表里却是 24 小时"不会发生。
+async function loadRequests() {
+  const token = ++streamToken;
+  try {
+    const data = await api.requests({ hours: state.hours, limit: 40 });
+    if (token !== streamToken) return;
+    state.requests = data;
+    state.requestsError = null;
+    state.requestsAt = new Date().toISOString();
+  } catch (error) {
+    if (token !== streamToken) return;
+    state.requestsError = errorText(error);
+  }
+  draw();
 }
 
 // 快照与序列必须同一个窗口、同一次请求周期内取，保证同屏数字自洽。
@@ -500,6 +524,187 @@ function heatmapCard() {
   );
 }
 
+// —— 请求流：刚刚发生了什么 ——
+// 从「用量统计」（原「实时活动」）移到概览：它回答的是"此刻正在发生什么"，
+// 与概览的实时定位一致；用量统计则专注于历史聚合。
+function filteredRequests() {
+  const items = state.requests?.items || [];
+  if (state.streamFilter === "failure") return items.filter((item) => !item.success);
+  if (state.streamFilter === "retry") return items.filter((item) => item.retried);
+  if (state.streamFilter === "success") return items.filter((item) => item.success);
+  return items;
+}
+
+function streamCard() {
+  if (state.requestsError) {
+    return card(cardHead("请求流"), notice(`请求明细读取失败: ${state.requestsError}`, "error"));
+  }
+  const all = state.requests?.items || [];
+  const items = filteredRequests();
+  const counts = {
+    all: all.length,
+    success: all.filter((item) => item.success).length,
+    failure: all.filter((item) => !item.success).length,
+    retry: all.filter((item) => item.retried).length,
+  };
+
+  return card(
+    cardHead("请求流",
+      badge(`最近 ${all.length} 条`, "muted"),
+      state.requestsAt ? freshness(state.requestsAt, { prefix: "拉取于" }) : null,
+    ),
+    // 过滤器放在卡头下方而不是塞进卡头：卡片不宽时四个筛选项会把标题挤成竖排。
+    h("div.toolbar", { style: { marginBottom: "8px" } },
+      segmented([
+        { id: "all", label: `全部 ${counts.all}` },
+        { id: "success", label: `成功 ${counts.success}` },
+        { id: "failure", label: `失败 ${counts.failure}` },
+        { id: "retry", label: `重试 ${counts.retry}` },
+      ], state.streamFilter, (id) => { state.streamFilter = id; draw(); },
+        { "aria-label": "按结果过滤请求流" }),
+    ),
+    items.length
+      ? h("div.stream", {}, items.map(streamRow))
+      : empty("该条件下暂无请求记录。", { icon: "activity", hint: "窗口内没有请求时，这里会是空的。" }),
+  );
+}
+
+function streamRow(item) {
+  const tone = !item.success ? "is-failure" : item.retried ? "is-retry" : "";
+  return h(`div.stream-row${tone ? `.${tone}` : ""}`, {},
+    h("span.stream-bar"),
+    h("span.stream-time", { title: item.created_at }, formatClockSeconds(item.created_at)),
+    h("div.stream-main", {},
+      h("span.stream-model", { title: item.model_id }, item.model_id),
+      h("span.stream-meta", {},
+        [
+          item.caller_type === "visitor" ? "访客" : "本机",
+          item.key_name,
+          item.provider_id || null,
+          `HTTP ${item.status_code ?? "无响应"}`,
+          item.retried ? "已重试" : null,
+        ].filter(Boolean).join(" · ")),
+    ),
+    h("span.stream-tokens", {}, item.total_tokens ? formatCompact(item.total_tokens) : "—"),
+    h("span.stream-latency", {}, formatDuration(item.duration_ms)),
+    h("span.stream-cost", { title: costTitle(item) }, costText(item)),
+  );
+}
+
+// 成本列：拿不到价格时显示 "—" 而不是 "$0" —— 0 会被读成"这次请求免费"，
+// 而事实是"不知道"。目录尚未加载（首屏）时同样显示 "—"，避免先闪一堆 $0。
+function costText(item) {
+  const index = currentIndex();
+  if (!index) return "—";
+  return formatCost(requestCost(index, item));
+}
+
+function costTitle(item) {
+  const index = currentIndex();
+  const name = item.upstream_model_id;
+  if (!index) return "价格目录尚未就绪";
+  if (!name) return "该请求没有 upstream_model 归因，无法匹配价格";
+  const entry = lookupPrice(index, name);
+  if (!entry) return `${name} 未在 models.dev 目录中匹配到价格`;
+  return `${name} · 输入 ${formatPrice(entry.input)} / 输出 ${formatPrice(entry.output)} USD per 1M token`;
+}
+
+// —— 结果构成随时间 ——
+// 成功 / 失败 / 重试随时间堆叠。折线只能看"总量"，这张图看的是"结构变化"：
+// 总量平稳但失败占比抬升，是上游开始抖动的早期信号。
+function outcomeCard(points, bucketSeconds) {
+  const specs = [
+    { id: "successes", label: "成功", tone: "secondary", pick: (point) => point.successes },
+    { id: "failures", label: "失败", tone: "error", pick: (point) => point.failures },
+    { id: "retries", label: "重试", tone: "warn", pick: (point) => point.retries },
+  ];
+  return card(
+    cardHead("结果构成随时间",
+      badge(`${bucketLabel(bucketSeconds)}/柱`, "muted"),
+      h("div.head-tools", {},
+        legend(specs.map((spec) => ({
+          label: spec.label,
+          tone: spec.id === "successes" ? "secondary" : spec.id === "failures" ? "bad" : "warn",
+        }))),
+      ),
+    ),
+    h("div", { style: { marginTop: "12px" } },
+      stackedBars({
+        points, series: specs, height: 220, bucketSeconds,
+        ariaLabel: `成功、失败与重试随时间构成，最近 ${rangeLabel()}`,
+        emptyText: "该时间窗内没有请求",
+      })),
+    h("div.card-foot", {}, "重试是成功与失败之外的第三次尝试计数，三者可能同时出现在同一个桶里。"),
+  );
+}
+
+// —— 状态码明细 ——
+// 比状态分组更细一层：分组告诉你"有 5xx"，这张表告诉你"是 502 还是 504"，
+// 排查时这是两种完全不同的原因。
+function statusCodeCard(metrics) {
+  const codes = metrics.total?.status_codes || {};
+  const entries = Object.entries(codes)
+    .map(([code, count]) => ({ code: Number(code), count: Number(count) || 0 }))
+    .filter((row) => row.count > 0)
+    .sort((a, b) => b.count - a.count);
+  if (!entries.length) {
+    return card(cardHead("状态码明细", badge(rangeLabel(), "muted")),
+      empty("窗口内没有带状态码的请求。", { icon: "activity" }));
+  }
+  const total = entries.reduce((sum, row) => sum + row.count, 0);
+  const group = (code) => (code >= 200 && code < 300 ? "good" : code >= 500 ? "bad" : code >= 400 ? "warn" : "neutral");
+  return card(
+    cardHead("状态码明细", badge(`${entries.length} 种`, "muted"), badge(rangeLabel(), "muted")),
+    h("div.stack.tight", {}, entries.slice(0, 8).map((row) =>
+      h("div.row-between", {},
+        h("span.inline", {},
+          h("i", { class: `swatch tone-${group(row.code)}` }),
+          h("span.mono", String(row.code)),
+        ),
+        h("span.inline", {},
+          h("strong", formatCount(row.count)),
+          h("span.muted", ` · ${formatPercent(row.count, total)}`),
+        ),
+      ))),
+  );
+}
+
+// —— 实时脉搏：四个指标的小倍数图 ——
+// 把 RPM / TPM / 耗时 / 成功率并成一组同宽的迷你曲线。分开看四张折线要上下滚动，
+// 摆在一起才能回答"这次耗时抬升是不是伴随了成功率下滑"。
+// 每格只画形状、不标刻度：读数是上面 KPI 瓦片的事，这里看的是"有没有同步异动"。
+function pulseCard(points, bucketSeconds) {
+  const cells = [
+    { metricId: "rpm", tone: "primary" },
+    { metricId: "tpm", tone: "primary" },
+    { metricId: "latency", tone: "warn" },
+    { metricId: "success", tone: "secondary" },
+  ];
+  return card(
+    cardHead("实时脉搏",
+      badge(`${bucketLabel(bucketSeconds)}/点`, "muted"),
+      badge(rangeLabel(), "muted"),
+    ),
+    h("div.pulse-grid", {}, cells.map((cell) => {
+      const metric = METRIC_MAP[cell.metricId] || METRIC_MAP.rpm;
+      const summary = chartSummary({ points, metricId: cell.metricId, bucketSeconds, windowHours: state.hours });
+      const latest = summary.latest;
+      return h("div.pulse-cell", {},
+        h("div.pulse-head", {},
+          h("span.pulse-label", metric.label),
+          h("span.pulse-value", { class: `tone-${cell.tone}` },
+            latest === null || latest === undefined ? "—" : metric.format(latest)),
+        ),
+        h("div.pulse-spark", {},
+          sparkline({ points, metricId: cell.metricId, bucketSeconds, width: 200, height: 40, tone: cell.tone })),
+        h("span.pulse-foot", {},
+          `均 ${summary.total === null || summary.total === undefined ? "—" : metric.format(summary.total)}`),
+      );
+    })),
+    h("div.card-foot", {}, "四格共用同一时间轴；只画走势不标刻度，具体读数见上方 KPI。"),
+  );
+}
+
 // —— 页面组装 ——
 export function renderOverview(context) {
   xtxRef = context;
@@ -510,13 +715,16 @@ export function renderOverview(context) {
   if (!state.snapshot && !state.loading) state.loading = true;
   if (state.seriesHours !== state.hours) loadWindow();
   loadHeatmap();
+  // 请求流与窗口同一 hours：切窗口时旧列表会被下一次 onTick 覆盖，
+  // 这里先取一次，避免切完窗口后列表还停在上一个窗口的记录上。
+  loadRequests();
   // 价格目录只拉一次（见 webui/pricing.js），失败不阻断看板：成本 KPI 与排行卡
   // 会退化成"—"/空态，其余卡片照常。
   loadPricing(() => api.pricing()).then(draw).catch(() => {});
-  // 指标轮询时刷新本页窗口数据（快照 + 序列一起，保持同屏口径一致）。
+  // 指标轮询时刷新本页窗口数据（快照 + 序列 + 请求流，保持同屏口径一致）。
   // 热力图有自己的 60 秒 TTL，force 会绕过它 —— 但那时桶内容其实没变，
   // 所以只在窗口数据真正变化时顺带刷新，避免每 10 秒重画 336 个格子。
-  context.onTick?.(() => { loadWindow(true); loadHeatmap(); });
+  context.onTick?.(() => { loadWindow(true); loadHeatmap(); loadRequests(); });
   // 同步首绘必须绕过"已挂载"守卫：app.js 是**先**拿本函数返回的节点、**后**mount 进
   // 文档的（renderContent 里 page.render(ctx()) 在前，mount 在后），此刻 host 还不在
   // 文档里，isConnected 恒为 false。而下面的 loadWindow/loadHeatmap 在缓存命中时会直接
@@ -551,7 +759,8 @@ function draw(firstPaint = false) {
         : null,
       segmented(TIME_RANGES.map((range) => ({ id: range.hours, label: range.short, title: range.label })),
         state.hours,
-        (id) => { state.hours = Number(id); state.loading = true; draw(); loadWindow(true); },
+        // 请求流也跟着换窗口：否则折线变成 7 天、列表还停在上一窗口的记录上。
+        (id) => { state.hours = Number(id); state.loading = true; draw(); loadWindow(true); loadRequests(); },
         { "aria-label": "选择统计窗口" }),
     ),
   );
@@ -579,25 +788,31 @@ function draw(firstPaint = false) {
   // 分开写时排内间距是 16px、排间却是 .content 的 24px，横向纵向对不上，
   // 整体节奏显得松散。合成一个栅格后，所有间隙统一为 gap。
   // 每排仍按最高卡等高（见 styles.css 的说明），因此排内底边平齐。
+  //
+  // 排序按"从实时到历史"：脉搏 → 热力图 → 趋势 → 请求流 → 构成与排行。
   children.push(h("div.grid-12", {},
-    // 热力图紧贴 KPI 瓦片下方并占满整行：它是"一眼看节律"的图，
-    // 放在页面末尾要滚到底才看得到；而 24 个小时列塞进 col-4 每格只剩十几像素。
-    h("div.col-12", {}, heatmapCard()),
+    // 实时脉搏紧跟在 KPI 下方并占满整行：它和 KPI 是同一个时间尺度上的两种读法。
+    h("div.col-12", {}, pulseCard(points, bucketSeconds)),
     h("div.col-8", {}, trendCard()),
     h("div.col-4", {}, unifiedCard()),
+    // 热力图是"一眼看节律"的图，占满整行；24 个小时列塞进 col-4 每格只剩十几像素。
+    h("div.col-12", {}, heatmapCard()),
+    h("div.col-5", {}, streamCard()),
+    h("div.col-7", {}, outcomeCard(points, bucketSeconds)),
     h("div.col-4", {}, compositionCard(metrics)),
     h("div.col-4", {}, statusCard(metrics)),
+    h("div.col-4", {}, statusCodeCard(metrics)),
     h("div.col-4", {}, waterfallCard(metrics)),
     h("div.col-4", {}, rankingCard("模型调用排行", metrics.models, "模型")),
     h("div.col-4", {}, rankingCard("调用方排行", metrics.caller_types, "调用方")),
-    h("div.col-4", {}, rankingCard("上游 Token 排行", metrics.upstream_models, "上游模型的 Token", {
+    h("div.col-6", {}, rankingCard("上游 Token 排行", metrics.upstream_models, "上游模型的 Token", {
       value: (stats) => stats.total_tokens,
       tone: "secondary",
       format: (row) => `${formatCompact(row.value)} Token`,
     })),
-    h("div.col-4", {}, costRankingCard(metrics)),
-    h("div.col-8", {}, tokenBreakdownCard(points, bucketSeconds)),
-    h("div.col-4", {}, runtimeCard()),
+    h("div.col-6", {}, costRankingCard(metrics)),
+    h("div.col-12", {}, tokenBreakdownCard(points, bucketSeconds)),
+    h("div.col-12", {}, runtimeCard()),
   ));
 
   render(host, children);
