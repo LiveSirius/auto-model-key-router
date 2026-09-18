@@ -2,23 +2,23 @@
 
 一个本地 OpenAI-compatible API 路由器：把多个模型和多个上游 API Key 统一收口到本地服务，自动分流、失败切换、统计调用，并可一键接入 Claude Code / Codex。
 
+AMKR 是单个 Go 二进制：配置、WebUI 静态资产（`//go:embed`）与 SQLite 指标库驱动全部编在里面，运行时不需要 Python、node 或任何额外依赖。浏览器里的 WebUI 是唯一界面；随 Python 版发布的终端交互界面已一并退役。
+
 ## 主要能力
 
 - **按模型管理 Key**：Key 属于供应商（`providers.*.keys`），模型通过 `targets[]`（`{provider, key, upstream_model}`）绑定一个或多个 Key；同一 Key 可服务多个模型，支持 `round_robin`、`priority`、`only_first`。
 - **失败切换与冷却**：遇到 `401/403/429/5xx` 等可重试错误时自动重试或切换 Key，并在进程内临时冷却异常 Key。
 - **统一模型名**：客户端固定请求 `unified-model`，真实模型和固定 Key 可在路由器侧随时切换。
 - **任务路由**：把任务名（`TASK_XXXXXX`）直接当模型名传，由路由器决定用哪个模型（首选 + 备选）和哪组采样参数；调用方改不了这些参数。
-- **每个 Key 独立探测**：模型清单按 Key 缓存（同一供应商不同 Key 可见模型可能不同），添加 Key 时自动探测该 Key，可在 TUI 或管理 API 手动刷新。
-- **OpenAI-compatible 代理**：支持 `/v1/chat/completions`、`/v1/models`，并兼容 Claude Code 的 `/v1/messages` 与 Codex 的 `/v1/responses`；可为不同协议模式配置上游额外路径。
-- **WebUI 管理**：浏览器里配置供应商与 Key、模型、统一模型、服务注册和客户端接入；`amkr` 的交互式终端界面已随 Python 版一并退役。
-- **访客 Key**：用固定访客 Key `amkr-visitor` 暴露受限公共模型（该功能现为常驻，不再需要额外安装步骤）。
-- **统计与日志**：记录本地/访客调用、模型、Key、状态码、token、重试、延迟等指标。
+- **每个 Key 独立探测**：模型清单按 Key 缓存（同一供应商不同 Key 可见模型可能不同），添加 Key 时自动探测该 Key，也可在 WebUI 的供应商页或管理 API 手动刷新。
+- **OpenAI-compatible 代理**：支持 `/v1/chat/completions`、`/v1/models`、`/v1/embeddings`、图像生成与编辑，并兼容 Claude Code 的 `/v1/messages` 与 Codex 的 `/v1/responses`；升级到 `/v1/*` 的 WebSocket 连接会被转发到上游。可为不同协议模式配置上游额外路径。
+- **WebUI 管理**：浏览器里配置供应商与 Key、模型路由、统一模型、任务路由、客户端接入、服务注册和运行设置。
+- **访客 Key**：用固定访客 Key `amkr-visitor` 暴露受限公共模型（该功能常驻，不需要额外安装步骤）。
+- **统计与日志**：记录本地/访客调用、模型、Key、状态码、token、重试、延迟等指标，经 `/metrics*`、`/api/logs` 与 WebUI 的概览、实时活动页查看。
 
 ## 安装
 
-AMKR 是单个 Go 二进制：配置、WebUI 静态资产（`//go:embed`）与 SQLite 驱动的指标库都编在里面，
-运行时不需要 Python、node 或额外的运行时依赖。推荐从 GitHub Releases 下载预编译二进制，
-安装脚本会校验 sha256 后再落盘。
+推荐从 GitHub Releases 下载预编译二进制（Windows / macOS / Linux，amd64 + arm64），安装脚本会校验 sha256 后再落盘。
 
 ### 一行安装（Linux / macOS）
 
@@ -51,6 +51,41 @@ irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scr
 .\install.ps1 -Version 5.0.0
 ```
 
+### Docker
+
+也可以自己从仓库构建镜像：
+
+```bash
+docker build -t amkr .
+docker run -d --name amkr -p 8000:8000 -v amkr-data:/data amkr
+```
+
+镜像里配置、指标库与日志都落在 `/data`（`XDG_CACHE_HOME`），挂一个卷即可整体持久化。容器内以 `--host 0.0.0.0` 启动（配置默认监听 `127.0.0.1`，不改的话端口映射进不来），并且用 `--serve-foreground` 前台运行，因此不会尝试打开浏览器。
+
+容器里需要 WebUI 时，把命令换成带上 `--webui` 的那条 —— 它会把开关写进配置并立即生效：
+
+```bash
+docker run -d --name amkr -p 8000:8000 -v amkr-data:/data \
+  amkr amkr --host 0.0.0.0 --serve-foreground --webui
+```
+
+首次启动会在卷里自动生成配置和本地授权 Key，路径是 `/data/auto-model-key-router/router-config.json`。取本地授权 Key：
+
+```bash
+docker exec amkr amkr --config /data/auto-model-key-router/router-config.json --get-key
+```
+
+删容器不丢数据。**容器内固定监听 `0.0.0.0`，务必保留 `local_api_key`，不要把端口直接暴露到公网**；需要改端口时改配置里的 `port`，再同步调整 `-p`。
+
+容器里建议关掉运维接口：`/api/logs`、`/api/tool`、`/api/service/*`、`/api/integrations/*` 作用于「服务所在的这台机器」（读日志文件、启停进程、注册系统服务、改写本机 Claude Code / Codex 配置），在容器或反向代理后面语义不成立，逐个路径拉黑又容易漏。在启动命令后加 `--no-ops` 即可（写入配置字段 `ops_enabled`，随后启动的服务进程即已关闭）：
+
+```bash
+docker run -d --name amkr -p 8000:8000 -v amkr-data:/data \
+  amkr amkr --host 0.0.0.0 --serve-foreground --webui --no-ops
+```
+
+关闭后这些路径返回 `404`，`/health` 的 `ops_enabled` 字段也会变成 `false`，便于部署时断言。代理、`/health`、`/metrics`、WebSocket 与 `/api/settings` 等配置管理接口不受影响。
+
 ### 从源码构建
 
 需要 Go 1.24+。
@@ -62,124 +97,31 @@ go build ./cmd/amkr          # 产出 amkr（Windows 上是 amkr.exe）
 ./amkr --version
 ```
 
-### Docker
-
-```bash
-docker build -t amkr .
-docker run -d --name amkr -p 8000:8000 -v amkr-data:/data amkr
-```
-
-镜像里配置、指标库与日志都落在 `/data`（`XDG_CACHE_HOME`），挂一个卷即可整体持久化。
-容器内以 `--host 0.0.0.0` 启动 —— 配置默认监听 `127.0.0.1`，不改的话端口映射进不来。
-
-### 首次运行
-
-```bash
-amkr --show-config      # 看一眼当前配置摘要与配置文件路径
-amkr --serve-foreground # 前台启动（不带参数时也是这个行为）
-```
-
-启动后打开 `http://127.0.0.1:<port>/ui` 使用 WebUI 配置供应商、Key 与模型。
-
-### 常用命令
-
-```bash
-amkr --show-address          # 查询监听地址与服务地址
-amkr --show-api-key          # 获取本地授权 Key
-amkr --status                # 查看后台服务状态
-amkr --service install-user  # 注册为用户级服务（Windows 计划任务 / systemd user unit）
-amkr --stop                  # 停止后台服务
-amkr --check-update          # 检查是否有新版本
-```
-
-`amkr --help` 可看到全部参数。从源码构建、没有把二进制放进 PATH 时，把上面的 `amkr` 换成 `./amkr`。
-### 可选 WebUI
-
-AMKR 自带一套可选的浏览器管理界面。**资产随软件包一起安装，没有单独的安装步骤，也没有额外依赖**，只由开关决定是否启用：
-
-```bash
-# 启动服务时启用（同时写入配置）
-amkr --config router-config.json --webui
-
-# 关闭
-amkr --config router-config.json --no-webui
-```
-
-也可以不写配置文件，直接在 TUI 的「CLI 设置 → WebUI」里切换。启用后访问 `http://127.0.0.1:8000/ui/`（端口以实际配置为准）。管理接口照常要求本地鉴权 Key；`/ui/` 的挂载在服务启动时完成，通过接口改动开关需要重启服务才会生效。
-
-### Docker
-
-发布时会把镜像推到 GHCR（`ghcr.io/sparrived/auto-model-key-router`，标签为版本号，正式版额外带 `latest`）。注意 GHCR 的容器包默认是**私有**，且可见性**不随仓库继承**（包只继承仓库的访问权限，不含可见性 —— 本仓库公开不代表镜像能匿名拉取），目前也没有 API 能改，只能在包页面手动改一次：
-
-> 包页面 → 右下角 **Danger Zone** → **Change visibility** → **Public**（按提示输入包名确认；改公开后不能改回私有）
-
-改之前 `docker pull` 会要求登录（`403 Forbidden`）。发布工作流来自仓库自身、包会自动关联到仓库，通常无需手动操作即可匿名拉取，但以包页面显示的实际可见性为准。
-
-也可以自己从仓库构建：
-
-```bash
-docker build -t amkr .
-
-docker run -d --name amkr \
-  -p 8000:8000 \
-  -v amkr-data:/data \
-  amkr
-```
-
-首次启动会在卷里自动生成配置和本地授权 Key。之后照常进入 TUI 配置（`-it` 分配终端，必须带）：
-
-```bash
-docker exec -it amkr amkr --config /data/auto-model-key-router/router-config.json
-```
-
-只取本地授权 Key 时用非交互命令：
-
-```bash
-docker exec amkr amkr --config /data/auto-model-key-router/router-config.json --get-key
-```
-
-配置、指标库、日志和 PID 文件都在 `/data/auto-model-key-router` 下，删容器不丢数据。容器内固定监听 `0.0.0.0`（否则端口映射进不去），**因此务必保留 `local_api_key`，不要把端口暴露到公网**；需要改端口时改配置里的 `port`，再同步调整 `-p`。
-
-容器里建议关掉运维接口：`/api/logs`、`/api/tool`、`/api/service/*`、`/api/integrations/*` 作用于「服务所在的这台机器」（读日志文件、启停进程、注册系统服务、改写本机 Claude Code / Codex 配置），在容器或反向代理后面语义不成立，逐个路径拉黑又容易漏：
-
-```bash
-amkr --config /data/auto-model-key-router/router-config.json --no-ops
-```
-
-开关写入配置字段 `ops_enabled`，重启后生效；关闭后这些路径返回 `404`，`/health` 的 `ops_enabled` 字段也会变成 `false`，便于部署时断言。代理、`/health`、`/metrics`、WebSocket 与 `/api/settings` 等配置管理接口不受影响。
-
 ## 快速开始
 
-### 1. 启动 Terminal UI
+### 1. 启动服务与 WebUI
 
 ```bash
-amkr
+amkr                 # 前台启动服务，并自动打开浏览器里的 WebUI
+amkr --no-open       # 不自动打开浏览器（SSH、容器等无桌面环境）
+amkr --serve         # 后台启动
 ```
 
-首次启动会在系统缓存目录自动创建配置文件和本地鉴权 Key。你也可以复制示例配置到当前目录：
+不带参数时：首次启动会在系统缓存目录自动创建配置文件和本地鉴权 Key，服务起来后用系统默认浏览器打开 WebUI；**服务已经在运行**（例如已注册为系统服务）时只打开 WebUI 并退出 `0`，不会去抢端口。`--serve-foreground`（服务注册调用的那条命令）始终不打开浏览器。打开浏览器失败不算错误，终端会打印地址供手动访问。
 
-```bash
-cp router-config.example.json router-config.json
-amkr --config router-config.json
-```
+默认监听 `127.0.0.1:8000`，所以 WebUI 地址是 `http://127.0.0.1:8000/ui`（端口以配置为准，不限于 8000）。自动生成的配置默认不启用 WebUI，首次使用请先看下文「WebUI」一节。
 
-Windows PowerShell 可使用：
+### 2. 在 WebUI 里配置
 
-```powershell
-copy router-config.example.json router-config.json
-amkr --config router-config.json
-```
+WebUI 左侧导航覆盖日常全部操作：
 
-### 2. 配置供应商、Key 与模型
-
-在 TUI 中进入：
-
-1. **供应商 → 添加供应商**：输入供应商 ID、Base URL 与第一个 Key 的 API Key。添加时自动探测这个新 Key（可用模型列表 + 各路由可用性）并据此建立可服务模型；以后每添加一个 Key 都会只探测该新 Key（不同 Key 可见模型可能不同）。
-2. **模型设置**：管理模型别名、隐藏别名、路由模式、绑定/解绑 Key（绑定 Key 时可指定上游模型名）。
+1. **供应商**：添加供应商（ID、Base URL）与 Key。添加时会自动探测这个新 Key（可用模型列表 + 各路由可用性）并据此建立可服务模型；以后每加一个 Key 只探测该新 Key（不同 Key 可见模型可能不同），也可随时手动刷新探测。
+2. **模型路由**：管理模型别名、隐藏别名、路由模式、绑定/解绑 Key（绑定 Key 时可指定上游模型名）。
 3. **统一模型**：把 `unified-model` 指向一个真实模型，必要时固定到某个 Key。
-4. **任务路由**（WebUI）：为 `TASK_XXXXXX` 指定模型与固定采样参数。
-5. **一键配置 → 路由服务**：启动或注册本地代理服务。
-6. **一键配置 → Claude Code / Codex / Pi Agent**：按需自动写入客户端配置。
+4. **任务路由**：为 `TASK_XXXXXX` 指定模型与固定采样参数。
+5. **集成**：按需把配置写入 Claude Code / Codex / Pi Agent，并可回退。
+6. **设置**：请求超时与两条流式超时、本地鉴权 Key、服务启动/停止/系统服务注册、配置导入导出、WebUI 开关、版本检查。
+7. **概览 / 实时活动**：请求量、成功率、Token、RPM/TPM、延迟趋势与日志流。
 
 ### 3. 调用本地代理
 
@@ -201,7 +143,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
   }'
 ```
 
-也可以把 `model` 写成真实模型 ID、模型 alias，或 `模型ID[key name]` 来显式指定某个 Key。
+鉴权凭据可以放在 `Authorization: Bearer <key>` 或 `x-api-key` 头里。也可以把 `model` 写成真实模型 ID、模型 alias，或 `模型ID[key name]` 来显式指定某个 Key。
 
 如果配置了任务路由，还可以直接传任务名：
 
@@ -217,44 +159,66 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 任务名对应的模型、备选模型和采样参数都在 AMKR 侧固定，调用方不需要知道真实模型名。详见 [`docs/USAGE.md`](docs/USAGE.md#9-任务路由)。
 
+除代理路径外，服务还提供 `GET /health`（无需鉴权）、`GET /v1/models`、`GET /metrics`、`GET /metrics/requests`、`GET /metrics/series`、`GET /ws/events`（事件流，WebSocket），以及 `/api/*` 管理接口（供应商、Key、模型、路由、统一模型、任务、探测、配置导入导出、设置）。完整清单见 [`docs/API.md`](docs/API.md)。
+
+## WebUI
+
+WebUI 是 AMKR 的界面：静态资产随二进制发布（`//go:embed`），没有单独的安装步骤，也没有额外依赖。页面对应上文的供应商、模型路由、统一模型、任务路由、集成与设置。
+
+`/ui` 是否挂载由配置字段 `webui_enabled` 决定，用 `--webui` / `--no-webui` 写入配置（也可以直接改配置文件）：
+
+```bash
+amkr --webui        # 启用，并写入配置
+amkr --no-webui     # 关闭，并写入配置
+```
+
+注意：自动生成的新配置里 `webui_enabled` 是 `false`，此时 `/ui` 返回 `404`（`/health` 的 `webui_available` 仍是 `true`，表示资产在二进制里）。所以首次使用要先跑一次 `amkr --webui` 再启动服务。开关在服务启动时决定挂载，对随后启动的进程立即生效，已在运行的进程需要重启才会改变。
+
 ## 常用命令
 
 ```bash
-# 打开 TUI
+# 前台启动服务并打开 WebUI（已在运行时只打开 WebUI 并退出 0）
 amkr
-
-# 使用指定配置文件打开 TUI
-amkr --config router-config.json
+amkr --no-open                                 # 不自动打开浏览器
+amkr --config router-config.json               # 使用指定配置文件
 
 # 后台启动 / 查看状态 / 停止
-auto-model-key-router --config router-config.json --serve
-auto-model-key-router --config router-config.json --status
-auto-model-key-router --config router-config.json --stop
+amkr --serve
+amkr --status
+amkr --stop
 
-# 注册、管理系统服务
-auto-model-key-router --config router-config.json --install-service
-auto-model-key-router --config router-config.json --service status
-auto-model-key-router --config router-config.json --service restart
+# 查询监听地址
+amkr --show-address
 
-# 查询 AMKR 监听 IP 和端口
-auto-model-key-router --config router-config.json --show-address
+# 获取本地授权 Key（别名：--get-key、--get-api-key）
+amkr --show-api-key
 
-# 获取当前 AMKR 的本地授权 Key（也可使用 --show-api-key）
-auto-model-key-router --config router-config.json --get-key
+# 查看配置摘要
+amkr --show-config
 
-# 查看配置摘要、日志与统计
-auto-model-key-router --config router-config.json --show-config
-auto-model-key-router --config router-config.json --show-logs 50
-
-# 启用 / 关闭内置 WebUI（访问 http://127.0.0.1:8000/ui/）
-auto-model-key-router --config router-config.json --webui
-auto-model-key-router --config router-config.json --no-webui
+# 注册、管理系统服务（Windows 计划任务 / systemd user unit）
+amkr --install-service                         # 等价于 --service install
+amkr --service install-user
+amkr --service status
+amkr --service restart
 
 # 管理 unified-model
-auto-model-key-router --config router-config.json --show-unified-model
-auto-model-key-router --config router-config.json --switch-model gpt-4o-mini
-auto-model-key-router --config router-config.json --switch-key auto
+amkr --show-unified-model
+amkr --switch-model gpt-4o-mini
+amkr --switch-key auto                         # 传 auto 恢复自动路由
+amkr --unified-target default.primary
+
+# 覆盖监听地址与端口（只对本次运行生效，不写回配置）
+amkr --host 0.0.0.0 --port 8000
+
+# 检查新版本（只查 GitHub Releases）
+amkr --check-update
+
+# 版本号
+amkr --version
 ```
+
+`--service` 的取值为 `install`、`install-user`、`uninstall`、`start`、`stop`、`restart`、`status`，以及对应的 `*-elevated` 变体（只在 Windows 上有意义，用于 UAC 提权）。`amkr --help` 会打印用法摘要；从源码构建、没有把二进制放进 PATH 时，把上面的 `amkr` 换成 `./amkr`。
 
 ## 配置示例
 
@@ -343,30 +307,28 @@ auto-model-key-router --config router-config.json --switch-key auto
 }
 ```
 
-> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model, fallback_model?, params?}`；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`reasoning_effort`，写错键名会在保存时报错。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 TUI「供应商 → 刷新能力探测」（全部 Key 或指定 Key、可限端点范围）或管理 API 的 probe 接口手动刷新。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
+> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model, fallback_model?, params?}`；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`reasoning_effort`，写错键名会在保存时报错。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 WebUI 的供应商页刷新探测（单个 Key 或批量、可限端点范围），或调用管理 API 的 probe 接口。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
 
-流式请求使用分段超时：`stream_first_byte_timeout`（默认 60 秒）覆盖等待上游响应头和第一块响应体的总时间，`stream_idle_timeout`（默认 60 秒）限制首块之后相邻响应块的等待时间，两者都必须大于 0。响应头返回前超时会按现有重试策略切换 Key；下游流建立后超时只结束当前流，不会自动重放请求。可在 TUI 的 **CLI 设置 → 超时配置** 中统一调整普通请求和两个流式超时。
-
-## 文档
-
-- [完整使用教程](docs/USAGE.md)：从安装、配置、启动、请求到 Claude Code / Codex 接入的完整流程。
-- [CLI 参考](docs/CLI.md)：所有命令行参数与示例。
-- [HTTP API 参考](docs/API.md)：代理、健康检查、统计和管理接口。
-- [更新日志](CHANGELOG.md)：版本变更记录。
-- [配置示例](router-config.example.json)：可复制修改的完整 JSON 示例。
+流式请求使用分段超时：`stream_first_byte_timeout`（默认 60 秒）覆盖等待上游响应头和第一块响应体的总时间，`stream_idle_timeout`（默认 60 秒）限制首块之后相邻响应块的等待时间，两者都必须大于 0。响应头返回前超时会按现有重试策略切换 Key；下游流建立后超时只结束当前流，不会自动重放请求。普通请求超时与这两个流式超时都可以在 WebUI 的**设置**页统一调整。
 
 ## 访客 Key 简介
 
-可以用固定 Key `amkr-visitor` 暴露受限公共模型（该功能现为常驻）。只有设置了 `allow_visitor: true` 的上游 Key 才能被访客使用，访客看到的模型名格式为 `amkr-{真实模型ID}`。
+可以用固定 Key `amkr-visitor` 暴露受限公共模型（该功能现为常驻）。只有设置了 `allow_visitor: true` 的上游 Key 才能被访客使用，访客看到的模型名格式为 `amkr-{真实模型ID}`；访客不能用 `unified-model`，也拿不到 `/metrics` 与管理接口。
 
 详细限制和示例见 [完整使用教程：使用访客 Key](docs/USAGE.md#14-使用访客-key)。
 
+## 数据与配置
+
+- **配置**：`config_version` 4 的 JSON 直接可用，升级不需要迁移；默认配置在首次启动时自动生成，路径按「`--config` > `$AMKR_CONFIG` > 系统缓存目录」解析。默认位置还没有配置时，工作目录下遗留的 `router-config.json` 会被复制到默认位置沿用。
+- **指标库**：SQLite（纯 Go 驱动，无 cgo），建表语句、7 个索引与 `user_version` 都与 Python 版逐字节一致，已有的 `metrics.sqlite3` 可以直接沿用，不需要重建或导出导入。
+- **日志与探测缓存**：默认落在系统缓存目录（Windows 是 `%LOCALAPPDATA%\AutoModelKeyRouter`，macOS 是 `~/Library/Caches/AutoModelKeyRouter`，其余是 `$XDG_CACHE_HOME/auto-model-key-router` 或 `~/.cache/auto-model-key-router`），可在配置里分别用 `log_file_path`、`endpoint_capabilities_path`、`metrics_db_path` 覆盖。
+
 ## 开发
 
-需要 Go 1.24+（前端资产用 `//go:embed` 编进二进制，无需 node/python 即可构建）。
+需要 Go 1.24+（前端资产用 `//go:embed` 编进二进制，无需 node 即可构建）。
 
 ```bash
-git clone https://github.com/sparr68/auto-model-key-router.git
+git clone https://github.com/Sparrived/auto-model-key-router.git
 cd auto-model-key-router
 go build ./cmd/amkr     # 产出 amkr（Windows 上是 amkr.exe）
 go test ./...           # 全部包
@@ -381,12 +343,23 @@ node webui/probes/webui_tip_probe.mjs
 node webui/probes/webui_auth_probe.mjs   # 鉴权与任务路由页；不带参数=跑全部场景
 ```
 
+## 文档
+
+- [完整使用教程](docs/USAGE.md)：安装、配置、启动、请求与 Claude Code / Codex 接入。
+- [CLI 参考](docs/CLI.md)：命令行参数与示例。
+- [HTTP API 参考](docs/API.md)：代理、健康检查、统计和管理接口。
+- [更新日志](CHANGELOG.md)：版本变更记录。
+- [配置示例](router-config.example.json)：可复制修改的完整 JSON 示例。
+
+> `docs/` 下的三份文档仍保留 Python 时代的描述（终端交互界面、已移除的参数、包管理器安装方式），与当前二进制不符的部分以本 README 和 `amkr --help` 为准。
+
 ## 安全提示
 
 - 不要把真实上游 API Key 提交到 Git。
 - `local_api_key` 为空会关闭本地鉴权；仅建议在可信本机环境使用。
-- `amkr --get-key` / `--show-api-key` 会直接输出本地授权 Key，请勿在共享终端、日志或 CI 输出中执行。
+- `amkr --show-api-key`（别名 `--get-key` / `--get-api-key`）会直接输出本地授权 Key，请勿在共享终端、日志或 CI 输出中执行。
 - 如果监听 `0.0.0.0` 或暴露到局域网/公网，请务必启用本地鉴权并配置防火墙。
+- 部署到容器或反向代理后面时用 `--no-ops` 关闭运维接口，避免把宿主机的服务控制与客户端配置改写能力暴露出去。
 
 ## License
 
