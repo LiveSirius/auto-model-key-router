@@ -78,8 +78,10 @@ type KeyPool struct {
 	unifiedDefault    *config.RoutePlan
 	unifiedImage      *config.RoutePlan
 	unifiedEmbeddings *config.RoutePlan
-	taskPlans         map[string]config.RoutePlan
-	taskParams        map[string]*canonical.Value
+	// taskPlans / taskParams 的键是 (工作空间, 任务名)：任务名只在工作空间内唯一，
+	// 用单个字符串当键会让两个空间里的同名任务互相覆盖。
+	taskPlans  map[[2]string]config.RoutePlan
+	taskParams map[[2]string]*canonical.Value
 
 	cursors        map[string]int
 	activeRequests map[[2]string]int
@@ -156,11 +158,16 @@ func (p *KeyPool) applyConfig(cfg *config.RouterConfig) {
 		return u.Embeddings
 	})
 
-	p.taskPlans = map[string]config.RoutePlan{}
-	p.taskParams = map[string]*canonical.Value{}
+	p.taskPlans = map[[2]string]config.RoutePlan{}
+	p.taskParams = map[[2]string]*canonical.Value{}
 	for _, task := range cfg.Tasks {
-		p.taskPlans[task.Name] = p.canonicalizePlan(task.Plan())
-		p.taskParams[task.Name] = task.Params
+		workspace := task.Workspace
+		if workspace == "" {
+			workspace = config.DefaultWorkspace
+		}
+		key := [2]string{workspace, task.Name}
+		p.taskPlans[key] = p.canonicalizePlan(task.Plan())
+		p.taskParams[key] = task.Params
 	}
 }
 
@@ -326,6 +333,14 @@ func (p *KeyPool) ResolveVisitorModelID(publicModelID string) (string, bool) {
 // 下游四处使用（proxy_handler.py:111/232/391/424）全部是真值判断，两者行为
 // 完全相同，因此这里不做区分；对拍测试对 key 位置做 null≡"" 归一后比较。
 func (p *KeyPool) ResolveRoute(modelID string, keyName *string, path string) (string, string, error) {
+	return p.ResolveRouteIn(config.DefaultWorkspace, modelID, keyName, path)
+}
+
+// ResolveRouteIn 是 ResolveRoute 的工作空间版本。
+//
+// 任务查表只在指定工作空间内进行：workspace 里没有这个任务名时按普通模型继续解析，
+// 而不是去别的空间里找——否则「隔离」就名存实亡。
+func (p *KeyPool) ResolveRouteIn(workspace, modelID string, keyName *string, path string) (string, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if modelID == config.UNIFIED_MODEL_ID {
@@ -335,7 +350,7 @@ func (p *KeyPool) ResolveRoute(modelID string, keyName *string, path string) (st
 		}
 		return plan.Primary.Model, plan.Primary.Key, nil
 	}
-	if plan, found := p.taskPlans[modelID]; found {
+	if plan, found := p.taskPlans[taskKey(workspace, modelID)]; found {
 		// 任务固定模型，不接受调用方指定的 Key。
 		return plan.Primary.Model, plan.Primary.Key, nil
 	}
@@ -345,19 +360,37 @@ func (p *KeyPool) ResolveRoute(modelID string, keyName *string, path string) (st
 	return p.resolveModelID(modelID), *keyName, nil
 }
 
-// TaskPlan 返回任务名的路由计划。
+// taskKey 归一化任务查表键：空工作空间视作默认工作空间。
+func taskKey(workspace, taskName string) [2]string {
+	if workspace == "" {
+		workspace = config.DefaultWorkspace
+	}
+	return [2]string{workspace, taskName}
+}
+
+// TaskPlan 返回默认工作空间里任务名的路由计划。
 func (p *KeyPool) TaskPlan(taskName string) (config.RoutePlan, bool) {
+	return p.TaskPlanIn(config.DefaultWorkspace, taskName)
+}
+
+// TaskPlanIn 返回指定工作空间里任务名的路由计划。
+func (p *KeyPool) TaskPlanIn(workspace, taskName string) (config.RoutePlan, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	plan, found := p.taskPlans[taskName]
+	plan, found := p.taskPlans[taskKey(workspace, taskName)]
 	return plan, found
 }
 
-// TaskParams 返回任务的固定参数（副本）。
+// TaskParams 返回默认工作空间里任务的固定参数（副本）。
 func (p *KeyPool) TaskParams(taskName string) *canonical.Value {
+	return p.TaskParamsIn(config.DefaultWorkspace, taskName)
+}
+
+// TaskParamsIn 返回指定工作空间里任务的固定参数（副本）。
+func (p *KeyPool) TaskParamsIn(workspace, taskName string) *canonical.Value {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	params, found := p.taskParams[taskName]
+	params, found := p.taskParams[taskKey(workspace, taskName)]
 	if !found || params == nil {
 		return canonical.NewObject()
 	}
