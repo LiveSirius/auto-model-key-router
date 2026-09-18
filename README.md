@@ -371,10 +371,11 @@ node webui/probes/webui_auth_probe.mjs   # 鉴权与任务路由页；不带参�
 - [完整使用教程](docs/USAGE.md)：安装、配置、启动、请求与 Claude Code / Codex 接入。
 - [CLI 参考](docs/CLI.md)：命令行参数与示例。
 - [HTTP API 参考](docs/API.md)：代理、健康检查、统计和管理接口。
+- [工作空间设计说明](docs/WORKSPACE.md)：任务集合隔离的取舍、边界与兼容性契约。
 - [更新日志](CHANGELOG.md)：版本变更记录。
 - [配置示例](router-config.example.json)：可复制修改的完整 JSON 示例。
 
-> `docs/` 下的三份文档仍保留 Python 时代的描述（终端交互界面、已移除的参数、包管理器安装方式），与当前二进制不符的部分以本 README 和 `amkr --help` 为准。
+> `docs/` 下的 `USAGE.md` / `CLI.md` / `API.md` 仍保留 Python 时代的描述（终端交互界面、已移除的参数、包管理器安装方式），与当前二进制不符的部分以本 README 和 `amkr --help` 为准；`WORKSPACE.md` 是 Go 版新增能力的文档，不涉及 Python 历史。
 
 ## 安全提示
 

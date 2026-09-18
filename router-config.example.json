@@ -100,5 +100,18 @@
         "reasoning_effort": "high"
       }
     }
+  },
+  "workspaces": {
+    "teamA": {
+      "tasks": {
+        "TASK_000001": {
+          "model": "gpt-4o-mini",
+          "fallback_model": null,
+          "params": {
+            "temperature": 0.7
+          }
+        }
+      }
+    }
   }
 }
