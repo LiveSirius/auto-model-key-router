@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -75,13 +76,14 @@ func newPlaceholders(t *testing.T, sections map[string]json.RawMessage) *corpusP
 
 	placeholders := &corpusPlaceholders{
 		goValues: map[string]string{
-			"$HOME":    home,
-			"$CWD":     cwd,
-			"$CONFIG":  configPath,
-			"$EXE":     python,
-			"$LOG":     logs,
-			"$BIN":     bin,
-			"$ARCHIVE": filepath.Join(filepath.Dir(logs), "server.20260102-030405.log"),
+			"$HOME":      home,
+			"$CWD":       cwd,
+			"$CONFIG":    configPath,
+			"$EXE":       python,
+			"$LOG":       logs,
+			"$BIN":       bin,
+			"$INSTALLED": filepath.Join(root, "bin", "installed-amkr"),
+			"$ARCHIVE":   filepath.Join(filepath.Dir(logs), "server.20260102-030405.log"),
 		},
 		pythonValues: pythonValues,
 	}
@@ -601,7 +603,17 @@ func TestCorpusShlexJoin(t *testing.T) {
 			args[position] = placeholders.denormalize(arg)
 		}
 		got := placeholders.restore(ShlexJoin(args))
-		if want := fieldString(t, entry, "expected"); got != want {
+		want := fieldString(t, entry, "expected")
+		// 用例 0 的入参是占位符还原出的**真实本机路径**：Windows 路径含 "\"，
+		// 属于 shlex 的不安全字符因此必须加引号；POSIX 路径不含不安全字符，因此
+		// 不加引号。这是同一套引号规则在两种平台输入下的必然结果（不是行为差异），
+		// 所以期望值按平台拆分，而不是把任一平台的写法当契约。
+		if runtime.GOOS == "windows" {
+			if windowsWant, present := optionalString(entry, "expected_windows"); present {
+				want = windowsWant
+			}
+		}
+		if got != want {
 			t.Errorf("用例 %d: ShlexJoin = %q，期望 %q", index, got, want)
 		}
 	}

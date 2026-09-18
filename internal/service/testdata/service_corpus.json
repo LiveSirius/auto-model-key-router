@@ -7,6 +7,7 @@
     "$EXE": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\python\\python.exe",
     "$LOG": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\logs\\server.log",
     "$BIN": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\amkr",
+    "$INSTALLED": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr",
     "$ARCHIVE": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\logs\\server.20260102-030405.log"
   },
   "pid_file_path": [
@@ -296,7 +297,8 @@
         "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\router-config.json",
         "--serve-foreground"
       ],
-      "expected": "'$BIN' --config '$CONFIG' --serve-foreground"
+      "expected": "$BIN --config $CONFIG --serve-foreground",
+      "expected_windows": "'$BIN' --config '$CONFIG' --serve-foreground"
     },
     {
       "args": [
@@ -1437,7 +1439,7 @@
   ],
   "console_script": [
     {
-      "argv0": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr",
+      "argv0": "$INSTALLED",
       "which": {},
       "expected": null
     },
@@ -1458,9 +1460,9 @@
     {
       "argv0": "main.py",
       "which": {
-        "auto-model-key-router": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr"
+        "auto-model-key-router": "$INSTALLED"
       },
-      "expected": "C:\\Users\\Sparr\\AppData\\Local\\Temp\\amkr_service_corpus\\bin\\installed-amkr"
+      "expected": "$INSTALLED"
     },
     {
       "argv0": "main.py",
