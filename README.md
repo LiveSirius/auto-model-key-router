@@ -10,59 +10,57 @@
 - **任务路由**：把任务名（`TASK_XXXXXX`）直接当模型名传，由路由器决定用哪个模型（首选 + 备选）和哪组采样参数；调用方改不了这些参数。
 - **每个 Key 独立探测**：模型清单按 Key 缓存（同一供应商不同 Key 可见模型可能不同），添加 Key 时自动探测该 Key，可在 TUI 或管理 API 手动刷新。
 - **OpenAI-compatible 代理**：支持 `/v1/chat/completions`、`/v1/models`，并兼容 Claude Code 的 `/v1/messages` 与 Codex 的 `/v1/responses`；可为不同协议模式配置上游额外路径。
-- **Terminal UI 管理**：在 TUI 中配置供应商与 Key、模型、统一模型、服务注册和客户端接入。
-- **访客 Key**：安装 `visitor` extra 后，可用固定访客 Key 暴露受限公共模型。
+- **WebUI 管理**：浏览器里配置供应商与 Key、模型、统一模型、服务注册和客户端接入；`amkr` 的交互式终端界面已随 Python 版一并退役。
+- **访客 Key**：用固定访客 Key `amkr-visitor` 暴露受限公共模型（该功能现为常驻，不再需要额外安装步骤）。
 - **统计与日志**：记录本地/访客调用、模型、Key、状态码、token、重试、延迟等指标。
 
 ## 安装
 
-需要 Python `>=3.12`。
+AMKR 是单个 Go 二进制：配置、WebUI 静态资产（`//go:embed`）与 SQLite 驱动的指标库都编在里面，
+运行时不需要 Python、node 或额外的运行时依赖。
 
-使用 pipx：
+### 从源码构建
 
-```bash
-pipx install auto-model-key-router
-pipx ensurepath
-```
-
-或使用 uv：
+需要 Go 1.24+。
 
 ```bash
-uv tool install auto-model-key-router
-uv tool update-shell
+git clone https://github.com/sparr68/auto-model-key-router.git
+cd auto-model-key-router
+go build ./cmd/amkr          # 产出 amkr（Windows 上是 amkr.exe）
+./amkr --version
 ```
 
-`pipx ensurepath` 和 `uv tool update-shell` 会把命令所在目录加入 PATH。执行后请关闭并重新打开终端（IDE、VS Code、Windows Terminal 也要重新启动），再验证：
+### Docker
 
 ```bash
-amkr --version
-# 备用命令
-auto-model-key-router --version
+docker build -t amkr .
+docker run -d --name amkr -p 8000:8000 -v amkr-data:/data amkr
 ```
 
-Windows PowerShell 如果仍然提示“无法将 amkr 识别为命令”，先用下面的命令确认实际安装目录：
+镜像里配置、指标库与日志都落在 `/data`（`XDG_CACHE_HOME`），挂一个卷即可整体持久化。
+容器内以 `--host 0.0.0.0` 启动 —— 配置默认监听 `127.0.0.1`，不改的话端口映射进不来。
 
-```powershell
-uv tool dir --bin
-pipx environment --value PIPX_BIN_DIR
-```
-
-然后把输出目录加入当前用户的 PATH，并重新打开终端。也可以直接使用 PATH 无关的临时方式验证安装是否成功：
-
-```powershell
-uvx --from auto-model-key-router amkr --version
-```
-
-如果 `uvx` 能运行而 `amkr` 不能运行，说明安装和 console script 没问题，缺的是 PATH。安装状态可分别用 `pipx list` 或 `uv tool list` 查看。
-
-启用访客 Key 功能：
+### 首次运行
 
 ```bash
-pipx install "auto-model-key-router[visitor]"
-# 或
-uv tool install "auto-model-key-router[visitor]"
+./amkr --show-config      # 看一眼当前配置摘要与配置文件路径
+./amkr --serve-foreground # 前台启动（不带参数时也是这个行为）
 ```
 
+启动后打开 `http://127.0.0.1:<port>/ui` 使用 WebUI 配置供应商、Key 与模型。
+
+### 常用命令
+
+```bash
+./amkr --show-address          # 查询监听地址与服务地址
+./amkr --show-api-key          # 获取本地授权 Key
+./amkr --status                # 查看后台服务状态
+./amkr --service install-user  # 注册为用户级服务（Windows 计划任务 / systemd user unit）
+./amkr --stop                  # 停止后台服务
+./amkr --check-update          # 检查是否有新版本
+```
+
+`./amkr --help` 可看到全部参数。
 ### 可选 WebUI
 
 AMKR 自带一套可选的浏览器管理界面。**资产随软件包一起安装，没有单独的安装步骤，也没有额外依赖**，只由开关决定是否启用：
@@ -327,17 +325,28 @@ auto-model-key-router --config router-config.json --switch-key auto
 
 ## 访客 Key 简介
 
-安装 `auto-model-key-router[visitor]` 后，可以用固定 Key `amkr-visitor` 暴露受限公共模型。只有设置了 `allow_visitor: true` 的上游 Key 才能被访客使用，访客看到的模型名格式为 `amkr-{真实模型ID}`。
+可以用固定 Key `amkr-visitor` 暴露受限公共模型（该功能现为常驻）。只有设置了 `allow_visitor: true` 的上游 Key 才能被访客使用，访客看到的模型名格式为 `amkr-{真实模型ID}`。
 
 详细限制和示例见 [完整使用教程：使用访客 Key](docs/USAGE.md#14-使用访客-key)。
 
 ## 开发
 
+需要 Go 1.24+（前端资产用 `//go:embed` 编进二进制，无需 node/python 即可构建）。
+
 ```bash
 git clone https://github.com/sparr68/auto-model-key-router.git
 cd auto-model-key-router
-pip install -e ".[test]"
-pytest
+go build ./cmd/amkr     # 产出 amkr（Windows 上是 amkr.exe）
+go test ./...           # 全部包
+```
+
+前端资产的检查（可选，只在改动 `webui/` 时需要）：
+
+```bash
+node scripts/webui_module_check.mjs      # 16 个 ES 模块的加载检查
+node webui/probes/webui_chart_probe.mjs  # 图表口径
+node webui/probes/webui_tip_probe.mjs
+node webui/probes/webui_auth_probe.mjs
 ```
 
 ## 安全提示
