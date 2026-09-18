@@ -164,7 +164,7 @@ function draw(firstPaint = false) {
   children.push(h("div.grid-12", {},
     h("div.col-7", {}, modelCostCard(metrics, index)),
     h("div.col-5", {}, compositionCard(metrics, index)),
-    h("div.col-6", {}, providerCostCard(metrics, index)),
+    h("div.col-6", {}, providerCostCard(index)),
     h("div.col-6", {}, recentCostCard(index)),
     // 明细表放在最后：它不提供结论，而是让人**核对**结论——匹配错了模型价格，
     // 上面所有金额都会错，这张表是唯一能一眼看出"匹配到了哪条价"的地方。
@@ -343,17 +343,44 @@ function compositionCard(metrics, index) {
   );
 }
 
-// providerCostCard 按供应商汇总成本（归因缺失的历史数据会落到"未归因"）。
-function providerCostCard(metrics, index) {
-  const rows = costRank(metrics.providers, index);
+// providerCostCard 按供应商汇总成本。
+//
+// **必须用逐条明细来算，不能用快照的 providers。** 快照的 providers 是按 provider_id
+// 单独聚合的，里面只有请求数/token，没有"这个供应商用了哪些上游模型"，因此无法与价格
+// 表相联——实测把 provider_id 当模型名去查价格，openai / anthropic / deepseek 等
+// **全部匹配不到**，那样这张卡会永远是空的。
+//
+// 逐条明细同时带 provider_id 与 upstream_model_id，可以直接做这个关联。代价是它只覆盖
+// 最近 200 条，所以标题与脚注都明确写出这个范围，避免被当成窗口全量。
+function providerCostCard(index) {
+  const items = state.requests || [];
+  const byProvider = new Map();
+  let priced = 0;
+  for (const item of items) {
+    const cost = requestCost(index, item);
+    if (cost === null) continue;
+    priced += 1;
+    const name = item.provider_id || "未归因";
+    byProvider.set(name, (byProvider.get(name) || 0) + cost);
+  }
+  const rows = [...byProvider.entries()]
+    .map(([name, value]) => ({ name, value }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+
   return card(
-    cardHead("供应商成本", badge(`${rows.length} 项`, "muted")),
+    cardHead("供应商成本",
+      badge(state.requests ? `最近 ${items.length} 条` : "0 条", "muted"),
+      rows.length ? null : badge("无数据", "muted")),
     rows.length
-      ? barList(rows, { tone: "secondary", format: (row) => formatCost(row.cost) })
-      : empty("没有可归因到供应商的成本数据。", {
+      ? barList(rows, { tone: "secondary", format: (row) => formatCost(row.value) })
+      : empty("最近请求里没有可归因到供应商的成本。", {
           icon: "providers",
-          hint: "供应商成本 = 该供应商下各上游模型的单价 × 用量；需要 upstream 归因。",
+          hint: "供应商成本按逐条明细的 provider_id × 该条 upstream_model 单价累加；需要 upstream 归因。",
         }),
+    rows.length
+      ? h("div.card-foot", {}, `按最近 ${items.length} 条明细中 ${priced} 条可计价的请求累加，不是窗口全量。`)
+      : null,
   );
 }
 

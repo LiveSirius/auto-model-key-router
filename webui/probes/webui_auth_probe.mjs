@@ -112,6 +112,8 @@ const server = {
   pricingStatus: 200,
   upstreamModels: {},
   providers: {},
+  // 逐条明细（成本页的"最近请求成本"与"供应商成本"用）。
+  requestItems: [],
 };
 
 function respond(status, payload) {
@@ -158,6 +160,19 @@ global.fetch = async (url, options = {}) => {
       return respond(200, {
         bucket_seconds: 15,
         points: [{ started_at: "2026-01-01T10:00:00+08:00", ended_at: "2026-01-01T10:00:15+08:00", complete: true, requests: 3, successes: 3, failures: 0, retries: 0, prompt_tokens: 30, completion_tokens: 10, total_tokens: 40, cached_tokens: 0, total_duration_ms: 300, total_first_token_ms: 100 }],
+      });
+    }
+    // 逐条明细：成本页的"最近请求成本"与"供应商成本"两张卡都靠它，
+    // 且它们是**唯一**能同时看到 provider_id 与 upstream_model_id 的地方。
+    if (path.startsWith("/metrics/requests")) {
+      return respond(200, {
+        count_semantics: "attempts",
+        rate_window_seconds: 60,
+        current_rpm: 3,
+        current_tpm: 40,
+        summary: { requests: server.requestItems.length },
+        total_items: server.requestItems.length,
+        items: server.requestItems,
       });
     }
     return respond(200, {
@@ -295,6 +310,10 @@ const setup = {
     server.upstreamModels = {
       "gpt-4o": { requests: 2, successes: 2, failures: 0, retries: 0, prompt_tokens: 1000000, completion_tokens: 0, total_tokens: 1000000, cached_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     };
+    server.requestItems = [
+      { id: 2, created_at: "2026-01-01T09:59:00+08:00", caller_type: "local", model_id: "route-a", upstream_model_id: "gpt-4o", provider_id: "openai", key_name: "k1", status_code: 200, success: true, retried: false, prompt_tokens: 500000, completion_tokens: 0, total_tokens: 500000, cached_tokens: 0 },
+      { id: 1, created_at: "2026-01-01T09:58:00+08:00", caller_type: "local", model_id: "route-a", upstream_model_id: "gpt-4o", provider_id: "openai", key_name: "k1", status_code: 200, success: true, retried: false, prompt_tokens: 500000, completion_tokens: 0, total_tokens: 500000, cached_tokens: 0 },
+    ];
   },
   // 成本页（目录可用，但该上游模型**不在**目录里）：这是"无定价"最真实的样子——
   // 目录是好的，只是没这个模型的价。此处必须显示 "—"，且绝不能退化成 $0。
@@ -542,6 +561,11 @@ if (scenario === "stale_key_prompts_login") {
   checks.showsPriceDetail = body.includes("$2.5");
   // 中文标题确认渲染的是成本页而不是别的页。
   checks.isCostPage = body.includes("成本") && body.includes("models.dev");
+  // 供应商成本必须真的画出来：它只能靠逐条明细关联 provider_id 与 upstream_model_id
+  // （快照的 providers 里没有上游模型信息，拿 provider_id 查价格实测全部匹配不到）。
+  checks.showsProviderCost = body.includes("openai");
+  // 逐条成本卡必须显示"2/2 条有定价"。
+  checks.showsRequestPricing = body.includes("2/2 条有定价");
   // 目录已就绪时不应出现"无定价"降级提示。
   checks.noUnavailableNotice = !body.includes("价格目录尚不可用");
   checks.requestedPricing = server.requests.some((r) => r.url === "/ui/pricing.json");
