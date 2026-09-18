@@ -114,6 +114,12 @@ const server = {
   providers: {},
   // 逐条明细（成本页的"最近请求成本"与"供应商成本"用）。
   requestItems: [],
+  // 请求明细里 window.from 的值：用量统计页的「全部历史」靠它推导跨度。
+  // null 表示库是空的（此时页面应退回最短窗口而不是报错）。
+  historyFrom: null,
+  // 服务日志页的文本。
+  logs: "",
+  logsError: null,
 };
 
 function respond(status, payload) {
@@ -170,6 +176,7 @@ global.fetch = async (url, options = {}) => {
         rate_window_seconds: 60,
         current_rpm: 3,
         current_tpm: 40,
+        window: { from: server.historyFrom, to: "2026-01-01T10:00:00+08:00", hours: 1 },
         summary: { requests: server.requestItems.length },
         total_items: server.requestItems.length,
         items: server.requestItems,
@@ -189,6 +196,17 @@ global.fetch = async (url, options = {}) => {
       providers: server.providers,
       upstream_models: server.upstreamModels,
       unattributed: {},
+    });
+  }
+
+  // 读取失败也是 200，错误文本放在 error 字段里（见 internal/api/handlers_ops.go）——
+  // 前端因此必须看 error 字段而不是 HTTP 状态码。
+  if (path.startsWith("/api/logs")) {
+    return respond(200, {
+      text: server.logsError ? "" : server.logs,
+      truncated: false,
+      path: "/tmp/amkr.log",
+      error: server.logsError,
     });
   }
 
@@ -351,6 +369,51 @@ const setup = {
   overview_reentry_paints_immediately: () => {
     global.location.hash = "#/overview";
     storage.set("amkr.apiKey", "good-key");
+  },
+  // 概览页必须真的带出请求流：它从「实时活动」移了过来，若只改了导航没搬卡片，
+  // 这一页会安静地少掉"刚刚发生了什么"这块内容。同时确认成本列**不会**谎报 $0。
+  overview_shows_request_stream: () => {
+    global.location.hash = "#/overview";
+    storage.set("amkr.apiKey", "good-key");
+    server.pricing = {
+      version: 1, source: "https://models.dev/api.json",
+      updated_at: "2026-01-02T03:04:05Z", error: null,
+      models: { "gpt-4o": { input: 2.5, output: 10, cache_read: 1.25 } },
+    };
+    server.requestItems = [
+      { id: 3, created_at: "2026-01-01T09:59:00+08:00", caller_type: "local", model_id: "route-a", upstream_model_id: "gpt-4o", provider_id: "openai", key_name: "k1", status_code: 200, success: true, retried: false, prompt_tokens: 100, completion_tokens: 20, total_tokens: 120, cached_tokens: 0, duration_ms: 800 },
+      { id: 2, created_at: "2026-01-01T09:58:30+08:00", caller_type: "visitor", model_id: "route-b", upstream_model_id: "no-price-model", provider_id: "openai", key_name: "k2", status_code: 502, success: false, retried: true, prompt_tokens: 50, completion_tokens: 0, total_tokens: 50, cached_tokens: 0, duration_ms: 1200 },
+    ];
+  },
+  // 用量统计页（原「实时活动」）：长窗口必须能画出来，且窗口切换项包含历史档。
+  usage_page_renders_history_ranges: () => {
+    global.location.hash = "#/activity";
+    storage.set("amkr.apiKey", "good-key");
+  },
+  // 「全部历史」的跨度由 /metrics/requests 的 window.from 推导：服务端给出的一年多
+  // 以前的记录，应当被夹到后端上限（8760 小时）并如实说明"只覆盖到上限"。
+  usage_all_history_clamps_span: () => {
+    global.location.hash = "#/activity";
+    storage.set("amkr.apiKey", "good-key");
+    server.historyFrom = "2020-01-01T00:00:00+08:00";
+  },
+  // 服务日志页：级别过滤、关键字搜索与自动跟随都必须真的作用在文本上。
+  logs_page_filters_by_level: () => {
+    global.location.hash = "#/logs";
+    storage.set("amkr.apiKey", "good-key");
+    server.logs = [
+      "2026-01-01 10:00:00 INFO  service started",
+      "2026-01-01 10:00:01 DEBUG cache warm",
+      "2026-01-01 10:00:02 WARN  upstream slow",
+      "2026-01-01 10:00:03 ERROR upstream 502",
+    ].join("\n");
+  },
+  // 日志读取失败时，服务端仍是 200、错误在 error 字段里：页面必须显示该错误，
+  // 而不是把空文本渲染成"日志为空。"（那就把故障说成了正常）。
+  logs_page_surfaces_read_error: () => {
+    global.location.hash = "#/logs";
+    storage.set("amkr.apiKey", "good-key");
+    server.logsError = "permission denied";
   },
 };
 // 没给场景名时，把自己按场景逐个重跑一遍。两个理由：
@@ -605,9 +668,115 @@ if (scenario === "stale_key_prompts_login") {
   // 刻意**不**排空微任务：切回后必须当场就有内容，而不是等下一次轮询。
   checks.reentryPaintsSynchronously = byClass("stat-grid").length === 1;
   checks.reentryHasHeatmap = byClass("heat-cell").length > 0;
-  // 用 .chart-host（折线 + 堆叠柱各一）而不是数 <svg>：导航图标也是 svg，
+  // 用 .chart-host（折线 + 两处堆叠柱）而不是数 <svg>：导航图标也是 svg，
   // 数 svg 在"页面空白只剩余壳"时照样为真，那种断言等于没测。
-  checks.reentryHasCharts = byClass("chart-host").length === 2;
+  // 三处分别是：流量趋势折线、结果构成堆叠柱、Token 构成随时间堆叠柱。
+  checks.reentryHasCharts = byClass("chart-host").length === 3;
+} else if (scenario === "overview_shows_request_stream") {
+  await settle();
+  const body = text();
+  // 请求流真的画出来了：两条记录都要在（含失败那条）。
+  checks.hasStreamRows = byClass("stream-row").length === 2;
+  // 失败优先于重试着色：同一条记录既失败又重试时，红色比黄色更重要。
+  checks.showsFailureRow = byClass("is-failure").length === 1;
+  checks.noRetryToneOnFailure = byClass("is-retry").length === 0;
+  // 概览同时保留它自己的实时图，不能为了塞进请求流把原有内容挤掉。
+  checks.stillHasHeatmap = byClass("heat-cell").length > 0;
+  checks.hasPulseGrid = byClass("pulse-cell").length === 4;
+  // 成本列：逐格断言，而不是全页搜 "$0"——小额金额本来就渲染成 $0.000250，
+  // 全页搜会把"正确的小额"误判成"把不知道渲染成免费"。
+  const costCells = byClass("stream-cost").map((n) => n.textContent.trim());
+  checks.costCellsFilled = costCells.length === 2 && costCells.every((t) => t.length > 0);
+  // 未匹配到单价的条目显示 "—"，**不能**是 "$0"。
+  checks.unpricedShowsDash = costCells.includes("—");
+  checks.noCostCellIsZero = costCells.every((t) => t !== "$0");
+} else if (scenario === "usage_page_renders_history_ranges") {
+  await settle();
+  const body = text();
+  checks.isUsagePage = body.includes("用量统计");
+  // 历史档必须都在切换项里：1 个月/3 个月/6 个月/1 年/全部。
+  // 分段控件显示短标签（1m/3m/6m/1y/全部），完整中文名在 title 里 —— 两处都要对，
+  // 否则用户看到的是看不懂的缩写、或者悬停提示与按钮对不上。
+  const titles = buttons().map((b) => String(b.attrs.title || ""));
+  checks.hasAllUsageRangeTitles = ["1 个月", "3 个月", "6 个月", "1 年", "全部历史"]
+    .every((label) => titles.includes(label));
+  const shortLabels = buttons().map((b) => b.textContent.trim());
+  checks.hasUsageRangeShortLabels = ["1m", "3m", "6m", "1y", "全部"]
+    .every((label) => shortLabels.includes(label));
+  // 累计用量与按天用量是用量统计的主视图，缺了就等于还是旧的实时页。
+  checks.hasCumulativeCard = body.includes("累计用量");
+  checks.hasDailyCard = body.includes("按天用量");
+  checks.hasHourlyCard = body.includes("日内时段分布");
+  // 性能趋势不能在重做这一页时弄丢（它原本就在活动页上）。
+  checks.hasLatencyCard = body.includes("性能趋势") && byClass("latency-panel").length === 2;
+  // 日志不该再留在这一页（已独立成页）。
+  checks.noLogPanel = byClass("log-panel").length === 0;
+  // 请求流也搬走了（它属于概览）。
+  checks.noStreamRows = byClass("stream-row").length === 0;
+} else if (scenario === "usage_all_history_clamps_span") {
+  // 切到「全部」触发跨度推导：这里直接驱动页面上的分段控件。
+  await settle();
+  const allButton = buttons().find((b) => b.textContent.trim() === "全部");
+  if (allButton) for (const handler of allButton.listeners.click || []) await handler({});
+  await settle();
+  const body = text();
+  // 跨度顶到上限时必须如实说明，否则「全部」会被读成"真的是全部"。
+  checks.warnsTruncated = body.includes("只覆盖最近");
+  // 推导出的小时数必须是上限（8760），而不是从 2020 年算出的五万多小时——
+  // 那样请求会被后端 422 挡掉，页面只剩报错。
+  const seriesCall = server.requests.filter((r) => r.url.startsWith("/metrics/series")).pop();
+  checks.seriesHoursClamped = !!seriesCall && seriesCall.url.includes("hours=8760"),
+    seriesCall && seriesCall.url;
+  // 推导跨度用的必须是 all_history（/metrics/series 没有这个参数）。
+  checks.probedHistorySpan = server.requests.some((r) => r.url.includes("all_history=true"));
+} else if (scenario === "logs_page_filters_by_level") {
+  await settle();
+  const body = text();
+  checks.isLogsPage = body.includes("服务日志");
+  checks.hasLogPanel = byClass("log-panel").length === 1;
+  // 默认"全部"：四行都要在。
+  checks.showsAllLines = ["service started", "cache warm", "upstream slow", "upstream 502"]
+    .every((line) => body.includes(line));
+  checks.countsLines = body.includes("共 4 行");
+  // 切到"仅错误"：只剩 ERROR 那一行。级别判定与着色共用同一份口径，
+  // 否则会出现"标红了却没被筛中"。
+  const errorButton = buttons().find((b) => b.textContent.trim() === "仅错误");
+  if (errorButton) for (const handler of errorButton.listeners.click || []) await handler({});
+  await settle();
+  const filtered = text();
+  checks.errorFilterKeepsError = filtered.includes("upstream 502");
+  checks.errorFilterDropsInfo = !filtered.includes("service started");
+  checks.errorFilterDropsDebug = !filtered.includes("cache warm");
+  checks.errorFilterDropsWarn = !filtered.includes("upstream slow");
+  // 过滤生效后行数提示要跟着变，否则"显示 4 行"和屏幕上的 1 行自相矛盾。
+  checks.footNotesFiltering = filtered.includes("显示 1 / 4 行");
+
+  // 关键字搜索：与级别筛选是两条独立路径，改动时容易只保住其中一条。
+  // 先切回"全部"，再搜 "cache"，应只剩 DEBUG 那一行。
+  const allButton = buttons().find((b) => b.textContent.trim() === "全部");
+  if (allButton) for (const handler of allButton.listeners.click || []) await handler({});
+  await settle();
+  const search = inputs()[0];
+  checks.hasSearchInput = !!search;
+  if (search) {
+    search.value = "cache";
+    for (const handler of search.listeners.input || []) await handler({ target: search });
+    await settle();
+  }
+  const searched = text();
+  checks.searchKeepsMatch = searched.includes("cache warm");
+  checks.searchDropsOthers = !searched.includes("service started") && !searched.includes("upstream 502");
+  checks.searchNotResettingLevel = searched.includes("显示 1 / 4 行");
+  // 搜索时不能整块重绘：那会重建输入框、把焦点和光标位置丢掉。
+  // 判据是输入框节点仍是同一个（重绘会换新节点）。
+  checks.searchKeepsInputNode = inputs()[0] === search;
+} else if (scenario === "logs_page_surfaces_read_error") {
+  await settle();
+  const body = text();
+  // 服务端用 200 + error 字段报告失败，页面必须照实显示，
+  // 而不是把空文本渲染成"日志为空。"（那是把故障说成正常）。
+  checks.showsReadError = body.includes("permission denied");
+  checks.notClaimedEmpty = !body.includes("日志为空。");
 }
 
 const failed = Object.entries(checks).filter(([, ok]) => !ok).map(([name]) => name);

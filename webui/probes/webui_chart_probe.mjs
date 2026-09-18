@@ -27,7 +27,7 @@ const LADDER = [15, 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 7200, 10800, 21
 check("bucket_1h_is_finest", m.pickBucketSeconds(1) === 15, String(m.pickBucketSeconds(1)));
 check("bucket_24h_is_180s", m.pickBucketSeconds(24) === 180, String(m.pickBucketSeconds(24)));
 check("bucket_168h_is_1800s", m.pickBucketSeconds(168) === 1800, String(m.pickBucketSeconds(168)));
-for (const hours of [1, 6, 24, 72, 168, 720]) {
+for (const hours of [1, 6, 24, 72, 168, 720, 2160, 4320, 8760]) {
   const bucket = m.pickBucketSeconds(hours);
   const points = Math.ceil((hours * 3600) / bucket) + 1;
   check(`bucket_points_within_cap_${hours}h`, points <= m.MAX_SERIES_POINTS, `${points} > ${m.MAX_SERIES_POINTS}`);
@@ -43,6 +43,37 @@ for (const hours of [1, 6, 24, 72, 168, 720]) {
     );
   }
 }
+
+// —— 时间范围表：实时窗口与历史窗口分开 ——
+// 实时档（1h-7d）给概览用；历史档（1 个月起）给用量统计用。
+// 「全部」不在表里（它的小时数是运行时从最早记录推导的），但必须能从 rangeSpec 解析。
+check("time_ranges_are_realtime", m.TIME_RANGES.map((r) => r.hours).join(",") === "1,6,24,72,168");
+check("long_ranges_1m_3m_6m_1y", m.LONG_RANGES.map((r) => r.hours).join(",") === "720,2160,4320,8760");
+check("usage_ranges_include_all", m.USAGE_RANGES.at(-1).hours === m.ALL_HISTORY);
+check("usage_ranges_count", m.USAGE_RANGES.length === m.TIME_RANGES.length + m.LONG_RANGES.length + 1);
+check("max_history_covers_1y", m.MAX_HISTORY_HOURS === 8760);
+// 每个历史档都必须能选出满足点数上限的桶，否则切到那一档就会拿到 422。
+for (const range of m.LONG_RANGES) {
+  const spec = m.rangeSpec(range.hours, {});
+  const bucket = m.pickBucketSeconds(spec.hours);
+  check(`long_range_${range.short}_within_cap`,
+    Math.ceil((spec.hours * 3600) / bucket) + 1 <= m.MAX_SERIES_POINTS,
+    `${range.short} 取 ${bucket}s 桶会超上限`);
+}
+// 「全部」的跨度推导：正常取整、超过上限夹紧、没有历史返回 null。
+const now = Date.parse("2026-06-01T00:00:00+08:00");
+check("history_hours_rounds_up", m.historyHours("2026-05-31T22:30:00+08:00", now) === 2,
+  String(m.historyHours("2026-05-31T22:30:00+08:00", now)));
+check("history_hours_clamps_to_cap", m.historyHours("2000-01-01T00:00:00+08:00", now) === m.MAX_HISTORY_HOURS,
+  String(m.historyHours("2000-01-01T00:00:00+08:00", now)));
+check("history_hours_null_when_empty", m.historyHours(null, now) === null);
+check("history_hours_null_when_future", m.historyHours("2026-07-01T00:00:00+08:00", now) === null);
+// 「全部」的徽标必须能说明"只覆盖到上限"，否则会被读成真的是全部。
+const allSpec = m.rangeSpec(m.ALL_HISTORY, { allHours: m.MAX_HISTORY_HOURS });
+check("all_range_is_marked_truncated", allSpec.all === true && allSpec.truncated === true);
+check("all_range_within_cap_not_truncated",
+  m.rangeSpec(m.ALL_HISTORY, { allHours: 100 }).truncated === false);
+check("all_range_falls_back_to_cap", m.rangeSpec(m.ALL_HISTORY, {}).hours === m.MAX_HISTORY_HOURS);
 
 // —— 速率换算：桶宽不是 60 秒时必须折算成每分钟 ——
 const rpm = m.METRIC_MAP.rpm;
@@ -252,6 +283,67 @@ check("heat_level_monotonic", [1, 25, 50, 75, 100].every((v, i, arr) =>
   i === 0 || m.heatmapLevel(v, 100) >= m.heatmapLevel(arr[i - 1], 100)));
 check("heat_level_no_data_is_zero", m.heatmapLevel(5, 0) === 0);
 check("heat_levels_has_zero_and_top", m.HEAT_LEVELS >= 2);
+
+// —— 历史聚合：按天 / 按时段 / 累计 / 前后对比 ——
+// 这些是「用量统计」页的读数来源，算错不会崩，只会让历史结论错。
+const histPoints = [
+  // 同一天两个桶：必须并成一天，且加权量直接相加。
+  { started_at: "2026-01-01T00:00:00+08:00", ended_at: "2026-01-01T00:30:00+08:00", requests: 10, successes: 9, failures: 1, retries: 2, prompt_tokens: 60, completion_tokens: 40, total_tokens: 100, cached_tokens: 20, total_duration_ms: 1000, total_first_token_ms: 100, complete: true },
+  { started_at: "2026-01-01T00:30:00+08:00", ended_at: "2026-01-01T01:00:00+08:00", requests: 30, successes: 30, failures: 0, retries: 0, prompt_tokens: 180, completion_tokens: 120, total_tokens: 300, cached_tokens: 60, total_duration_ms: 6000, total_first_token_ms: 300, complete: true },
+  { started_at: "2026-01-02T14:00:00+08:00", ended_at: "2026-01-02T14:30:00+08:00", requests: 5, successes: 5, failures: 0, retries: 0, prompt_tokens: 30, completion_tokens: 20, total_tokens: 50, cached_tokens: 10, total_duration_ms: 500, total_first_token_ms: 50, complete: false },
+];
+const dayList = m.dailyUsage(histPoints);
+check("daily_merges_same_day", dayList.length === 2, `得到 ${dayList.length} 天`);
+check("daily_sums_requests", dayList[0].requests === 40, String(dayList[0].requests));
+check("daily_sums_tokens", dayList[0].total_tokens === 400, String(dayList[0].total_tokens));
+// 日期要用北京时间切分：UTC 的 2026-01-01T16:30Z 属于北京的 1 月 2 日。
+check("daily_uses_beijing_day",
+  m.dailyUsage([{ started_at: "2026-01-01T16:30:00Z", requests: 1, complete: true }])[0].date === "2026-01-02",
+  m.dailyUsage([{ started_at: "2026-01-01T16:30:00Z", requests: 1, complete: true }])[0].date);
+check("daily_sorted_ascending", dayList[0].date < dayList[1].date);
+// 累加中的尾桶必须被标记，否则最后一天会被读成"用量骤降"。
+check("daily_marks_partial_day", dayList[1].partial === true && dayList[0].partial === false);
+check("daily_empty_is_empty", m.dailyUsage([]).length === 0);
+check("daily_ignores_undated", m.dailyUsage([undefined, {}]).length === 0);
+
+// 日内时段：24 格，北京时间。
+const profile = m.hourlyProfile(histPoints);
+check("hourly_profile_is_24", profile.length === 24);
+check("hourly_buckets_by_beijing_hour", profile[0].value === 40 && profile[14].value === 5,
+  `${profile[0].value} / ${profile[14].value}`);
+check("hourly_empty_hours_are_zero", profile[8].value === 0 && profile[8].buckets === 0);
+// 自定义取值（Token 口径）必须被采纳。
+check("hourly_custom_value",
+  m.hourlyProfile(histPoints, { value: (p) => p.total_tokens })[0].value === 400,
+  String(m.hourlyProfile(histPoints, { value: (p) => p.total_tokens })[0].value));
+
+// 累计曲线：缺失桶不参与累加，也不把总量重置为 0。
+const cumulative = m.cumulativeSeries(m.series([
+  { started_at: "2026-01-01T00:00:00+08:00", requests: 10, complete: true },
+  { started_at: "2026-01-01T00:15:00+08:00", requests: null, complete: true },
+  { started_at: "2026-01-01T00:30:00+08:00", requests: 30, complete: true },
+], m.METRIC_MAP.requests, 900));
+check("cumulative_running_total", cumulative[0].value === 10 && cumulative[2].value === 40,
+  `${cumulative[0].value} / ${cumulative[2].value}`);
+// 中间点缺失时累计值不变（沿用上一个总量），而不是掉回 0。
+check("cumulative_skips_missing", cumulative[1].value === 10, String(cumulative[1].value));
+check("requests_metric_is_unscaled",
+  m.metricValue({ requests: 30 }, m.METRIC_MAP.requests, 15) === 30,
+  String(m.metricValue({ requests: 30 }, m.METRIC_MAP.requests, 15)));
+
+// 前后对半对比：只统计已完结桶（残桶会把"后半段"拖低，让趋势看起来在跌）。
+const compare = m.splitCompare(m.series([
+  { started_at: "2026-01-01T00:00:00+08:00", requests: 10, complete: true },
+  { started_at: "2026-01-01T00:15:00+08:00", requests: 20, complete: true },
+  { started_at: "2026-01-01T00:30:00+08:00", requests: 60, complete: true },
+  { started_at: "2026-01-01T00:45:00+08:00", requests: 60, complete: true },
+], m.METRIC_MAP.requests, 900));
+check("split_compare_halves", compare.before === 30 && compare.after === 120,
+  `${compare.before} / ${compare.after}`);
+check("split_compare_change", near(compare.change, 3), String(compare.change));
+check("split_compare_too_short_is_null",
+  m.splitCompare(m.series([{ started_at: "2026-01-01T00:00:00+08:00", requests: 1, complete: true }],
+    m.METRIC_MAP.requests, 900)) === null);
 
 const failed = Object.entries(checks).filter(([, value]) => value !== true);
 console.log(JSON.stringify({ failed: failed.map(([name, detail]) => `${name} (${detail})`), total: Object.keys(checks).length }));
