@@ -119,7 +119,19 @@ try {
     }
     New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
     $installed = Join-Path $InstallDir "$Program.exe"
-    Copy-Item -LiteralPath $assetPath -Destination $installed -Force
+    try {
+        Copy-Item -LiteralPath $assetPath -Destination $installed -Force
+    } catch {
+        # Windows 不允许覆盖正在运行的 exe（最常见：amkr 正以后台服务/前台进程运行）。
+        # 这里不能替用户结束进程，只能给出可执行的下一步。
+        $running = Get-Process -Name $Program -ErrorAction SilentlyContinue
+        $hint = if ($running) {
+            "检测到正在运行的 $Program 进程（PID $($running.Id -join ', ')）：请先执行 `"$installed`" --stop（或在服务管理器里停止服务）后重试。"
+        } else {
+            "该文件可能被其它进程占用：请关闭正在使用它的程序后重试，或用 -InstallDir 换一个目录。"
+        }
+        Fail "写入 $installed 失败：$hint`n原始错误：$($_.Exception.Message)"
+    }
 
     Write-Step "已安装: $installed（v$Version）"
     $versionOutput = & $installed --version 2>$null
