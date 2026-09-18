@@ -42,9 +42,8 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from rich.console import Console  # noqa: E402
-from rich.table import Table  # noqa: E402
 
-from auto_model_key_router import dashboard, main, update  # noqa: E402
+from auto_model_key_router import main, update  # noqa: E402
 from auto_model_key_router.config import (  # noqa: E402
     RouterConfig,
     empty_config_dict,
@@ -85,14 +84,6 @@ def controlled_console() -> Console:
     )
 
 
-def render_lines(renderable) -> list[str]:
-    console = controlled_console()
-    console.print(renderable)
-    text = ANSI.sub("", console.export_text())
-    lines = text.split("\n")
-    if lines and lines[-1] == "":
-        lines.pop()
-    return lines
 
 
 # --------------------------------------------------------------------------- #
@@ -231,8 +222,6 @@ def run_case(argv: list[str], env: dict | None = None, load_error: Exception | N
         mock.patch.object(main, "check_latest_version", make_stub(journal, "check-update", fixture)),
         mock.patch.object(main, "update_latest_version", make_stub(journal, "update-dropped", fixture)),
         mock.patch.object(main, "restart_service_after_update", make_stub(journal, "restart-after-update", fixture)),
-        mock.patch.object(main, "render_logs", make_stub(journal, "show-logs", fixture)),
-        mock.patch.object(main, "run_terminal_ui", make_stub(journal, "terminal-ui", fixture)),
         mock.patch.object(main, "start_service_background", make_stub(journal, "background-start", fixture)),
         mock.patch.object(main, "start_service_foreground", make_stub(journal, "foreground", fixture)),
         mock.patch.object(main, "stop_background_service", make_stub(journal, "background-stop", fixture)),
@@ -240,8 +229,8 @@ def run_case(argv: list[str], env: dict | None = None, load_error: Exception | N
         mock.patch.object(main, "service_status_panel", make_stub(journal, "service-status", fixture)),
         mock.patch.object(main, "manage_system_service", make_stub(journal, "system-service", fixture)),
         mock.patch.object(main, "switch_unified_target", make_stub(journal, "switch-unified", fixture, True)),
-        mock.patch.object(main, "render_config", make_stub(journal, "show-config", fixture)),
-        mock.patch.object(main, "unified_model_status_panel", make_stub(journal, "show-unified-model", fixture)),
+        mock.patch.object(main, "plain_config_summary", make_stub(journal, "show-config", fixture)),
+        mock.patch.object(main, "plain_unified_model_summary", make_stub(journal, "show-unified-model", fixture)),
     ]
 
     with contextlib.ExitStack() as stack:
@@ -365,51 +354,10 @@ def address_text_cases() -> list[dict]:
     return cases
 
 
-class RecordingTable(Table):
-    """记录 add_row 的表格，用来取出模型配置表的**行数据**。"""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.recorded: list[list[str]] = []
-
-    def add_row(self, *cells, **kwargs):
-        self.recorded.append([str(cell) for cell in cells])
-        return super().add_row(*cells, **kwargs)
 
 
-def config_summary_cases() -> list[dict]:
-    cases = []
-    tables: list[RecordingTable] = []
-    factory = lambda *args, **kwargs: _capture_table(tables, args, kwargs)
-    with mock.patch.object(dashboard, "quick_metrics_items", lambda path: []), mock.patch.object(
-        dashboard, "visitor_feature_available", lambda: True
-    ), mock.patch.object(dashboard, "is_service_healthy", lambda *a, **k: False), mock.patch.object(
-        dashboard, "Table", factory
-    ):
-        for sample in sample_configs():
-            tables.clear()
-            config = RouterConfig.from_dict(sample["config"])
-            renderables = dashboard.config_renderables(config, CONFIG)
-            summary = renderables[0].renderable
-            rows = list(tables[0].recorded) if tables else []
-            cases.append(
-                {
-                    "name": sample["name"],
-                    "config_json": json.dumps(sample["config"], ensure_ascii=False, sort_keys=False),
-                    "healthy": False,
-                    "visitor_installed": True,
-                    "summary_lines": render_lines(summary),
-                    "model_rows": rows,
-                    "has_warning": config.host == "0.0.0.0",
-                }
-            )
-    return cases
 
 
-def _capture_table(store: list, args, kwargs):
-    table = RecordingTable(*args, **kwargs)
-    store.append(table)
-    return table
 
 
 def version_check_cases() -> list[dict]:
@@ -465,7 +413,6 @@ def build_corpus() -> dict:
         "dropped_flags": DROPPED_FLAGS,
         "flags": flag_cases(),
         "address_text": address_text_cases(),
-        "config_summary": config_summary_cases(),
         "version_check": version_check_cases(),
         "version_output": version_output_case(),
     }

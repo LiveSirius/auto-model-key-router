@@ -134,7 +134,13 @@ def test_show_api_key_returns_failure_when_config_load_fails(tmp_path, monkeypat
     assert "配置加载失败" in capsys.readouterr().out
 
 
-def test_default_cli_loads_config_then_runs_tui(tmp_path, monkeypatch) -> None:
+def test_default_cli_loads_config_then_serves_foreground(tmp_path, monkeypatch) -> None:
+    """无参数默认动作：前台启动服务。
+
+    此前默认进 ``dashboard.run_terminal_ui`` 的终端界面，而 ``dashboard.py`` 已按决策 7
+    删除（终端界面由 WebUI 取代）。默认改为**前台启动服务**，与 Go 版 ``cmd/amkr`` 的
+    ``defaultCommand`` 保持一致。
+    """
     config_path = tmp_path / "router-config.json"
     events: list[str] = []
     config = object()
@@ -146,13 +152,13 @@ def test_default_cli_loads_config_then_runs_tui(tmp_path, monkeypatch) -> None:
     )
     monkeypatch.setattr(
         main_module,
-        "run_terminal_ui",
-        lambda path, loaded: events.append("tui"),
+        "start_service_foreground",
+        lambda path, loaded: events.append("foreground"),
     )
 
     main_module.main()
 
-    assert events == ["load", "tui"]
+    assert events == ["load", "foreground"]
 
 
 def test_serve_does_not_run_interactive_pool_repair(tmp_path, monkeypatch) -> None:

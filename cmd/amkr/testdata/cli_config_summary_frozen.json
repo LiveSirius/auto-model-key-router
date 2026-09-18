@@ -1,0 +1,77 @@
+{
+  "note": "冻结夹具：本段期望值由参照实现（dashboard.config_renderables）产出，而 dashboard.py 已按决策 7 删除，无法再重新生成。保留它是为了让 Go 侧 --show-config 的渲染仍有回归锁。不要用生成器重写本文件。",
+  "frozen_from": "cmd/amkr/testdata/cli_corpus.json 的 config_summary 段（删除前最后一次提交）",
+  "cases": [
+    {
+      "name": "example",
+      "config_json": "{\"config_version\": 4, \"host\": \"127.0.0.1\", \"port\": 8000, \"request_timeout\": 60, \"stream_first_byte_timeout\": 60, \"stream_idle_timeout\": 60, \"max_retries\": 2, \"key_failure_threshold\": 2, \"key_cooldown_seconds\": 60, \"endpoint_capabilities_path\": \"\", \"metrics_db_path\": \"\", \"log_file_path\": \"C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_cli_corpus\\\\router-config.json\", \"local_api_key\": \"amkr-generated-local-api-key\", \"providers\": {\"openai\": {\"base_url\": \"https://api.openai.com\", \"routes\": {\"openai\": \"v1/chat/completions\", \"responses\": \"v1/responses\", \"images\": \"v1/images/generations\", \"embeddings\": \"v1/embeddings\"}, \"keys\": {\"main\": {\"api_key\": \"sk-your-first-key\", \"capabilities\": {\"models\": [\"gpt-4o-mini\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}, \"backup\": {\"api_key\": \"sk-your-second-key\", \"allow_visitor\": true, \"capabilities\": {\"models\": [\"gpt-4o-mini\", \"gpt-4o\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}}}}, \"models\": {\"gpt-4o-mini\": {\"aliases\": [\"gpt-4o-mini-display\", \"fast-mini\"], \"hidden_aliases\": [\"mini-latest\"], \"routing_mode\": \"round_robin\", \"reasoning_effort\": \"medium\", \"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"gpt-4o-mini-2024-07-18\"}]}, \"text-embedding-3-small\": {\"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"text-embedding-3-small\"}]}}, \"unified_model\": {\"default\": {\"primary\": {\"model\": \"gpt-4o-mini\", \"key\": null}}, \"embeddings\": {\"primary\": {\"model\": \"text-embedding-3-small\", \"key\": null}}}, \"tasks\": {\"TASK_000001\": {\"model\": \"gpt-4o-mini\", \"fallback_model\": null, \"params\": {\"temperature\": 0.2, \"top_p\": 0.9, \"reasoning_effort\": \"high\"}}}}",
+      "healthy": false,
+      "visitor_installed": true,
+      "summary_lines": [
+        "监听 127.0.0.1:8000  服务 ○  鉴权 ✓  模型 2  Key 2  上游 1  访客Key amkr-visitor  访客可用 0"
+      ],
+      "model_rows": [
+        [
+          "gpt-4o-mini",
+          "gpt-4o-mini-display\nfas…",
+          "mini-latest +1 自动",
+          "分流",
+          "1"
+        ],
+        [
+          "text-embedding-3-small",
+          "-",
+          "-",
+          "分流",
+          "1"
+        ]
+      ],
+      "has_warning": false
+    },
+    {
+      "name": "zero-host",
+      "config_json": "{\"config_version\": 4, \"host\": \"0.0.0.0\", \"port\": 8000, \"request_timeout\": 60, \"stream_first_byte_timeout\": 60, \"stream_idle_timeout\": 60, \"max_retries\": 2, \"key_failure_threshold\": 2, \"key_cooldown_seconds\": 60, \"endpoint_capabilities_path\": \"\", \"metrics_db_path\": \"\", \"log_file_path\": \"C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_cli_corpus\\\\router-config.json\", \"local_api_key\": \"amkr-generated-local-api-key\", \"providers\": {\"openai\": {\"base_url\": \"https://api.openai.com\", \"routes\": {\"openai\": \"v1/chat/completions\", \"responses\": \"v1/responses\", \"images\": \"v1/images/generations\", \"embeddings\": \"v1/embeddings\"}, \"keys\": {\"main\": {\"api_key\": \"sk-your-first-key\", \"capabilities\": {\"models\": [\"gpt-4o-mini\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}, \"backup\": {\"api_key\": \"sk-your-second-key\", \"allow_visitor\": true, \"capabilities\": {\"models\": [\"gpt-4o-mini\", \"gpt-4o\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}}}}, \"models\": {\"gpt-4o-mini\": {\"aliases\": [\"gpt-4o-mini-display\", \"fast-mini\"], \"hidden_aliases\": [\"mini-latest\"], \"routing_mode\": \"round_robin\", \"reasoning_effort\": \"medium\", \"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"gpt-4o-mini-2024-07-18\"}]}, \"text-embedding-3-small\": {\"targets\": [{\"provider\": \"openai\", \"key\": \"main\", \"upstream_model\": \"text-embedding-3-small\"}]}}, \"unified_model\": {\"default\": {\"primary\": {\"model\": \"gpt-4o-mini\", \"key\": null}}, \"embeddings\": {\"primary\": {\"model\": \"text-embedding-3-small\", \"key\": null}}}, \"tasks\": {\"TASK_000001\": {\"model\": \"gpt-4o-mini\", \"fallback_model\": null, \"params\": {\"temperature\": 0.2, \"top_p\": 0.9, \"reasoning_effort\": \"high\"}}}}",
+      "healthy": false,
+      "visitor_installed": true,
+      "summary_lines": [
+        "监听 0.0.0.0:8000  服务 ○  鉴权 ✓  模型 2  Key 2  上游 1  访客Key amkr-visitor  访客可用 0"
+      ],
+      "model_rows": [
+        [
+          "gpt-4o-mini",
+          "gpt-4o-mini-display\nfas…",
+          "mini-latest +1 自动",
+          "分流",
+          "1"
+        ],
+        [
+          "text-embedding-3-small",
+          "-",
+          "-",
+          "分流",
+          "1"
+        ]
+      ],
+      "has_warning": true
+    },
+    {
+      "name": "no-models",
+      "config_json": "{\"config_version\": 4, \"host\": \"127.0.0.1\", \"port\": 8000, \"request_timeout\": 60, \"stream_first_byte_timeout\": 60, \"stream_idle_timeout\": 60, \"max_retries\": 2, \"key_failure_threshold\": 2, \"key_cooldown_seconds\": 60, \"endpoint_capabilities_path\": \"\", \"metrics_db_path\": \"\", \"log_file_path\": \"C:\\\\Users\\\\Sparr\\\\AppData\\\\Local\\\\Temp\\\\amkr_cli_corpus\\\\router-config.json\", \"local_api_key\": \"amkr-generated-local-api-key\", \"providers\": {\"openai\": {\"base_url\": \"https://api.openai.com\", \"routes\": {\"openai\": \"v1/chat/completions\", \"responses\": \"v1/responses\", \"images\": \"v1/images/generations\", \"embeddings\": \"v1/embeddings\"}, \"keys\": {\"main\": {\"api_key\": \"sk-your-first-key\", \"capabilities\": {\"models\": [\"gpt-4o-mini\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}, \"backup\": {\"api_key\": \"sk-your-second-key\", \"allow_visitor\": true, \"capabilities\": {\"models\": [\"gpt-4o-mini\", \"gpt-4o\"], \"route_status\": {\"openai\": \"ok\", \"anthropic\": \"ok\", \"responses\": \"ok\"}, \"errors\": {}, \"checked_at\": \"2026-01-01T00:00:00+00:00\"}}}}}, \"models\": {}, \"tasks\": {}}",
+      "healthy": false,
+      "visitor_installed": true,
+      "summary_lines": [
+        "监听 127.0.0.1:8000  服务 ○  鉴权 ✓  模型 0  Key 0  上游 0  访客Key amkr-visitor  访客可用 0"
+      ],
+      "model_rows": [
+        [
+          "未配置",
+          "-",
+          "-",
+          "-",
+          "0"
+        ]
+      ],
+      "has_warning": false
+    }
+  ]
+}

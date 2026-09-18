@@ -35,7 +35,6 @@ type cliCorpus struct {
 	DroppedFlags  []string         `json:"dropped_flags"`
 	Flags         []cliFlagCase    `json:"flags"`
 	AddressText   []cliAddressCase `json:"address_text"`
-	ConfigSummary []cliSummaryCase `json:"config_summary"`
 	VersionCheck  []cliVersionCase `json:"version_check"`
 	VersionOutput cliVersionOutput `json:"version_output"`
 }
@@ -101,6 +100,34 @@ type cliVersionCase struct {
 type cliVersionOutput struct {
 	Stdout string `json:"stdout"`
 	Exit   int    `json:"exit"`
+}
+
+// frozenSummaryCorpus 是冻结夹具的顶层结构。
+//
+// 这段期望值原先随语料一起由生成器产出，其来源是参照实现的
+// `dashboard.config_renderables`。而 `dashboard.py` 已按决策 7 删除（终端仪表盘由
+// WebUI 取代），因此**无法再重新生成**。期望值本身仍是「参照实现真实产出过的输出」，
+// 对 Go 侧渲染依旧是有效的回归锁，故从删除前最后一次提交里取出、冻结成静态文件。
+//
+// 不要用生成器重写 testdata/cli_config_summary_frozen.json。
+type frozenSummaryCorpus struct {
+	Cases []cliSummaryCase `json:"cases"`
+}
+
+func loadFrozenSummary(t *testing.T) []cliSummaryCase {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join("testdata", "cli_config_summary_frozen.json"))
+	if err != nil {
+		t.Fatalf("读取冻结夹具失败: %v", err)
+	}
+	var frozen frozenSummaryCorpus
+	if err := json.Unmarshal(raw, &frozen); err != nil {
+		t.Fatalf("解析冻结夹具失败: %v", err)
+	}
+	if len(frozen.Cases) == 0 {
+		t.Fatal("冻结夹具为空：--show-config 的渲染将失去回归锁")
+	}
+	return frozen.Cases
 }
 
 func loadCLICorpus(t *testing.T) *cliCorpus {
@@ -437,9 +464,11 @@ func TestCLICorpusAddressText(t *testing.T) {
 }
 
 // TestCLICorpusConfigSummary 对拍 --show-config 的「运行概览」行与模型表行。
+//
+// 数据来自**冻结夹具**而非生成的语料：参照实现里的渲染函数已随 dashboard.py 一起按决策 7
+// 删除，无法再重新生成（见 frozenSummaryCorpus 的说明）。
 func TestCLICorpusConfigSummary(t *testing.T) {
-	corpus := loadCLICorpus(t)
-	for _, entry := range corpus.ConfigSummary {
+	for _, entry := range loadFrozenSummary(t) {
 		raw, err := canonical.ParseString(entry.ConfigJSON)
 		if err != nil {
 			t.Fatalf("用例 %s: 解析配置失败: %v", entry.Name, err)

@@ -9,11 +9,9 @@ from . import __version__
 from .config import DEFAULT_CONFIG_PATH, UNIFIED_MODEL_ID, RouterConfig
 from .config_operations import UNIFIED_TARGETS
 from .config_service import ConfigService
-from .dashboard import render_config, run_terminal_ui, unified_model_status_panel
-from .logs_tui import render_logs
 from .service import background_status_panel, manage_system_service, service_status_panel, start_service_background, start_service_foreground, stop_background_service
 from .tui import clear_terminal_history, console, section_panel
-from .unified_model import switch_unified_model, switch_unified_target
+from .unified_model import switch_unified_target
 from .update import check_latest_version, render_version_check_result, restart_service_after_update, update_latest_version
 
 
@@ -27,6 +25,48 @@ def router_address_text(config: RouterConfig) -> str:
         f"监听端口: [bold]{config.port}[/bold]\n"
         f"服务地址: [bold]http://{url_host}:{config.port}[/bold]"
     )
+
+
+def plain_config_summary(config: RouterConfig, config_path: Path) -> str:
+    """--show-config 的纯文本摘要。
+
+    原由 ``dashboard.render_config`` 渲染成多块 Rich 面板；``dashboard.py`` 已按决策 7
+    删除（终端仪表盘由 WebUI 取代），故退化成纯文本，只保留真正有用的字段。
+    这段代码本身也计划随 ``main.py`` 一并删除，不要在此追加功能。
+    """
+    models = ", ".join(model.id for model in config.models) or "（无）"
+    providers = ", ".join(provider.id for provider in config.providers) or "（无）"
+    return "\n".join(
+        (
+            f"配置文件: {config_path}",
+            f"监听地址: {config.host}:{config.port}",
+            f"模型: {models}",
+            f"提供方: {providers}",
+            f"WebUI: {'启用' if config.webui_enabled else '关闭'}",
+            f"运维接口: {'启用' if config.ops_enabled else '关闭'}",
+        )
+    )
+
+
+def plain_unified_model_summary(config: RouterConfig, title: str) -> str:
+    """统一模型状态的纯文本摘要（原 dashboard.unified_model_status_panel）。"""
+    if config.unified_model is None:
+        return f"{title}: 尚未配置 {UNIFIED_MODEL_ID}。请选择已有模型和 Key。"
+    lines = [
+        f"{title}",
+        f"请求模型: {UNIFIED_MODEL_ID}",
+        f"目标模型: {config.unified_model.model}",
+        f"使用 Key: {config.unified_model.key or '自动路由'}",
+    ]
+    fallback = config.unified_model.default.fallback
+    if fallback:
+        lines.append(f"熔断模型: {fallback.model}")
+        lines.append(f"熔断 Key: {fallback.key or '自动路由'}")
+    for label, plan in (("图像", config.unified_model.image), ("嵌入", config.unified_model.embeddings)):
+        if plan is not None:
+            lines.append(f"{label}模型: {plan.primary.model}")
+            lines.append(f"{label} Key: {plan.primary.key or '自动路由'}")
+    return "\n".join(lines)
 
 
 def main() -> None:
@@ -48,7 +88,6 @@ def main() -> None:
     parser.add_argument("--switch-key", metavar="KEY", help=f"切换 {UNIFIED_MODEL_ID} 使用的已有 key；传 auto 恢复自动路由")
     parser.add_argument("--unified-target", choices=list(UNIFIED_TARGETS), default="default.primary", help="选择要修改的 unified 路由目标")
     parser.add_argument("--show-unified-model", action="store_true", help=f"查看 {UNIFIED_MODEL_ID} 当前指向")
-    parser.add_argument("--show-logs", nargs="?", const=20, type=int, help="进入调用日志，显示最近 N 行运行日志，调用统计明细固定 10 行/页")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--check-update", action="store_true", help="通过 PyPI/GitHub 检查最新版本")
     parser.add_argument("--update", action="store_true", help="通过 PyPI/GitHub 手动更新到最新版本")
@@ -101,25 +140,6 @@ def main() -> None:
             ConfigService(config_path).update(
                 lambda data: data.update(ops_enabled=args.ops)
             )
-        interactive_tui = not any(
-            (
-                args.show_config,
-                args.show_address,
-                args.show_api_key,
-                args.switch_model is not None,
-                args.switch_key is not None,
-                args.show_unified_model,
-                args.show_logs is not None,
-                args.update,
-                args.restart_service_after_update,
-                args.serve,
-                args.serve_foreground,
-                args.stop,
-                args.status,
-                args.install_service,
-                args.service is not None,
-            )
-        )
         try:
             config = RouterConfig.load(config_path)
         except Exception as exc:
@@ -145,13 +165,13 @@ def main() -> None:
                 raise SystemExit(1) from exc
             # 面板必须报整份配置：目标不止 default 一个，只打印 default 会在
             # `--unified-target embeddings.primary` 时显示一份根本没变过的计划。
-            console.print(unified_model_status_panel(config, "统一模型已切换", "green"))
+            console.print(plain_unified_model_summary(config, "统一模型已切换"))
             return
         if args.show_api_key:
             print(config.local_api_key)
             return
         if args.show_unified_model:
-            console.print(unified_model_status_panel(config, "统一模型", "cyan"))
+            console.print(plain_unified_model_summary(config, "统一模型"))
             return
 
         if args.update:
@@ -163,15 +183,11 @@ def main() -> None:
                 console.print(result)
             return
 
-        if args.show_logs is not None:
-            render_config(config, config_path)
-            render_logs(config.metrics_db_path, config.log_file_path, args.show_logs)
-            return
         if args.show_address:
             console.print(section_panel(router_address_text(config), "AMKR 地址", "cyan"))
             return
         if args.show_config:
-            render_config(config, config_path)
+            print(plain_config_summary(config, config_path))
             return
         if args.stop:
             console.print(stop_background_service(config))
@@ -190,7 +206,10 @@ def main() -> None:
             start_service_foreground(config_path, config)
             return
         if not args.serve:
-            run_terminal_ui(config_path, config)
+            # 无参数默认动作：此前是进 dashboard.run_terminal_ui 的终端界面，而 dashboard.py
+            # 已按决策 7 删除（终端界面由 WebUI 取代）。默认改为**前台启动服务**，与 Go 版
+            # cmd/amkr 的 defaultCommand 保持一致。
+            start_service_foreground(config_path, config)
             return
         console.print(start_service_background(config_path, config))
     except KeyboardInterrupt:
