@@ -70,6 +70,9 @@ func (a *App) buildHandler() http.Handler {
 		// 工作空间用量读数（理由见 workspace_usage.go）：这是本项目自己的响应形状，
 		// 不能混进被逐字节语料锁定的 /metrics 系列，因此同样挂在 /ui/ 之下。
 		mux.HandleFunc(path+workspaceUsagePath, a.handleWorkspaceUsage)
+		// 嵌入方面板的读数（理由见 workspace_panel.go）：与上一条形状相同，但只认
+		// 面板 key，且只回 key 所属那**一个**空间的用量。
+		mux.HandleFunc(path+workspacePanelPath, a.handleWorkspacePanel)
 		a.webuiMounted = true
 	}
 
