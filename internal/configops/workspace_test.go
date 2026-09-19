@@ -238,6 +238,119 @@ func TestTransferCarriesWorkspaces(t *testing.T) {
 	}
 }
 
+// TestRenameWorkspaceMovesTasks 固化改名：整组任务跟着新名字走，旧键消失。
+func TestRenameWorkspaceMovesTasks(t *testing.T) {
+	data := workspaceData(t)
+	// 先给 teamA 加上第二个任务，确认改名搬的是整组而不是一个。
+	if _, err := CreateTaskIn(data, "teamA", "extra", CreateTaskOptions{Model: "model-a"}); err != nil {
+		t.Fatalf("准备第二个任务失败: %v", err)
+	}
+
+	renamed, err := RenameWorkspace(data, "teamA", "teamB")
+	if err != nil {
+		t.Fatalf("改名失败: %v", err)
+	}
+	if renamed != "teamB" {
+		t.Errorf("返回的新名字 = %q，期望 teamB", renamed)
+	}
+	if got := WorkspaceTasks(data, "teamB").Obj.Len(); got != 2 {
+		t.Errorf("teamB 应有 2 个任务，实际 %d（%s）", got, canonical.Dumps(data))
+	}
+	if entry, ok := lookup(data, "workspaces").LookupOK("teamA"); ok && entry.IsObject() {
+		t.Error("旧名字应从配置里消失")
+	}
+	// 任务内容本身要完好：改名不该顺手改掉模型或参数。
+	task, err := RequireTaskIn(data, "teamB", "shared")
+	if err != nil {
+		t.Fatalf("改名后应能按新名字读到任务: %v", err)
+	}
+	if got := lookup(task, "model").StringValue(); got != "model-b" {
+		t.Errorf("改名不应改动任务内容，实际 model=%s", got)
+	}
+	// 默认空间一个字节都不该动。
+	if got := WorkspaceTasks(data, config.DefaultWorkspace).Obj.Len(); got != 1 {
+		t.Errorf("默认空间任务数 = %d，期望 1", got)
+	}
+}
+
+// TestRenameWorkspaceRejectsTargets 固化改名的两条拒绝路径。
+func TestRenameWorkspaceRejectsTargets(t *testing.T) {
+	// 目标已存在时不合并：两个空间各有一批任务时合并会出现重名任务，而那是非法配置。
+	data := workspaceData(t)
+	if _, err := CreateTaskIn(data, "teamB", "only-b", CreateTaskOptions{Model: "model-a"}); err != nil {
+		t.Fatalf("准备 teamB 失败: %v", err)
+	}
+	var conflict *ConfigOperationError
+	err := func() error { _, err := RenameWorkspace(data, "teamB", "teamA"); return err }()
+	if !errors.As(err, &conflict) || conflict.StatusCode != 409 {
+		t.Errorf("改名到已存在的空间应报 409，实际 %v", err)
+	}
+	// 两边都原样保留。
+	if WorkspaceTasks(data, "teamA").Obj.Len() != 1 || WorkspaceTasks(data, "teamB").Obj.Len() != 1 {
+		t.Errorf("失败的改名不应改动任何一边: %s", canonical.Dumps(data))
+	}
+
+	// 源空间没有任务 -> 404（空间由任务反推，空分组不算存在）。
+	data = workspaceData(t)
+	if _, err := RenameWorkspace(data, "nope", "other"); !errors.As(err, &conflict) || conflict.StatusCode != 404 {
+		t.Errorf("改名不存在的空间应报 404，实际 %v", err)
+	}
+
+	// 默认空间改不动：全组任务会跟着换名字，缺省调用方全部落空。
+	data = workspaceData(t)
+	if _, err := RenameWorkspace(data, config.DefaultWorkspace, "moved"); !errors.As(err, &conflict) || conflict.StatusCode != 400 {
+		t.Errorf("默认空间不可改名，实际 %v", err)
+	}
+	if _, err := RenameWorkspace(data, "teamA", config.DefaultWorkspace); !errors.As(err, &conflict) || conflict.StatusCode != 409 {
+		t.Errorf("不能改名成默认空间名，实际 %v", err)
+	}
+}
+
+// TestDeleteWorkspaceRemovesTasks 固化删除：整组任务与分组一起消失。
+func TestDeleteWorkspaceRemovesTasks(t *testing.T) {
+	data := workspaceData(t)
+
+	if err := DeleteWorkspace(data, "teamA"); err != nil {
+		t.Fatalf("删除失败: %v", err)
+	}
+	if _, err := RequireTaskIn(data, "teamA", "shared"); err == nil {
+		t.Error("删掉的空间不该还能读到任务")
+	}
+	// 这是团队 A 唯一的空间，删完 workspaces 段应整个消失（空段无意义）。
+	if lookup(data, "workspaces").IsObject() {
+		t.Errorf("最后一个命名空间删掉后 workspaces 段应消失: %s", canonical.Dumps(data))
+	}
+	if WorkspaceTasks(data, config.DefaultWorkspace).Obj.Len() != 1 {
+		t.Errorf("默认空间不应受影响: %s", canonical.Dumps(data))
+	}
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("删除后的配置应可解析: %v", err)
+	}
+
+	// 删不存在的空间 -> 404；默认空间删不得 -> 400。
+	var opErr *ConfigOperationError
+	if err := DeleteWorkspace(data, "teamA"); !errors.As(err, &opErr) || opErr.StatusCode != 404 {
+		t.Errorf("重复删除应报 404，实际 %v", err)
+	}
+	if err := DeleteWorkspace(data, config.DefaultWorkspace); !errors.As(err, &opErr) || opErr.StatusCode != 400 {
+		t.Errorf("默认空间不可删除，实际 %v", err)
+	}
+}
+
+// TestDeleteWorkspaceKeepsSibling 固化删除一个空间不连累兄弟空间。
+func TestDeleteWorkspaceKeepsSibling(t *testing.T) {
+	data := workspaceData(t)
+	if _, err := CreateTaskIn(data, "teamB", "kept", CreateTaskOptions{Model: "model-a"}); err != nil {
+		t.Fatalf("准备 teamB 失败: %v", err)
+	}
+	if err := DeleteWorkspace(data, "teamA"); err != nil {
+		t.Fatalf("删除失败: %v", err)
+	}
+	if task, ok := WorkspaceTasks(data, "teamB").LookupOK("kept"); !ok || !task.IsObject() {
+		t.Errorf("兄弟空间应原样保留: %s", canonical.Dumps(data))
+	}
+}
+
 // TestDefaultWorkspaceAliasesLegacyAPI 固化：既有 API 一律作用于默认空间。
 //
 // 这是兼容性的核心——语料锁定的那批调用路径（不带工作空间）必须一字不变。

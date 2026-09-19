@@ -301,6 +301,81 @@ func DeleteTaskIn(data *canonical.Value, workspace, taskName string) error {
 	return nil
 }
 
+// RenameWorkspace 把命名工作空间的任务整体搬到新名字下，旧名字随之消失。
+//
+// 工作空间只是「一组任务」的容器（见 WorkspaceTasks 的说明），因此改名就是把整组
+// 任务换个键：任务本身一个字都不用动，也不需要逐条重建。
+//
+// 目标名已存在时报 409 而不是合并——两个空间各有一批任务时，合并会在一瞬间产生
+// 重名任务，而重名任务在 config 层是非法的，等于用一个必然失败的中间态做一次
+// 有损操作。
+func RenameWorkspace(data *canonical.Value, workspace, newName string) (string, error) {
+	source, err := requireNamedWorkspace(workspace)
+	if err != nil {
+		return "", err
+	}
+	if err := requireWorkspaceTasks(data, source); err != nil {
+		return "", err
+	}
+	target, err := nonEmptyString(newName, "工作空间名")
+	if err != nil {
+		return "", err
+	}
+	target = normalizeWorkspace(target)
+	if target == config.DefaultWorkspace {
+		return "", opErrf(409, "工作空间名重复: %s", config.DefaultWorkspace)
+	}
+	if target == source {
+		return target, nil
+	}
+	if WorkspaceTasks(data, target).Obj.Len() > 0 {
+		return "", opErrf(409, "工作空间已存在: %s", target)
+	}
+	// 先写目标再清来源：两处都持有同一批任务对象，顺序反了会把刚搬过去的任务删掉。
+	writeWorkspaceTasks(data, target, WorkspaceTasks(data, source))
+	writeWorkspaceTasks(data, source, canonical.NewObject())
+	return target, nil
+}
+
+// DeleteWorkspace 删除命名工作空间及其中的全部任务。
+//
+// 它等价于「把这个空间里的任务一次删光」——空分组不进配置，因此删除之后这个名字
+// 就不再存在，而不是留下一个空壳。
+func DeleteWorkspace(data *canonical.Value, workspace string) error {
+	name, err := requireNamedWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if err := requireWorkspaceTasks(data, name); err != nil {
+		return err
+	}
+	writeWorkspaceTasks(data, name, canonical.NewObject())
+	return nil
+}
+
+// requireNamedWorkspace 归一化并确认这是一个**命名**工作空间。
+//
+// 默认工作空间刻意排除在外：它是不带 X-AMKR-Workspace 头时命中的那个空间，永远
+// 存在于清单里（见 RouterConfig.WorkspaceNames），因此既删不掉也改不了名——改名会
+// 让全部缺省调用突然落空，删除则删不掉它、只能清空，两种结果都不是调用方要的。
+func requireNamedWorkspace(workspace string) (string, error) {
+	name := normalizeWorkspace(workspace)
+	if name == config.DefaultWorkspace {
+		return "", opErr(400, "不能修改或删除默认工作空间")
+	}
+	return name, nil
+}
+
+// requireWorkspaceTasks 确认工作空间里确实有任务。
+//
+// 工作空间由任务反推（空分组不进配置），所以「空间存在」就等于「它里面有任务」。
+func requireWorkspaceTasks(data *canonical.Value, workspace string) error {
+	if WorkspaceTasks(data, workspace).Obj.Len() == 0 {
+		return opErrf(404, "工作空间不存在: %s", workspace)
+	}
+	return nil
+}
+
 // RepairTasks 删掉引用已不存在模型（或参数非法）的任务，返回被清理的任务名（升序）。
 //
 // 对齐 config_operations.py:1234。模型没了，指向它的任务留着只会在请求时变成
