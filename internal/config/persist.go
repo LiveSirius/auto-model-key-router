@@ -49,6 +49,19 @@ func GenerateWorkspaceKey() (string, error) {
 	return "amkr_ws_" + base64.RawURLEncoding.EncodeToString(randomBytes), nil
 }
 
+// GenerateInferenceKey 生成工作空间推理 key，格式 "amkr_ik_" + 43 字符 base64url。
+//
+// 与 GenerateWorkspaceKey 同一套随机源、同样长度，只换前缀。前缀在这里意义更重：
+// 面板 key 会被贴进浏览器 URL，推理 key 会被写进各个项目的环境变量，两者在运维
+// 眼里必须一眼可辨——否则一次误配就是把「只读面板」当成「能刷额度」的凭据发出去。
+func GenerateInferenceKey() (string, error) {
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	return "amkr_ik_" + base64.RawURLEncoding.EncodeToString(randomBytes), nil
+}
+
 // EmptyConfigDict 返回新建配置的默认内容。
 //
 // 字段顺序与参照实现一致：它决定落盘文件的键序（保存时用 indent=2 且不排序），

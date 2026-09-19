@@ -103,6 +103,25 @@ type WorkspaceConfig struct {
 	// 与 local_api_key 一样是**入站凭据**，因此不随 /api/config/export 迁移
 	// （workspace 有自己的迁移通道，见 configops 的 WorkspaceBundle）。
 	APIKey string
+	// InferenceKey 是这个空间的**推理凭据**；空串表示没有。
+	//
+	// 为什么不复用 APIKey：面板 key 的存在形式是浏览器 URL fragment（`#k=`），
+	// 是最容易泄漏的位置。让同一把 key 还能消耗上游额度，等于把「嵌进第三方后台
+	// 的只读面板」升级成「能刷你的上游账单」。两把 key 的泄漏后果差一个数量级，
+	// 因此刻意分开。
+	//
+	// 有了它，持有 key 的项目就能用自己的任务名调 /v1/*，而不必拿到 local_api_key
+	// ——后者是完整管理权限（能读全部上游 key、能改全部配置）。
+	InferenceKey string
+	// Models 是本空间**允许使用**的模型名（真实 id 或别名）；空表示不限制。
+	//
+	// 为什么需要它：models 在配置里是全局的，只有 tasks 天然按空间隔离。若不加
+	// 限制，一个只该用某个小模型的项目可以直呼任意真实模型名绕过任务路由，隔离
+	// 就只剩任务那一层。运维侧因此要能按空间收窄可用的模型集合。
+	//
+	// 只影响**直呼真实模型名**这条路；任务名始终可用（任务自己固定了模型，它
+	// 引用的模型就是该空间被授权使用的）。/v1/models 也按这份清单收窄。
+	Models []string
 }
 
 // TaskConfig 是任务名路由：model 传任务名时改用这里的模型与固定参数。
@@ -174,7 +193,7 @@ type RouterConfig struct {
 	// Tasks 是**扁平**的全部任务，每项带自己的 Workspace（顶层 `tasks` 段的任务
 	// 归属 DefaultWorkspace）。工作空间名从这份列表反推，见 WorkspaceNames。
 	Tasks []TaskConfig
-	// Workspaces 只装**声明了 api_key** 的命名工作空间。
+	// Workspaces 只装**声明了凭据**的命名工作空间。
 	//
 	// 不带 key 的空间不需要在这里留记录：它们完全由 Tasks 反映（见 WorkspaceNames）。
 	// 只收带 key 的那些，是为了让这份列表恰好等于「需要参与鉴权匹配的空间」，不多
@@ -641,11 +660,55 @@ func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, []Wor
 			return nil, nil, err
 		}
 		tasks = append(tasks, group...)
-		if key := strings.TrimSpace(workspace.Lookup("api_key").StringValue()); key != "" {
-			workspaces = append(workspaces, WorkspaceConfig{Name: name, APIKey: key})
+		apiKey := strings.TrimSpace(workspace.Lookup("api_key").StringValue())
+		inferenceKey := strings.TrimSpace(workspace.Lookup("inference_key").StringValue())
+		models, err := parseWorkspaceModels(workspace.Lookup("models"), name, idsByName)
+		if err != nil {
+			return nil, nil, err
+		}
+		// 留下这个分组的条件：有凭据，或者声明了模型清单。
+		//
+		// 只带 models 的分组**必须留**：最常见的情形正是「一个已经有任务的空间（靠任务
+		// 反推即存在）被运维加上了 models 限制」，此时它两把 key 都没有。若在这里丢掉，
+		// models 会在热重载后静默消失——限制看起来配了，实际没生效。
+		//
+		// 三者皆无的空壳仍然不留，与既有「空分组不进配置」一致。
+		if apiKey != "" || inferenceKey != "" || models != nil {
+			workspaces = append(workspaces, WorkspaceConfig{
+				Name:         name,
+				APIKey:       apiKey,
+				InferenceKey: inferenceKey,
+				Models:       models,
+			})
 		}
 	}
 	return tasks, workspaces, nil
+}
+
+// parseWorkspaceModels 解析 `workspaces.<空间>.models`：本空间允许直呼的模型名清单。
+//
+// 逐个校验名字确实指向一个已配置的模型（id 或别名）。写错一个名字就让整个空间
+// 静默少一个可用模型，排查成本远高于在这里直接报错——错误文本带上空间名与字段
+// 路径，与 tasks 的引用校验保持同一种措辞风格。
+func parseWorkspaceModels(raw *canonical.Value, workspace string, idsByName map[string]string) ([]string, error) {
+	if raw == nil || raw.IsNull() {
+		return nil, nil
+	}
+	if !raw.IsArray() {
+		return nil, errf("workspaces.%s.models 必须是数组", workspace)
+	}
+	models := make([]string, 0, len(raw.Arr))
+	for index, item := range raw.Arr {
+		name := strings.TrimSpace(item.StringValue())
+		if name == "" {
+			return nil, errf("workspaces.%s.models[%d] 不能为空", workspace, index)
+		}
+		if _, ok := idsByName[name]; !ok {
+			return nil, errf("workspaces.%s.models[%d] 引用了未配置的模型: %s", workspace, index, name)
+		}
+		models = append(models, name)
+	}
+	return models, nil
 }
 
 // parseTaskGroup 解析一段 `{任务名: {...}}`，workspace 是它归属的工作空间。
@@ -759,20 +822,39 @@ func (c *RouterConfig) Validate() error {
 	// 与 local_api_key 相同是必须挡的：本地 key 给的是全量权限（含配置与 /v1 代理），
 	// 若某个空间的面板 key 恰好等于它，那么「嵌出去的 key」与「主凭据」就是同一个，
 	// 一旦嵌进第三方页面就等于交出了整个实例。这不可能是有意为之。
+	//
+	// 推理 key 适用同一组底线，且**两种 key 共用一张占用表**：它们的判定发生在不同
+	// 调用点（面板面 vs /v1 面），若允许同一个字符串两处都命中，同一个 key 会在一条
+	// 路径上是面板、另一条上是推理，权限边界取决于走到哪条路由——这正是要避免的。
 	keyOwner := map[string]string{}
-	for _, workspace := range c.Workspaces {
-		if workspace.APIKey == VISITOR_API_KEY {
-			return errf("工作空间 %s 的 api_key 不能使用保留的访客 key: %s", workspace.Name, VISITOR_API_KEY)
+	// name 是空间名；错误文本里的「工作空间」前缀在这里拼，既有的三条错误文本
+	// （`工作空间 a 的 api_key 不能…` / `工作空间 a 与 b 的 api_key 重复`）因此
+	// 逐字不变。kind 区分同一空间的两把 key。
+	claim := func(secret, kind, name string) error {
+		if secret == "" {
+			return nil
 		}
-		if c.LocalAPIKey != "" && workspace.APIKey == c.LocalAPIKey {
-			return errf("工作空间 %s 的 api_key 不能与 local_api_key 相同", workspace.Name)
+		if secret == VISITOR_API_KEY {
+			return errf("工作空间 %s 的 %s 不能使用保留的访客 key: %s", name, kind, VISITOR_API_KEY)
 		}
-		// 两个空间同 key 时判定结果会取决于遍历顺序，等于随机给其中一个空间开门，
+		if c.LocalAPIKey != "" && secret == c.LocalAPIKey {
+			return errf("工作空间 %s 的 %s 不能与 local_api_key 相同", name, kind)
+		}
+		// 两处同 key 时判定结果会取决于遍历顺序，等于随机给其中一个开门，
 		// 因此直接判非法而不是「取第一个」。
-		if owner, exists := keyOwner[workspace.APIKey]; exists {
-			return errf("工作空间 %s 与 %s 的 api_key 重复", owner, workspace.Name)
+		if previous, exists := keyOwner[secret]; exists {
+			return errf("工作空间 %s 与 %s 的 %s 重复", previous, name, kind)
 		}
-		keyOwner[workspace.APIKey] = workspace.Name
+		keyOwner[secret] = name
+		return nil
+	}
+	for _, workspace := range c.Workspaces {
+		if err := claim(workspace.APIKey, "api_key", workspace.Name); err != nil {
+			return err
+		}
+		if err := claim(workspace.InferenceKey, "inference_key", workspace.Name); err != nil {
+			return err
+		}
 	}
 
 	modelNames := map[string]bool{}
@@ -1029,6 +1111,55 @@ func (c *RouterConfig) WorkspaceForAPIKey(apiKey string) string {
 		}
 	}
 	return ""
+}
+
+// WorkspaceForInferenceKey 找出持有该推理凭据的工作空间，没有则返回空串。
+//
+// 与 WorkspaceForAPIKey **刻意分开**，而不是合成一个「任意凭据 -> 空间」的查表：
+// 两把 key 的权限不同（面板 key 只能管任务，推理 key 只能调 /v1），因此调用点必须
+// 知道自己匹配上的是哪一种。合成一个函数会让「这请求到底该按哪套权限走」取决于
+// 返回值的用法，而调用点本来就知道自己要哪一种。
+//
+// 空 key 同样不匹配，理由与 WorkspaceForAPIKey 一致。比较走恒定时间。
+func (c *RouterConfig) WorkspaceForInferenceKey(apiKey string) string {
+	if apiKey == "" {
+		return ""
+	}
+	for _, workspace := range c.Workspaces {
+		if hmac.Equal([]byte(apiKey), []byte(workspace.InferenceKey)) {
+			return workspace.Name
+		}
+	}
+	return ""
+}
+
+// WorkspaceAllowedModels 返回该空间允许直呼的模型名；第二个返回值报告是否存在清单。
+//
+// **没有配置清单**（返回 false）表示不限制——这是既有配置的默认，保持它们行为一字不变。
+// 配置了空数组则是「一个都不许直呼」，与「不限制」是两回事。
+//
+// 区分靠的是 nil 而不是长度：Models 为 nil 表示配置里没有这个字段（不限制），非 nil
+// 的**空**切片表示显式写了 `[]`（一个都不许）。用 len == 0 判断会把后者误当成不限制，
+// 也就是把运维下的禁令悄悄失效——这正是这个字段存在的意义。
+func (c *RouterConfig) WorkspaceAllowedModels(workspace string) (map[string]bool, bool) {
+	if workspace == "" {
+		workspace = DefaultWorkspace
+	}
+	for i := range c.Workspaces {
+		config := c.Workspaces[i]
+		if config.Name != workspace {
+			continue
+		}
+		if config.Models == nil {
+			return nil, false
+		}
+		allowed := make(map[string]bool, len(config.Models))
+		for _, name := range config.Models {
+			allowed[name] = true
+		}
+		return allowed, true
+	}
+	return nil, false
 }
 
 // HiddenModelNames 返回可直接调用、但不出现在 /v1/models 中的名字 -> 本地模型 ID。

@@ -450,6 +450,194 @@ func TestWorkspaceAPIKeyValidation(t *testing.T) {
 	}
 }
 
+// TestWorkspaceInferenceKeyValidation 固化推理 key 的底线。
+//
+// 与面板 key 同一组底线，外加**跨类型**撞车也必须挡：同一个字符串若能同时是某个空间
+// 的面板 key 与另一个空间的推理 key，权限边界就取决于走到哪条路由（面板面还是 /v1 面），
+// 而这正是不可接受的。
+func TestWorkspaceInferenceKeyValidation(t *testing.T) {
+	build := func(workspaces string) string {
+		return `{"config_version":4,"local_api_key":"k",
+			"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+			"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+			"workspaces":` + workspaces + `}`
+	}
+	// 合法：两把 key 各自不冲突。
+	if _, err := FromDict(mustParse(t, build(
+		`{"a":{"api_key":"ka","inference_key":"ia"},"b":{"inference_key":"ib"}}`))); err != nil {
+		t.Errorf("合法配置不应报错: %v", err)
+	}
+	cases := []struct {
+		name       string
+		workspaces string
+		want       string
+	}{
+		{"占用访客 key", `{"a":{"inference_key":"amkr-visitor"}}`,
+			"工作空间 a 的 inference_key 不能使用保留的访客 key: amkr-visitor"},
+		{"与本地 key 相同", `{"a":{"inference_key":"k"}}`,
+			"工作空间 a 的 inference_key 不能与 local_api_key 相同"},
+		{"两空间同推理 key", `{"a":{"inference_key":"same"},"b":{"inference_key":"same"}}`,
+			"工作空间 a 与 b 的 inference_key 重复"},
+		// 跨类型：同空间的两把 key 也不能是同一个字符串。
+		{"同空间两把 key 相同", `{"a":{"api_key":"same","inference_key":"same"}}`,
+			"工作空间 a 与 a 的 inference_key 重复"},
+		// 跨类型：一个空间的面板 key 撞上另一个空间的推理 key。
+		{"面板 key 撞推理 key", `{"a":{"api_key":"same"},"b":{"inference_key":"same"}}`,
+			"工作空间 a 与 b 的 inference_key 重复"},
+		// 反向：推理 key 先声明，面板 key 后撞上。
+		{"推理 key 撞面板 key", `{"a":{"inference_key":"same"},"b":{"api_key":"same"}}`,
+			"工作空间 a 与 b 的 api_key 重复"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := FromDict(mustParse(t, build(testCase.workspaces)))
+			if err == nil {
+				t.Fatalf("应报错: %s", testCase.want)
+			}
+			if err.Error() != testCase.want {
+				t.Errorf("错误文本 = %q，期望 %q", err.Error(), testCase.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceForInferenceKey 固化推理 key 到空间的解析，且**不与面板 key 混淆**。
+func TestWorkspaceForInferenceKey(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"workspaces":{"a":{"api_key":"ka","inference_key":"ia"},"b":{"inference_key":"ib"}}}`))
+	if err != nil {
+		t.Fatalf("配置应合法: %v", err)
+	}
+	if got := cfg.WorkspaceForInferenceKey("ia"); got != "a" {
+		t.Errorf("ia 应解析到 a，实得 %q", got)
+	}
+	if got := cfg.WorkspaceForInferenceKey("ib"); got != "b" {
+		t.Errorf("ib 应解析到 b，实得 %q", got)
+	}
+	// 两把 key 的解析必须互不相通：面板 key 不该被推理侧认出来，反之亦然。
+	// 否则 proxy 与面板两条路径会用同一个字符串打开不同的空间。
+	if got := cfg.WorkspaceForInferenceKey("ka"); got != "" {
+		t.Errorf("面板 key 不应被推理侧命中，实得 %q", got)
+	}
+	if got := cfg.WorkspaceForAPIKey("ia"); got != "" {
+		t.Errorf("推理 key 不应被面板侧命中，实得 %q", got)
+	}
+	if got := cfg.WorkspaceForInferenceKey(""); got != "" {
+		t.Errorf("空 key 不应命中任何空间，实得 %q", got)
+	}
+	if got := cfg.WorkspaceForInferenceKey("nope"); got != "" {
+		t.Errorf("未知 key 不应命中，实得 %q", got)
+	}
+}
+
+// TestWorkspaceAllowedModels 固化模型清单的三态：省略=不限制，空数组=一个都不许，
+// 有内容=只许这些。
+//
+// 空数组与省略必须可区分：用 len == 0 判断会把运维写下的「一个都不许」当成「不限制」,
+// 也就是把一条禁令悄悄失效——而这个字段存在的意义就是限制。
+func TestWorkspaceAllowedModels(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]},
+			"model-b":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"t1":{"model":"model-a"}},
+		"workspaces":{"open":{"api_key":"ko"},"none":{"inference_key":"in","models":[]},
+			"some":{"inference_key":"is","models":["model-b"]}}}`))
+	if err != nil {
+		t.Fatalf("配置应合法: %v", err)
+	}
+	cases := []struct {
+		workspace  string
+		restricted bool
+		allowed    []string
+	}{
+		{"open", false, nil},
+		{"none", true, nil},
+		{"some", true, []string{"model-b"}},
+		// 没有 models 字段的空间（只靠任务存在）同样是不限制。
+		{"t1", false, nil},
+	}
+	for _, testCase := range cases {
+		allowed, restricted := cfg.WorkspaceAllowedModels(testCase.workspace)
+		if restricted != testCase.restricted {
+			t.Errorf("%s: restricted = %v，期望 %v", testCase.workspace, restricted, testCase.restricted)
+		}
+		if len(allowed) != len(testCase.allowed) {
+			t.Errorf("%s: 清单 = %v，期望 %v", testCase.workspace, allowed, testCase.allowed)
+		}
+		for _, name := range testCase.allowed {
+			if !allowed[name] {
+				t.Errorf("%s: 应允许 %s", testCase.workspace, name)
+			}
+		}
+	}
+}
+
+// TestWorkspaceModelsParseErrors 固化模型清单的引用校验。
+//
+// 写错一个名字会让该空间静默少一个可用模型，排查要翻两边配置，因此在解析期直接报错。
+func TestWorkspaceModelsParseErrors(t *testing.T) {
+	build := func(models string) string {
+		return `{"config_version":4,"local_api_key":"k",
+			"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+			"models":{"model-a":{"targets":[{"provider":"p","key":"k"}],"aliases":["alias-a"]}},
+			"workspaces":{"a":{"api_key":"ka","models":` + models + `}}}`
+	}
+	// 别名也算合法引用：调用方可以直呼别名，解析后按真实模型算权限。
+	if _, err := FromDict(mustParse(t, build(`["alias-a"]`))); err != nil {
+		t.Errorf("别名应可作为引用: %v", err)
+	}
+	cases := []struct{ name, models, want string }{
+		{"引用未配置的模型", `["nope"]`, "workspaces.a.models[0] 引用了未配置的模型: nope"},
+		{"元素为空串", `[""]`, "workspaces.a.models[0] 不能为空"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := FromDict(mustParse(t, build(testCase.models)))
+			if err == nil {
+				t.Fatalf("应报错: %s", testCase.want)
+			}
+			if err.Error() != testCase.want {
+				t.Errorf("错误文本 = %q，期望 %q", err.Error(), testCase.want)
+			}
+		})
+	}
+}
+
+// TestWorkspaceModelsKeepsGroupWithoutCredentials 固化：只带 models（无任何 key）的
+// 空间分组不会被解析丢掉。
+//
+// 这是最常见的配置形态——「一个已经有任务的空间被加上了模型限制」，此时它两把 key
+// 都没有。若因为「没有凭据」把它丢了，models 会在热重载后静默消失：限制看起来配了，
+// 实际完全没生效。
+func TestWorkspaceModelsKeepsGroupWithoutCredentials(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"t1":{"model":"model-a","workspace":"teamA"}},
+		"workspaces":{"teamA":{"models":["model-a"]}}}`))
+	if err != nil {
+		t.Fatalf("配置应合法: %v", err)
+	}
+	allowed, restricted := cfg.WorkspaceAllowedModels("teamA")
+	if !restricted || !allowed["model-a"] {
+		t.Fatalf("teamA 的模型清单应被保留，实得 restricted=%v allowed=%v", restricted, allowed)
+	}
+	// models 为空数组也留：那是「一个都不许直呼」这条禁令本身。
+	empty, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"workspaces":{"teamA":{"models":[]}}}`))
+	if err != nil {
+		t.Fatalf("配置应合法: %v", err)
+	}
+	if _, restricted := empty.WorkspaceAllowedModels("teamA"); !restricted {
+		t.Error("空清单也应被视为「已配置」（一个都不许直呼）")
+	}
+}
+
 // TestWorkspacesOptional 固化兼容性：没有 workspaces 段的既有配置行为不变。
 func TestWorkspacesOptional(t *testing.T) {
 	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
