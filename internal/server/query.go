@@ -81,7 +81,10 @@ var (
 	qFloat24    = canonical.NewFloat(24)
 	qFloatOne   = canonical.NewFloat(1)
 	qInt60      = canonical.NewInt("60")
-	callerTypes = []string{"local", "visitor"}
+	// 三档：本机（local_api_key）、访客（amkr-visitor）、工作空间推理凭据。
+	// workspace 是 Go 侧新增（参照实现只有前两档），语料锁定的 filter/snapshot
+	// 用例都只用 local 与 visitor，因此加这一档不影响它们。
+	callerTypes = []string{"local", "visitor", "workspace"}
 )
 
 // metricsSnapshotParams 对应 app.py:212-216 的 GET /metrics 签名。

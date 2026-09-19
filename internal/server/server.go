@@ -220,6 +220,10 @@ func New(options Options) (*App, error) {
 		// 参照实现只有一个 authenticator（app.state.authenticator），proxy 也走它
 		// （proxy_handler.py 的 authorize 读 app.state）。proxy 侧的接缝只关心
 		// visitor_only 一个布尔，因此这里做一次收窄转换。
+		//
+		// 宿主自带的身份体系里没有「工作空间凭据」这个概念，因此 Workspace 留空：
+		// 空间仍由 X-AMKR-Workspace 头选择。作用域推理凭据是 AMKR 自己的配置能力，
+		// 它在 proxy 的默认判定里解析（见 proxy.Handler.authorize）。
 		authorizer := options.Authorizer
 		proxyOptions.Authorizer = func(r *http.Request, localAPIKey string) *proxy.AuthorizerResult {
 			context := authorizer(r, localAPIKey)

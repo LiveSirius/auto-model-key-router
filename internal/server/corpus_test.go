@@ -327,12 +327,18 @@ func TestServerMatchesPython(t *testing.T) {
 				t.Errorf("content-type 不一致: got %q want %v",
 					got, derefOrNull(entry.ContentType))
 			}
+			wantBody := entry.BodyText
+			amended := false
+			if rewritten, ok := amendCallerTypeLiteralBody(t, entry.Name, wantBody); ok {
+				wantBody = rewritten
+				amended = true
+			}
 			if entry.Method == "HEAD" {
 				// httptest.ResponseRecorder 不会像真实 http.Server 那样丢弃 HEAD 的
 				// 响应体（处理器写了什么就记什么），因此 HEAD 用例只比对状态码与
 				// 响应头——参照实现的空体是 HTTP 服务器行为，不是处理器行为。
-			} else if body != entry.BodyText {
-				t.Errorf("响应体不一致:\n got=%s\nwant=%s", body, entry.BodyText)
+			} else if body != wantBody {
+				t.Errorf("响应体不一致:\n got=%s\nwant=%s", body, wantBody)
 			}
 			if entry.BodyNormalized {
 				// 归一化过的响应体长度不可比（占位符与真实时间/路径的长度不同），
@@ -345,12 +351,53 @@ func TestServerMatchesPython(t *testing.T) {
 				}
 				return
 			}
+			if amended {
+				// 体被替换过，语料里的 content_length 不再适用；改成断言它与**替换后**
+				// 的期望体长自洽。上面的逐字节比对已经保证了与 Go 实测体一致。
+				if got := recorder.Header().Get("Content-Length"); got != strconv.Itoa(len(wantBody)) {
+					t.Errorf("content-length 不一致: got %q want %d（替换后期望体长）",
+						got, len(wantBody))
+				}
+				return
+			}
 			if got := recorder.Header().Get("Content-Length"); !equalOptionalHeader(got, entry.ContentLength) {
 				t.Errorf("content-length 不一致: got %q want %v",
 					got, derefOrNull(entry.ContentLength))
 			}
 		})
 	}
+}
+
+// amendCallerTypeLiteralBody 处理 caller_type 取值集合扩档造成的对拍偏离，返回替换后的
+// 期望体与是否发生了替换。
+//
+// caller_type 从参照实现的 {local, visitor} 扩到 {local, visitor, workspace}（见
+// server/query.go 的 callerTypes，Go 侧新增的第三档是「工作空间推理凭据」）。Pydantic
+// 的 literal_error 会把整个取值集合写进错误文本，因此那两条 422 用例的响应体必然不同
+// ——这不是 bug，是加了合法取值之后的必然结果。
+//
+// **不改语料文件本身**：它是真实 Python 应用产出的冻结证据，「逐字节对拍」这个说法的
+// 全部价值都建立在它没被手工改过之上。这里只做一处**可验证的**替换：把旧的取值集合
+// 文本换成新的，然后仍然逐字节比对——也就是说，除了取值集合本身，其余字节（键序、
+// error type、loc、input、嵌套结构、转义）依旧与参照实现一字不差地相符。
+//
+// 若语料里找不到旧文本（例如将来重新生成了语料），直接失败而不是静默放过：那说明
+// 这个偏离的前提变了，必须有人重新判断一次。
+func amendCallerTypeLiteralBody(t *testing.T, name, body string) (string, bool) {
+	t.Helper()
+	switch name {
+	case "requests_caller_type_invalid", "requests_caller_type_empty":
+	default:
+		return body, false
+	}
+	const (
+		oldSet = "'local' or 'visitor'"
+		newSet = "'local', 'visitor' or 'workspace'"
+	)
+	if !strings.Contains(body, oldSet) {
+		t.Fatalf("语料 %s 里找不到 %s：对拍前提已变，请重新生成语料或复核 callerTypes", name, oldSet)
+	}
+	return strings.ReplaceAll(body, oldSet, newSet), true
 }
 
 // TestServerCorpusCoversEveryRoute 断言语料覆盖了 app 面的每一条路由。

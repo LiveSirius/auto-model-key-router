@@ -39,8 +39,13 @@ const createTableSQL = `
 //
 // caller_type 的历史值可能是 NULL 或早期写错的其它字符串，统一收敛到 'local'；
 // requested_model_id 是后加的列，老行默认空串，用 model_id 回填。
+//
+// 合法值表在这里必须与 server/query.go 的 callerTypes 一致：这条 UPDATE 只在
+// caller_type 列**不存在**时才执行（ensureColumn 里 `if exists { return nil }`），
+// 因此它不会碰到新写入的 'workspace' 行；但漏掉一档会让一次老库升级把那种行
+// 静默改写成 'local'，指标永久失真。
 var backfillStatements = [...]string{
-	"UPDATE request_metrics SET caller_type = 'local' WHERE caller_type IS NULL OR caller_type NOT IN ('local', 'visitor')",
+	"UPDATE request_metrics SET caller_type = 'local' WHERE caller_type IS NULL OR caller_type NOT IN ('local', 'visitor', 'workspace')",
 	"UPDATE request_metrics SET requested_model_id = model_id WHERE requested_model_id = ''",
 }
 

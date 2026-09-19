@@ -181,3 +181,75 @@ func TestWorkspaceUsageRejectsNonPositiveHours(t *testing.T) {
 		t.Fatalf("错误类型 = %T, 期望 *ValidationError", err)
 	}
 }
+
+// TestRecordKeepsWorkspaceCallerType 固化 caller_type 的第三档 'workspace' 能落库。
+//
+// Go 侧新增（参照实现只有 local / visitor）。store.Record 里有一个白名单，未列的取值
+// 会被**静默改写成 'local'**——那会让工作空间流量在看板上算成本机（权限最高的一档），
+// 归因彻底失真。因此这一档必须显式被接受。
+func TestRecordKeepsWorkspaceCallerType(t *testing.T) {
+	store := tempStore(t)
+	usage := canonical.NewObjectOf(
+		canonical.ObjectPair{Key: "prompt_tokens", Value: canonical.NewIntValue(10)},
+		canonical.ObjectPair{Key: "completion_tokens", Value: canonical.NewIntValue(0)},
+	)
+	if err := store.Record(RecordParams{
+		ModelID:    "model-a",
+		KeyName:    "key-a",
+		Usage:      usage,
+		CallerType: "workspace",
+		Workspace:  "teamA",
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+
+	hours := 24.0
+	value, err := store.Snapshot(&hours, nil)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	callerTypes, _ := value.Obj.Get("caller_types")
+	if _, ok := callerTypes.Obj.Get("workspace"); !ok {
+		t.Fatalf("snapshot 应含 workspace 档，实得 %v", callerTypes.Obj.Keys())
+	}
+	// 且不得被算成 local。
+	workspaceStats, _ := callerTypes.Obj.Get("workspace")
+	if got := statInt(t, workspaceStats, "requests"); got != 1 {
+		t.Errorf("workspace 档请求数 = %d，期望 1", got)
+	}
+	localStats, _ := callerTypes.Obj.Get("local")
+	if got := statInt(t, localStats, "requests"); got != 0 {
+		t.Errorf("local 档请求数 = %d，期望 0（不得把 workspace 归进 local）", got)
+	}
+}
+
+// TestRecordRejectsUnknownCallerType 固化：未知 caller_type 仍然收敛到 'local'。
+//
+// 这是既有行为，与新档无关——写在这里是为了让「加档」与「兜底」两个方向同时被锁住：
+// 放宽白名单时不能顺手把兜底也取消掉。
+func TestRecordRejectsUnknownCallerType(t *testing.T) {
+	store := tempStore(t)
+	usage := canonical.NewObjectOf(
+		canonical.ObjectPair{Key: "prompt_tokens", Value: canonical.NewIntValue(10)},
+		canonical.ObjectPair{Key: "completion_tokens", Value: canonical.NewIntValue(0)},
+	)
+	if err := store.Record(RecordParams{
+		ModelID:    "model-a",
+		KeyName:    "key-a",
+		Usage:      usage,
+		CallerType: "bogus",
+		Workspace:  "teamA",
+	}); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	hours := 24.0
+	value, err := store.Snapshot(&hours, nil)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	callerTypes, _ := value.Obj.Get("caller_types")
+	localStats, _ := callerTypes.Obj.Get("local")
+	if got := statInt(t, localStats, "requests"); got != 1 {
+		t.Errorf("未知 caller_type 应收敛到 local，local 请求数 = %d，期望 1", got)
+	}
+}

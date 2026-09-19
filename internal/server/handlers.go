@@ -4,10 +4,12 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 
 	"github.com/Sparrived/auto-model-key-router/internal/auth"
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
+	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/health"
 	"github.com/Sparrived/auto-model-key-router/internal/keypool"
 	"github.com/Sparrived/auto-model-key-router/internal/metrics"
@@ -40,12 +42,22 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 //
 // 与 /health 的差别是它**需要鉴权**，且访客看到的是另一份模型清单
 // （key_pool.available_model_ids(visitor_only=True) 返回 "amkr-" 前缀的对外名）。
+//
+// 作用域推理凭据看到的是**第三份**清单：它的空间配置了 models 白名单时按白名单收窄，
+// 否则只列任务名（那是它天然被授权调用的名字）。这份清单必须与 proxy 的判定一致——
+// 列了却调不动、或调得动却不在清单里，都会让接入方以为自己配错了。
 func (a *App) handleModels(w http.ResponseWriter, r *http.Request) {
 	a.withLease(w, func(resources *runtime.RuntimeResources) {
 		context := auth.Authenticate(a.options.Authorizer, r, resources.Config.LocalAPIKey)
+		scoped := ""
 		if context == nil {
-			writeErrorEnvelope(w, http.StatusUnauthorized, authFailureMessage)
-			return
+			// 完整权限与访客都没通过，再看是不是某个空间的推理 key。判定顺序与
+			// proxy.Handler.authorize 一致。
+			scoped = resources.Config.WorkspaceForInferenceKey(auth.RequestAPIKey(r.Header))
+			if scoped == "" {
+				writeErrorEnvelope(w, http.StatusUnauthorized, authFailureMessage)
+				return
+			}
 		}
 		pool := keyPoolOf(resources)
 		if pool == nil {
@@ -53,8 +65,12 @@ func (a *App) handleModels(w http.ResponseWriter, r *http.Request) {
 			writeInternalError(w)
 			return
 		}
-		items := make([]*canonical.Value, 0)
-		for _, modelID := range pool.AvailableModelIDs(context.VisitorOnly()) {
+		names := pool.AvailableModelIDs(context != nil && context.VisitorOnly())
+		if scoped != "" {
+			names = scopedModelNames(resources.Config, scoped)
+		}
+		items := make([]*canonical.Value, 0, len(names))
+		for _, modelID := range names {
 			items = append(items, canonical.NewObjectOf(
 				canonical.ObjectPair{Key: "id", Value: canonical.NewString(modelID)},
 				canonical.ObjectPair{Key: "object", Value: canonical.NewString("model")},
@@ -66,6 +82,34 @@ func (a *App) handleModels(w http.ResponseWriter, r *http.Request) {
 			canonical.ObjectPair{Key: "data", Value: canonical.NewArray(items...)},
 		))
 	})
+}
+
+// scopedModelNames 列出某个工作空间的作用域凭据**可直呼**的名字（升序）。
+//
+// 配置了 models 白名单时就是它（按名字升序，与 AvailableModelIDs 的排序口径一致）；
+// 没配置时退化成该空间的**任务名**——任务名是该空间唯一天然隔离的东西，也是作用域
+// 凭据本来最该用的调用方式。
+//
+// unified-model 刻意不进这份清单：它是全局计划，作用域凭据用不了（见 proxy 的同名
+// 判断）。任务名里即便有人起了这个名也不会出现——任务名与保留模型名同名会在配置层
+// 就被判非法。
+func scopedModelNames(cfg *config.RouterConfig, workspace string) []string {
+	if allowed, restricted := cfg.WorkspaceAllowedModels(workspace); restricted {
+		names := make([]string, 0, len(allowed))
+		for name := range allowed {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		return names
+	}
+	names := make([]string, 0)
+	for i := range cfg.Tasks {
+		if config.NormalizeWorkspace(cfg.Tasks[i].Workspace) == workspace {
+			names = append(names, cfg.Tasks[i].Name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 // handleMetrics 对应 app.py:212-233 的 GET /metrics。

@@ -287,7 +287,7 @@ func (s *Store) Record(params RecordParams) error {
 		requestModelID = *params.RequestedModelID
 	}
 	callerType := "local"
-	if params.CallerType == "local" || params.CallerType == "visitor" {
+	if params.CallerType == "local" || params.CallerType == "visitor" || params.CallerType == "workspace" {
 		callerType = params.CallerType
 	}
 	failure := params.Failed || params.StatusCode == nil || *params.StatusCode >= 400

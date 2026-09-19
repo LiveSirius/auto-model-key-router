@@ -54,6 +54,63 @@ func TestModelsExcludesUnconfiguredModelAndAppendsUnified(t *testing.T) {
 	}
 }
 
+// workspaceModelsFixture 是一份带作用域推理凭据的配置文本。
+//
+// teamA 有 models 清单（只许直呼 model-a）；teamB 没有清单（不限制）。两者各有自己的
+// 任务，用来验证「没配清单时清单退化成任务名」这条回退语义。
+const workspaceModelsFixture = `{
+  "config_version": 4,
+  "local_api_key": "local-key",
+  "host": "127.0.0.1",
+  "port": 8000,
+  "endpoint_capabilities_path": "<CAP>",
+  "metrics_db_path": "<DB>",
+  "log_file_path": "<LOG>",
+  "webui_enabled": false,
+  "ops_enabled": true,
+  "providers": {"prov-a": {"base_url": "https://a.test", "keys": {"key-a": {"api_key": "sk-a"}}}},
+  "models": {
+    "model-a": {"targets": [{"provider": "prov-a", "key": "key-a", "upstream_model": "model-a"}]},
+    "model-b": {"targets": [{"provider": "prov-a", "key": "key-a", "upstream_model": "model-b"}]}
+  },
+  "tasks": {"only-b": {"workspace": "teamB", "model": "model-b"}},
+  "workspaces": {
+    "teamA": {"inference_key": "ia", "models": ["model-a"]},
+    "teamB": {"inference_key": "ib", "tasks": {"only-b": {"model": "model-b"}}}
+  }
+}`
+
+// TestModelsNarrowedForScopedInferenceKey 固化 /v1/models 对作用域凭据的收窄。
+//
+// 清单必须与 proxy 的判定一致：列了却调不动、或调得动却不在清单里，都会让接入方
+// 以为自己配错了。三种情况：
+//
+//   - teamA 配了清单 -> 只列清单里的 model-a；
+//   - teamB 没配清单 -> 退化成它的**任务名**（那是它天然被授权调用的东西）；
+//   - 未知 key -> 401（作用域凭据不是万能通行证）。
+func TestModelsNarrowedForScopedInferenceKey(t *testing.T) {
+	app := newTestAppWith(t, t.TempDir(), appFixture{opsEnabled: true, configText: workspaceModelsFixture})
+
+	restricted := modelIDs(t, serve(app, http.MethodGet, "/v1/models", "Bearer ia"))
+	if len(restricted) != 1 || restricted[0] != "model-a" {
+		t.Errorf("配了清单的空间应只看到清单内容，实得 %v", restricted)
+	}
+	// unified-model 是全局计划，作用域凭据用不了，因此不该出现。
+	if contains(restricted, "unified-model") {
+		t.Errorf("作用域清单不应含 unified-model: %v", restricted)
+	}
+
+	byTask := modelIDs(t, serve(app, http.MethodGet, "/v1/models", "Bearer ib"))
+	if len(byTask) != 1 || byTask[0] != "only-b" {
+		t.Errorf("没配清单的空间应看到自己的任务名，实得 %v", byTask)
+	}
+
+	unknown := serve(app, http.MethodGet, "/v1/models", "Bearer nope")
+	if unknown.Code != http.StatusUnauthorized {
+		t.Errorf("未知 key 应 401，实得 %d（body=%s）", unknown.Code, unknown.Body.String())
+	}
+}
+
 // modelIDs 从 /v1/models 响应里取出 id 列表。
 func modelIDs(t *testing.T, recorder *httptest.ResponseRecorder) []string {
 	t.Helper()
