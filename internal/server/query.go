@@ -67,20 +67,20 @@ type qParam struct {
 
 // 复用的边界字面量。它们是只读的（校验过程绝不改写），因此可以共享。
 var (
-	qFloat0     = canonical.NewFloat(0)
-	qFloat8760  = canonical.NewFloat(8760)
-	qFloat720   = canonical.NewFloat(720)
-	qInt1       = canonical.NewInt("1")
-	qInt15      = canonical.NewInt("15")
-	qInt50      = canonical.NewInt("50")
-	qInt100     = canonical.NewInt("100")
-	qInt200     = canonical.NewInt("200")
-	qInt599     = canonical.NewInt("599")
-	qInt86400   = canonical.NewInt("86400")
-	qBoolFalse  = canonical.NewBool(false)
-	qFloat24    = canonical.NewFloat(24)
-	qFloatOne   = canonical.NewFloat(1)
-	qInt60      = canonical.NewInt("60")
+	qFloat0    = canonical.NewFloat(0)
+	qFloat8760 = canonical.NewFloat(8760)
+	qFloat720  = canonical.NewFloat(720)
+	qInt1      = canonical.NewInt("1")
+	qInt15     = canonical.NewInt("15")
+	qInt50     = canonical.NewInt("50")
+	qInt100    = canonical.NewInt("100")
+	qInt200    = canonical.NewInt("200")
+	qInt599    = canonical.NewInt("599")
+	qInt86400  = canonical.NewInt("86400")
+	qBoolFalse = canonical.NewBool(false)
+	qFloat24   = canonical.NewFloat(24)
+	qFloatOne  = canonical.NewFloat(1)
+	qInt60     = canonical.NewInt("60")
 	// 三档：本机（local_api_key）、访客（amkr-visitor）、工作空间推理凭据。
 	// workspace 是 Go 侧新增（参照实现只有前两档），语料锁定的 filter/snapshot
 	// 用例都只用 local 与 visitor，因此加这一档不影响它们。
