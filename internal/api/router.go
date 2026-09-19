@@ -32,6 +32,10 @@ func (s *Server) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces", s.handleCreateWorkspace)
 	mux.HandleFunc("PUT /api/workspaces/{workspace}", s.handleRenameWorkspace)
 	mux.HandleFunc("DELETE /api/workspaces/{workspace}", s.handleDeleteWorkspace)
+	// 推理凭据轮换与「可直呼模型」清单。与上面那对同属工作空间，但作用在**子资源**上，
+	// 因此路径多一段。
+	mux.HandleFunc("POST /api/workspaces/{workspace}/inference-key", s.handleRotateInferenceKey)
+	mux.HandleFunc("PUT /api/workspaces/{workspace}/models", s.handleSetWorkspaceModels)
 	// 整包迁移（带面板 key，与 /api/config/export 刻意分开，见
 	// handlers_workspace_migration.go）。注册在 /api/workspaces/{workspace} 之后：
 	// 路径段的模式不会匹配到 export/import 这两条更具体的字面量模式，ServeMux 按
@@ -162,6 +166,8 @@ func workspacePatterns() []string {
 		"POST /api/workspaces",
 		"PUT /api/workspaces/{workspace}",
 		"DELETE /api/workspaces/{workspace}",
+		"POST /api/workspaces/{workspace}/inference-key",
+		"PUT /api/workspaces/{workspace}/models",
 		"POST /api/workspaces/export",
 		"POST /api/workspaces/import",
 	}

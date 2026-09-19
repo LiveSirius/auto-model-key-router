@@ -433,6 +433,17 @@ func TestWorkspaceImportRejectsDuplicateKey(t *testing.T) {
 	if created.Code != http.StatusCreated {
 		t.Fatalf("建空间状态码 = %d（body=%s）", created.Code, created.Body.String())
 	}
+	// 建空间同时发一把推理 key（服务端生成，明文只在这次响应里）。它同样落在配置里，
+	// 因此下面的「配置未变」断言要带上它——否则会因为一个**预期内**的字段而失败。
+	var createBody struct {
+		InferenceKey string `json:"inference_key"`
+	}
+	if err := json.Unmarshal(created.Body.Bytes(), &createBody); err != nil {
+		t.Fatalf("解析建空间响应失败: %v（body=%s）", err, created.Body.String())
+	}
+	if !strings.HasPrefix(createBody.InferenceKey, "amkr_ik_") {
+		t.Fatalf("建空间应返回 amkr_ik_ 前缀的推理 key，实际 %q", createBody.InferenceKey)
+	}
 
 	bundleJSON := `{"spaces":{"incoming":{"api_key":"amkr_ws_taken","tasks":{"t":{"model":"model-a"}}}}}`
 	revision = currentRevision(t, path)
@@ -448,7 +459,8 @@ func TestWorkspaceImportRejectsDuplicateKey(t *testing.T) {
 	// 失败的导入不改配置。
 	withHolder := strings.Replace(workspaceFixture,
 		`"workspaces": {"teamA": {"tasks": {"team-a-only": {"model": "model-b"}}}}`,
-		`"workspaces": {"holder": {"api_key": "amkr_ws_taken"}, "teamA": {"tasks": {"team-a-only": {"model": "model-b"}}}}`,
+		`"workspaces": {"holder": {"api_key": "amkr_ws_taken", "inference_key": "`+createBody.InferenceKey+`"}, `+
+			`"teamA": {"tasks": {"team-a-only": {"model": "model-b"}}}}`,
 		1)
 	assertConfigUnchanged(t, path, withHolder)
 

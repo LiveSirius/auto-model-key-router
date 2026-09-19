@@ -250,6 +250,20 @@ var specWorkspaceCreate = newModelSpec("WorkspaceCreate",
 	nul("api_key", kindStr).minLenOf(1),
 )
 
+// specWorkspaceModels 是设定工作空间可直呼模型清单的请求体（Go 侧新增，无 Python 先例）。
+//
+// models 必填但可为 null，三种取值各有含义：
+//   - `[...]` 允许直呼这些模型；
+//   - `[]`  一个都不许直呼（只走任务名）；
+//   - `null` 清除清单，回到「不限制」。
+//
+// 必填是为了不让「漏传字段」被当成「清除限制」——那是把一条授权悄悄放宽。要清除就
+// 显式写 null。
+var specWorkspaceModels = newModelSpec("WorkspaceModels",
+	req("config_revision", kindStr).minLenOf(1),
+	fieldSpec{name: "models", kind: kindStrList, required: true, nullable: true},
+)
+
 // specWorkspaceExport 是工作空间导出请求体（Go 侧新增，无 Python 先例）。
 //
 // 整个 body 可省略（导出全部）；给了就按 workspaces 列出的名字导出。
