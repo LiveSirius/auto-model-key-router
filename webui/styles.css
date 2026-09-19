@@ -255,8 +255,10 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
   gap: var(--sp-2);
   align-items: stretch;
 }
-/* 列容器撑满行高，里面的卡片再撑满列容器，撑满才能等高。 */
-.grid-12 > [class*="col-"] { display: flex; flex-direction: column; min-width: 0; }
+/* 列容器撑满行高，里面的卡片再撑满列容器，撑满才能等高。
+ * gap 只为"同列叠放多张卡"准备（如概览的两种构成图）：不加时两张卡会贴在一起，
+ * 与栅格其余处恒为 gap 的节奏不一致。单卡列不受影响。 */
+.grid-12 > [class*="col-"] { display: flex; flex-direction: column; min-width: 0; gap: var(--sp-2); }
 .grid-12 > [class*="col-"] > * { flex: 1 1 auto; min-width: 0; }
 .col-3 { grid-column: span 3; }
 .col-4 { grid-column: span 4; }

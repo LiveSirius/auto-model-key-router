@@ -798,7 +798,14 @@ function draw(firstPaint = false) {
     // 热力图是"一眼看节律"的图，占满整行；24 个小时列塞进 col-4 每格只剩十几像素。
     h("div.col-12", {}, heatmapCard()),
     h("div.col-5", {}, streamCard()),
-    h("div.col-7", {}, outcomeCard(points, bucketSeconds)),
+    // 两张堆叠柱上下同列：它们画的是同一份 points、同一个桶宽，横轴完全对齐，
+    // 并排看"结果结构"与"Token 结构"才读得出同步异动。此前 Token 图单独占
+    // col-12，而请求流限高 520px 把本排撑到 652px，"结果构成"卡下方空出近 300px
+    // —— 不是把图拉高填满（定高图表拉长只会让图内多出空白），而是把这张图搬进来。
+    h("div.col-7", {},
+      outcomeCard(points, bucketSeconds),
+      tokenBreakdownCard(points, bucketSeconds),
+    ),
     h("div.col-4", {}, compositionCard(metrics)),
     h("div.col-4", {}, statusCard(metrics)),
     h("div.col-4", {}, statusCodeCard(metrics)),
@@ -811,7 +818,6 @@ function draw(firstPaint = false) {
       format: (row) => `${formatCompact(row.value)} Token`,
     })),
     h("div.col-6", {}, costRankingCard(metrics)),
-    h("div.col-12", {}, tokenBreakdownCard(points, bucketSeconds)),
     h("div.col-12", {}, runtimeCard()),
   ));
 
