@@ -194,6 +194,14 @@ type Options struct {
 // 只被读这一个字段（proxy_handler.py:209）。
 type AuthorizerResult struct {
 	VisitorOnly bool
+	// Workspace 非空表示本次请求由一把**作用域推理凭据**发起，且它被钉死在这个
+	// 工作空间上。
+	//
+	// 钉死的意思是忽略请求头 X-AMKR-Workspace：空间由 key 决定。这是这个模式存在的
+	// 全部意义——key 会被配进各个项目的环境变量，若能用一个请求头换空间，一把泄漏的
+	// key 就等于所有空间的推理权限。与面板 key 的做法一致（见 api 的
+	// authorizedTaskConfig）。
+	Workspace string
 }
 
 // Handler 是代理请求的编排器。

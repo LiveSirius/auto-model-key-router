@@ -154,9 +154,13 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		return nil
 	}
 	visitorOnly := authorization.VisitorOnly
+	// scopedWorkspace 非空表示凭据被钉死在某个工作空间上，据此**忽略请求头**。
+	scopedWorkspace := authorization.Workspace
 	callerType := "local"
 	if visitorOnly {
 		callerType = "visitor"
+	} else if scopedWorkspace != "" {
+		callerType = "workspace"
 	}
 
 	payload, body, flat, bodyErr := h.readRequestBody(request, request.Header.Get("Content-Type"))
@@ -189,6 +193,14 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 			jsonErrorResponse("访客 key 无权访问模型: "+config.UNIFIED_MODEL_ID))
 		return nil
 	}
+	// 作用域凭据同样不能用 unified-model：它是一份**全局**计划（由运维为整台实例挑的
+	// 默认首选/备选），不属于任何工作空间，因此绕过按空间收窄的模型白名单。要让它
+	// 可用，运维就把具体模型名写进该空间的 models 清单——那是显式的授权。
+	if scopedWorkspace != "" && requestedModelName == config.UNIFIED_MODEL_ID {
+		writeJSON(w, http.StatusForbidden,
+			jsonErrorResponse("工作空间 "+scopedWorkspace+" 无权访问模型: "+config.UNIFIED_MODEL_ID))
+		return nil
+	}
 
 	// 任务名路由：模型与采样参数都由任务固定，调用方只能传任务名。必须在
 	// resolve_route 之前判断，否则任务的 key=None 会把调用方指定的 Key 冲掉。
@@ -197,7 +209,15 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 	// 工作空间来自 X-AMKR-Workspace 头，缺省即默认工作空间；任务名只在所选空间
 	// 内查表。访客仍然不能使用任务（`!visitorOnly`），工作空间头也不例外——
 	// 访客无权访问任何任务，多一个维度只会扩大面。
-	workspace := config.NormalizeWorkspace(request.Header.Get(config.WorkspaceHeader))
+	//
+	// 作用域推理凭据（scopedWorkspace 非空）**忽略请求头**：空间由 key 决定。这是
+	// 这个模式要防的核心事情，与面板 key 在管理面的做法一致（api 的
+	// authorizedTaskConfig）。若请求头能换空间，一把配进项目环境变量的 key 泄漏后
+	// 就等于所有空间的推理权限。
+	workspace := scopedWorkspace
+	if workspace == "" {
+		workspace = config.NormalizeWorkspace(request.Header.Get(config.WorkspaceHeader))
+	}
 	var taskParams *canonical.Value
 	var taskName *string
 	if !visitorOnly {
@@ -244,6 +264,17 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 			return nil
 		}
 		modelID = resolved
+		// 作用域凭据的模型白名单：任务名不查（任务自己固定的模型就是该空间被授权用的），
+		// 直呼真实模型名时才判。放在解析**之后**，这样别名也按它解析到的真实模型算，
+		// 而不是拿别名去比对清单——否则同一个模型写成别名就绕过了。
+		if scopedWorkspace != "" && taskName == nil {
+			if allowed, restricted := resources.Config.WorkspaceAllowedModels(scopedWorkspace); restricted && !allowed[modelID] {
+				h.logModelNotConfigured(path, requestedModelID, modelID, workspace, "workspace_model_not_allowed")
+				writeJSON(w, http.StatusForbidden, jsonErrorResponse(
+					"工作空间 "+scopedWorkspace+" 无权访问模型: "+requestedModelName))
+				return nil
+			}
+		}
 		if requestedKey != nil {
 			value := key
 			requestedKey = &value
@@ -319,15 +350,25 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 //
 // 默认实现直接转 internal/auth（hmac.Equal 的恒定时间比较）；Options.Authorizer
 // 非空时整体替换，对应参照实现的 create_app(authenticator=...)。
+//
+// 作用域推理凭据的识别刻意放在这里而不是塞进 internal/auth：auth 是被逐字节语料
+// 锁定的纯函数（已退役的 Python 参照实现没有工作空间这个概念），往它里面加分支会
+// 让那份对拍证据的含义变模糊。这与面板 key 在 api 层的处置相同——那条路径同样
+// 「从不构造 ModeFull」。
 func (h *Handler) authorize(request *http.Request, cfg *config.RouterConfig) *AuthorizerResult {
 	if h.authorizer != nil {
 		return h.authorizer(request, cfg.LocalAPIKey)
 	}
 	context := auth.Authenticate(nil, request, cfg.LocalAPIKey)
-	if context == nil {
-		return nil
+	if context != nil {
+		return &AuthorizerResult{VisitorOnly: context.VisitorOnly()}
 	}
-	return &AuthorizerResult{VisitorOnly: context.VisitorOnly()}
+	// 完整权限与访客都没通过，再看是不是某个空间的推理 key。顺序不能反：推理 key
+	// 必须先排除在完整权限之外，否则一把空间的 key 就能当管理员用。
+	if workspace := cfg.WorkspaceForInferenceKey(auth.RequestAPIKey(request.Header)); workspace != "" {
+		return &AuthorizerResult{Workspace: workspace}
+	}
+	return nil
 }
 
 // writeRouteError 把 ResolveRoute / ResolveUnifiedPlan 的错误折算成下游响应。

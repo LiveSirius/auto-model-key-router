@@ -237,3 +237,243 @@ func TestVisitorCannotUseWorkspaceTasks(t *testing.T) {
 		t.Fatalf("访客不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
 	}
 }
+
+// scopedConfig 构造一份带作用域推理凭据的两空间配置：
+//
+//	teamA：推理 key ia，任务 shared -> model-b，允许直呼 model-b
+//	teamB：推理 key ib，任务 shared -> model-a，无 models 清单（不限制）
+//	默认空间：任务 shared -> model-a
+//
+// 每个空间的 shared 指向不同模型，因此「用的是哪个模型」就说明空间钉在了哪一个。
+func scopedConfig() *config.RouterConfig {
+	cfg := workspaceConfig()
+	cfg.Tasks = append(cfg.Tasks, config.TaskConfig{Name: "shared", Workspace: "teamB", Model: "model-a"})
+	cfg.Workspaces = []config.WorkspaceConfig{
+		{Name: "teamA", InferenceKey: "ia", Models: []string{"model-b"}},
+		{Name: "teamB", InferenceKey: "ib"},
+	}
+	return cfg
+}
+
+// TestScopedKeyPinsWorkspaceIgnoringHeader 是本能力最核心的一条：作用域推理 key 决定
+// 空间，且**忽略 X-AMKR-Workspace 头**。
+//
+// 若请求头能换空间，一把配进各项目环境变量的 key 泄漏后就等于拿到所有空间的推理权限
+// ——而它之所以被设计出来，正是因为项目环境变量是最容易泄漏的地方。因此这里断言两次
+// 调用（带一个**别的空间**的头、带一个不存在的头）都仍然落在 key 自己的空间上。
+func TestScopedKeyPinsWorkspaceIgnoringHeader(t *testing.T) {
+	env := newTestEnv(t, scopedConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+
+	body := `{"model":"shared","messages":[{"role":"user","content":"hi"}]}`
+
+	// 不带任何工作空间头：teamB 的 shared -> model-a（用 ka）。
+	if got := env.request(http.MethodPost, "chat/completions", body,
+		map[string]string{"Authorization": "Bearer ib"}); got.Code != http.StatusOK {
+		t.Fatalf("不带头的状态码: got %d（%s）", got.Code, got.Body.String())
+	}
+	if key := env.transport.calls[0].headers["authorization"]; key != "Bearer sk-ka" {
+		t.Fatalf("teamB 的 shared 应指向 model-a（用 ka），实际 %q", key)
+	}
+
+	// 带头指向 teamA —— 必须被**忽略**，仍走 teamB 的 shared。
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+	got := env.request(http.MethodPost, "chat/completions", body,
+		map[string]string{"Authorization": "Bearer ib", config.WorkspaceHeader: "teamA"})
+	if got.Code != http.StatusOK {
+		t.Fatalf("带 teamA 头的状态码: got %d（%s）", got.Code, got.Body.String())
+	}
+	if key := env.transport.calls[1].headers["authorization"]; key != "Bearer sk-ka" {
+		t.Fatalf("X-AMKR-Workspace 必须被忽略（仍应走 teamB/model-a 的 ka），实际 %q", key)
+	}
+
+	// 指向一个**不存在**的空间也不行：拿不到任何别的空间的路由。
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+	got = env.request(http.MethodPost, "chat/completions", body,
+		map[string]string{"Authorization": "Bearer ib", config.WorkspaceHeader: "nope"})
+	if got.Code != http.StatusOK {
+		t.Fatalf("带不存在空间头的状态码: got %d（%s）", got.Code, got.Body.String())
+	}
+	if key := env.transport.calls[2].headers["authorization"]; key != "Bearer sk-ka" {
+		t.Fatalf("不存在的空间头也必须被忽略，实际 %q", key)
+	}
+}
+
+// TestScopedKeyCannotReachOtherWorkspaceTask 固化：作用域 key 拿不到别的空间的同名任务。
+//
+// shared 在两个空间里都存在但指向不同模型。teamA 的 key 必须始终拿到 teamA 的那份，
+// 哪怕调用方显式要求 teamB。
+func TestScopedKeyCannotReachOtherWorkspaceTask(t *testing.T) {
+	env := newTestEnv(t, scopedConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+
+	got := env.request(http.MethodPost, "chat/completions",
+		`{"model":"shared","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ia", config.WorkspaceHeader: "teamB"})
+	if got.Code != http.StatusOK {
+		t.Fatalf("状态码: got %d（%s）", got.Code, got.Body.String())
+	}
+	// teamA 的 shared -> model-b（kb），而不是 teamB 的 model-a（ka）。
+	if key := env.transport.calls[0].headers["authorization"]; key != "Bearer sk-kb" {
+		t.Fatalf("teamA 的 key 应拿到 teamA 的 shared（kb），实际 %q", key)
+	}
+}
+
+// TestScopedKeyEnforcesModelAllowlist 固化：作用域 key 只能直呼清单内的模型。
+//
+// teamA 的清单是 [model-b]。直呼 model-a 必须 403 且**不触达上游**；直呼 model-b 放行。
+// 这条是「共用网关」在模型维度的隔离——任务名天然隔离，模型名不是。
+func TestScopedKeyEnforcesModelAllowlist(t *testing.T) {
+	env := newTestEnv(t, scopedConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+
+	// 不在清单内：403，且不触达上游。
+	denied := env.request(http.MethodPost, "chat/completions",
+		`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ia"})
+	if denied.Code != http.StatusForbidden {
+		t.Fatalf("清单外模型应 403，实得 %d（%s）", denied.Code, denied.Body.String())
+	}
+	if !strings.Contains(denied.Body.String(), "无权访问模型") {
+		t.Errorf("403 文案应说明无权访问模型: %s", denied.Body.String())
+	}
+	if len(env.transport.calls) != 0 {
+		t.Fatalf("被拒的请求不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
+	}
+
+	// 在清单内：放行。
+	allowed := env.request(http.MethodPost, "chat/completions",
+		`{"model":"model-b","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ia"})
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("清单内模型应放行，实得 %d（%s）", allowed.Code, allowed.Body.String())
+	}
+	if len(env.transport.calls) != 1 {
+		t.Fatalf("应有一次上游调用，实得 %v", describeUpstreams(env.transport.calls))
+	}
+}
+
+// TestScopedKeyAllowlistMatchesAliasResolution 固化：清单按**解析后的真实模型**判定，
+// 而不是拿调用方写的别名去比对。
+//
+// 否则「同一个模型写成别名」就绕过了白名单——那是这类白名单最典型的失效方式。
+func TestScopedKeyAllowlistMatchesAliasResolution(t *testing.T) {
+	cfg := scopedConfig()
+	cfg.Models[1].Aliases = []string{"alias-b"}
+	env := newTestEnv(t, cfg, Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+
+	// teamA 的清单里只有 model-b，别名 alias-b 解析到 model-b，因此**应当放行**。
+	got := env.request(http.MethodPost, "chat/completions",
+		`{"model":"alias-b","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ia"})
+	if got.Code != http.StatusOK {
+		t.Fatalf("别名解析到清单内模型应放行，实得 %d（%s）", got.Code, got.Body.String())
+	}
+}
+
+// TestScopedKeyCannotUseUnifiedModel 固化：作用域 key 不能用 unified-model。
+//
+// unified-model 是全局计划（运维为整台实例挑的默认首选/备选），不属于任何工作空间，
+// 因此绕过按空间收窄的模型清单。要让它可用就把具体模型写进清单——那是显式授权。
+func TestScopedKeyCannotUseUnifiedModel(t *testing.T) {
+	env := newTestEnv(t, scopedConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+
+	got := env.request(http.MethodPost, "chat/completions",
+		`{"model":"unified-model","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ia"})
+	if got.Code != http.StatusForbidden {
+		t.Fatalf("作用域 key 用 unified-model 应 403，实得 %d（%s）", got.Code, got.Body.String())
+	}
+	if len(env.transport.calls) != 0 {
+		t.Fatalf("不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
+	}
+}
+
+// TestScopedKeyIsNotFullPermission 固化：推理 key 拿不到完整权限。
+//
+// 顺序错了（先判推理 key 再判完整权限）会让一把空间 key 变成管理员凭据。这里用一个
+// 错误的本机 key 反证：错误 key 与作用域 key 都不该通过完整权限那条路。
+func TestScopedKeyIsNotFullPermission(t *testing.T) {
+	cfg := scopedConfig()
+	env := newTestEnv(t, cfg, Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+
+	// 未知 key：401。
+	unknown := env.request(http.MethodPost, "chat/completions",
+		`{"model":"shared","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer nope"})
+	if unknown.Code != http.StatusUnauthorized {
+		t.Fatalf("未知 key 应 401，实得 %d（%s）", unknown.Code, unknown.Body.String())
+	}
+	if len(env.transport.calls) != 0 {
+		t.Fatalf("未鉴权请求不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
+	}
+}
+
+// TestEmptyScopedKeyDoesNotMatch 固化：空 Authorization 不命中任何空间。
+//
+// 若空串能命中（例如某个空间没配 inference_key），随便发一个空 Bearer 就能用别人的空间。
+func TestEmptyScopedKeyDoesNotMatch(t *testing.T) {
+	cfg := scopedConfig()
+	cfg.Workspaces = append(cfg.Workspaces, config.WorkspaceConfig{Name: "noKey"})
+	env := newTestEnv(t, cfg, Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+
+	got := env.request(http.MethodPost, "chat/completions",
+		`{"model":"shared","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer "})
+	if got.Code != http.StatusUnauthorized {
+		t.Fatalf("空 key 应 401，实得 %d（%s）", got.Code, got.Body.String())
+	}
+}
+
+// TestUnrestrictedScopedKeyKeepsDefaultWorkspaceBehavior 固化：没配 models 清单的
+// 作用域 key 仍可直呼全部模型（兼容既有配置的默认语义）。
+func TestUnrestrictedScopedKeyKeepsDefaultWorkspaceBehavior(t *testing.T) {
+	env := newTestEnv(t, scopedConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+
+	// teamB 没有 models 清单 -> 不限制 -> 能直呼 model-b（不在它自己的任务里）。
+	got := env.request(http.MethodPost, "chat/completions",
+		`{"model":"model-b","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ib"})
+	if got.Code != http.StatusOK {
+		t.Fatalf("无清单空间应可直呼任意模型，实得 %d（%s）", got.Code, got.Body.String())
+	}
+}
+
+// TestScopedKeyCannotReachOtherWorkspaceViaUnifiedModelFallback 固化：被清单拒掉之后
+// **不能**有任何回落。
+//
+// 这条防的是「拒绝之后悄悄换一个模型继续跑」——那样限制看起来生效（日志里有 403 的
+// 分支）而实际照跑。断言方式是拒绝后上游调用数仍为 0。
+func TestScopedKeyNoFallbackAfterDeny(t *testing.T) {
+	env := newTestEnv(t, scopedConfig(), Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	env.route("/v1/chat/completions",
+		jsonStep(200, `{"choices":[{"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}]}`))
+
+	got := env.request(http.MethodPost, "chat/completions",
+		`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ia"})
+	if got.Code != http.StatusForbidden {
+		t.Fatalf("应 403，实得 %d（%s）", got.Code, got.Body.String())
+	}
+	if len(env.transport.calls) != 0 {
+		t.Fatalf("拒绝后不得回落，实得 %v", describeUpstreams(env.transport.calls))
+	}
+}
