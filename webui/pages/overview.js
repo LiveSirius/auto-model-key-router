@@ -36,6 +36,20 @@ export const HEATMAP_BUCKET_SECONDS = 1800;
 // 尾桶是半小时聚合值，半分钟内不会变，没必要跟着 10 秒轮询重算 337 个桶。
 const HEATMAP_TTL_MS = 60000;
 
+// CALLER_TYPE_LABELS 把 caller_type 取值翻成中文。
+//
+// 三档：local（本机主 key）、visitor（amkr-visitor）、workspace（工作空间推理凭据，
+// Go 侧新增，见 server/query.go 的 callerTypes）。**必须用查表而不是三元表达式**：
+// 原先写的是 `=== "visitor" ? "访客" : "本机"`，多一档之后工作空间流量会被显示成
+// 「本机」——那正好是权限最高的一档，看板上混淆这两者会让人误判谁在用这个实例。
+//
+// 兜底回显原始值：将来再加档时宁可看到 "unknown" 这种生词，也不要被悄悄归进某一档。
+const CALLER_TYPE_LABELS = {
+  local: "本机",
+  visitor: "访客",
+  workspace: "工作空间",
+};
+
 // 页面级状态：时间范围与主图指标是用户选择，需在轮询重绘间保持。
 const state = {
   hours: 1,
@@ -578,7 +592,7 @@ function streamRow(item) {
       h("span.stream-model", { title: item.model_id }, item.model_id),
       h("span.stream-meta", {},
         [
-          item.caller_type === "visitor" ? "访客" : "本机",
+          CALLER_TYPE_LABELS[item.caller_type] || item.caller_type,
           item.key_name,
           item.provider_id || null,
           `HTTP ${item.status_code ?? "无响应"}`,

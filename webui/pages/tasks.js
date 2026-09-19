@@ -375,6 +375,16 @@ function workspaceSwitcher() {
         switchWorkspace(event.target.value);
       },
     }),
+    buttonNode("模型授权", {
+      small: true,
+      variant: "text",
+      class: "workspace-models",
+      disabled: state.saving || !actionable,
+      title: actionable
+        ? "设定这个空间允许直呼哪些模型"
+        : "默认空间不能配置模型清单（它没有作用域凭据）",
+      onClick: () => promptWorkspaceModels(current),
+    }),
     buttonNode("改名", {
       small: true,
       variant: "text",
@@ -413,8 +423,8 @@ function promptNewWorkspace() {
   const ref = dialog({
     title: "新建工作空间",
     body: h("div.stack", {},
-      h("p.muted", "空间创建后会立刻写入配置，并生成一个只属于它的面板 key——"
-        + "把它交给要嵌入工作空间面板的应用。"),
+      h("p.muted", "空间创建后会立刻写入配置，并生成两把只属于它的 key："
+        + "面板 key 交给要嵌入工作空间面板的应用，推理 key 交给要调用 /v1 的项目。"),
       nameInput,
       errorHost,
     ),
@@ -444,46 +454,178 @@ function promptNewWorkspace() {
   });
 }
 
-// showWorkspaceKey 显示新建空间的面板 key，并给出可复制的嵌入片段。
+// promptWorkspaceModels 设定某个空间**允许直呼**的模型清单（运维侧的模型维度隔离）。
 //
-// 这是明文 key 唯一出现的地方（目录接口刻意不含它，配置文件里那份不会再回到界面上），
+// 为什么需要它：任务名天然按空间隔离，但**真实模型名在配置里是全局的**——没有这份
+// 清单，任何一把推理 key 都能直呼全部模型。共用网关要能「这个项目的 key 只能用这几个
+// 模型」，就得在这里收窄。
+//
+// 三态在界面上用两个控件表达，而不是一个多选框列表：
+//   - 「不限制」勾上 -> 提交 null（清除清单）；
+//   - 否则提交勾选的模型数组（可能为空数组 = 一个都不许直呼）。
+//
+// 用「不限制」这个显式开关而不是「一个都不勾 = 不限制」：后者会让「全部取消勾选」这个
+// 明显的收紧动作变成放开一切，是这类界面里最危险的一种默认。
+function promptWorkspaceModels(workspace) {
+  const entry = state.workspaces.find((item) => item.name === workspace) || {};
+  const restricted = Array.isArray(entry.models);
+  const selected = new Set(restricted ? entry.models : []);
+
+  const errorHost = h("div");
+  const boxes = [];
+  const listHost = h("div.stack.models-list");
+  // 模型清单来自 /api/models（含别名），与任务编辑器里可选的是同一份。
+  if (!state.models.length) {
+    listHost.appendChild(h("p.muted", "当前没有可用的模型。"));
+  }
+  for (const model of state.models) {
+    const box = h("input", { type: "checkbox", value: model.id });
+    box.checked = selected.has(model.id);
+    boxes.push(box);
+    listHost.appendChild(h("label.check.models-item", {}, box, model.id));
+  }
+
+  const unrestrictedBox = h("input", { type: "checkbox" });
+  unrestrictedBox.checked = !restricted;
+  const syncDisabled = () => {
+    for (const box of boxes) box.disabled = unrestrictedBox.checked;
+    listHost.style.opacity = unrestrictedBox.checked ? "0.5" : "1";
+  };
+  syncDisabled();
+  unrestrictedBox.addEventListener("change", syncDisabled);
+
+  const ref = dialog({
+    title: `模型授权 · ${workspace}`,
+    body: h("div.stack", {},
+      h("p.muted", "这里选中的模型允许被这个空间的**推理 key 直呼**。任务名不受限制——"
+        + "任务自己固定的模型就是该空间被授权用的。"),
+      h("label.check", {}, unrestrictedBox, "不限制（允许直呼全部模型）"),
+      listHost,
+      h("p.muted", "一个都不选 = 这个空间只能通过任务名调用，不能直呼任何模型。"),
+      errorHost,
+    ),
+    actions: [
+      {
+        label: "保存",
+        variant: "primary",
+        onClick: async () => {
+          const models = unrestrictedBox.checked
+            ? null
+            : boxes.filter((box) => box.checked).map((box) => box.value);
+          try {
+            await api.setWorkspaceModels(state.revision, workspace, models);
+            ref.close();
+            await load();
+            toast(models === null
+              ? `已取消 ${workspace} 的模型限制。`
+              : `已更新 ${workspace} 的模型授权（${models.length} 个）。`);
+          } catch (error) {
+            render(errorHost, notice(errorText(error), "error"));
+            if (error.status === 409) await load().catch(() => {});
+          }
+        },
+      },
+      {
+        label: "轮换推理 key",
+        variant: "secondary",
+        onClick: async () => {
+          try {
+            const rotated = await api.rotateInferenceKey(state.revision, workspace);
+            ref.close();
+            await load();
+            showInferenceKey(workspace, rotated.inference_key);
+          } catch (error) {
+            render(errorHost, notice(errorText(error), "error"));
+            if (error.status === 409) await load().catch(() => {});
+          }
+        },
+      },
+    ],
+  });
+}
+
+// showInferenceKey 显示刚轮换出来的推理 key（明文只出现这一次）。
+function showInferenceKey(workspace, key) {
+  if (!key) return;
+  dialog({
+    title: "推理 key 已轮换",
+    closeOnBackdrop: false,
+    body: h("div.stack", {},
+      notice("旧 key 已经失效。新 key 只显示这一次，请立即更新到各个项目的环境变量里。", "warn"),
+      kv([["工作空间", workspace], ["推理 key", h("code.mono", {}, key)]]),
+      h("div.inline", {},
+        buttonNode("复制推理 key", {
+          variant: "primary",
+          small: true,
+          onClick: () => copyText(key)
+            .then(() => toast("推理 key 已复制。"))
+            .catch((error) => toast(errorText(error), "error")),
+        }),
+      ),
+    ),
+    actions: [{ label: "我已保存", variant: "primary" }],
+  });
+}
+
+// showWorkspaceKey 显示新建空间的两把 key，并给出可复制的嵌入片段。
+//
+// 这是明文 key 唯一出现的地方（目录接口刻意不含它们，配置文件里那两份不会再回到界面上），
 // 因此文案必须把"现在就复制"讲清楚，否则用户关掉弹窗就永久失去了它——只能删掉空间
 // 重建。key 本身不给输入框（readonly input 反而像是可编辑的），用 code + 复制按钮。
+//
+// 两把 key 都列出来且**分开说明用途**：它们权限不同，混在一句"这是 key"里最容易
+// 被拿错——把面板 key 配进项目环境变量会调不通 /v1，把推理 key 嵌进页面则读不到面板。
 function showWorkspaceKey(created) {
-  const key = created?.api_key || "";
-  if (!key) return;
-  const embed = panelEmbedURL(key);
+  const panelKey = created?.api_key || "";
+  const inferenceKey = created?.inference_key || "";
+  if (!panelKey && !inferenceKey) return;
+  const embed = panelEmbedURL(panelKey);
   const snippet = `<iframe src="${embed}" width="100%" height="720" style="border:0" title="AMKR 工作空间面板"></iframe>`;
+  const rows = [["工作空间", created.name]];
+  if (panelKey) rows.push(["面板 key", h("code.mono", {}, panelKey)]);
+  if (inferenceKey) rows.push(["推理 key", h("code.mono", {}, inferenceKey)]);
+  const copyButtons = [];
+  if (panelKey) {
+    copyButtons.push(buttonNode("复制面板 key", {
+      variant: "primary",
+      small: true,
+      onClick: () => copyText(panelKey)
+        .then(() => toast("面板 key 已复制。"))
+        .catch((error) => toast(errorText(error), "error")),
+    }));
+    copyButtons.push(buttonNode("复制嵌入片段", {
+      small: true,
+      variant: "secondary",
+      onClick: () => copyText(snippet)
+        .then(() => toast("嵌入片段已复制。"))
+        .catch((error) => toast(errorText(error), "error")),
+    }));
+  }
+  if (inferenceKey) {
+    copyButtons.push(buttonNode("复制推理 key", {
+      small: true,
+      variant: "secondary",
+      onClick: () => copyText(inferenceKey)
+        .then(() => toast("推理 key 已复制。"))
+        .catch((error) => toast(errorText(error), "error")),
+    }));
+  }
   dialog({
     title: "工作空间已创建",
     closeOnBackdrop: false,
     body: h("div.stack", {},
-      notice("这个 key 只显示这一次。请立即复制并妥善保存；关闭后无法再查看，"
-        + "只能删除该工作空间后重建。", "warn"),
-      kv([
-        ["工作空间", created.name],
-        ["面板 key", h("code.mono", {}, key)],
-      ]),
-      h("div.inline", {},
-        buttonNode("复制 key", {
-          variant: "primary",
-          small: true,
-          onClick: () => copyText(key)
-            .then(() => toast("面板 key 已复制。"))
-            .catch((error) => toast(errorText(error), "error")),
-        }),
-        buttonNode("复制嵌入片段", {
-          small: true,
-          variant: "secondary",
-          onClick: () => copyText(snippet)
-            .then(() => toast("嵌入片段已复制。"))
-            .catch((error) => toast(errorText(error), "error")),
-        }),
-      ),
+      notice("这两把 key 只显示这一次。请立即复制并妥善保存；关闭后无法再查看，"
+        + "只能轮换推理 key，或删除该工作空间后重建面板 key。", "warn"),
+      kv(rows),
+      h("div.inline", {}, ...copyButtons),
       h("details", {},
-        h("summary", "面板地址与嵌入片段"),
-        h("p.muted", "面板是一个独立精简页，只能用这个 key 读写这一个空间的任务与用量。"
-          + "它支持被 iframe 直接嵌入。"),
+        h("summary", "两把 key 的分工"),
+        h("p.muted", "面板 key —— 给嵌入工作空间面板的应用：它只能读写这一个空间的任务与用量，"
+          + "支持被 iframe 直接嵌入（key 放在 fragment 里，不进 Referer 与访问日志）。"),
+        h("p.muted", "推理 key —— 给各个项目做 /v1 调用：把它配到项目的环境变量里作为 "
+          + "Authorization: Bearer。空间由这把 key 决定，调用方无法用 "
+          + "X-AMKR-Workspace 头换到别的空间。"),
+        h("p.muted", "面板地址与嵌入片段："),
         h("pre.snippet", {}, snippet),
       ),
     ),

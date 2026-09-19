@@ -249,12 +249,15 @@ global.fetch = async (url, options = {}) => {
       // 服务端生成 key，并**只在这一条响应里**回明文——目录接口刻意不含它，
       // 垫片必须照做：否则"目录不含 key"这条断言测的就是假的。
       server.workspaceWrites.push({ method: "POST", path, payload });
-      server.workspaces.push({ name: payload.name, task_count: 0 });
+      server.workspaces.push({ name: payload.name, task_count: 0, has_inference_key: true });
+      // 真实接口同时返回两把 key（面板 key + 推理 key），垫片必须照做：否则
+      // 「两把都显示」这条断言测的就是假的。
       return respond(201, {
         config_revision: "rev-2",
         name: payload.name,
         task_count: 0,
         api_key: `amkr_ws_${payload.name}_generated`,
+        inference_key: `amkr_ik_${payload.name}_generated`,
       });
     }
     if (options.method === "PUT" || options.method === "DELETE") {
@@ -767,8 +770,13 @@ if (scenario === "stale_key_prompts_login") {
   // 关键：明文 key 只在这一条响应里回。界面必须当场显示它——关掉就再也拿不到了。
   const bodyText = () => global.document.body.textContent;
   checks.showsReturnedKey = bodyText().includes("amkr_ws_teamB_generated");
+  // 推理 key 是**另一把**凭据（调 /v1 用），同样只显示这一次，必须一起给出。
+  // 建空间是这个实例唯一能拿到明文 key 的时刻，漏了它应用侧就还得再找一条路要。
+  checks.showsReturnedInferenceKey = bodyText().includes("amkr_ik_teamB_generated");
   checks.warnsKeyShownOnce = bodyText().includes("只显示这一次");
-  checks.offersCopyKey = bodyButtons().some((b) => b.textContent.trim() === "复制 key");
+  // 两把 key 的复制入口要分别存在：混成一个「复制 key」最容易把面板 key 配进项目。
+  checks.offersCopyPanelKey = bodyButtons().some((b) => b.textContent.trim() === "复制面板 key");
+  checks.offersCopyInferenceKey = bodyButtons().some((b) => b.textContent.trim() === "复制推理 key");
   // 嵌入片段：带 key 的 fragment + iframe 标签，复制即可用。
   checks.showsEmbedSnippet = bodyText().includes("panel.html#k=")
     && bodyText().includes("<iframe");
@@ -796,10 +804,13 @@ if (scenario === "stale_key_prompts_login") {
   await settle();
   const defaultRename = byClass("workspace-rename")[0];
   const defaultDelete = byClass("workspace-delete")[0];
-  checks.hasWorkspaceActions = Boolean(defaultRename && defaultDelete);
-  checks.defaultWorkspaceActionsDisabled = Boolean(defaultRename?.disabled && defaultDelete?.disabled);
+  const defaultModels = byClass("workspace-models")[0];
+  checks.hasWorkspaceActions = Boolean(defaultRename && defaultDelete && defaultModels);
+  // 模型授权在默认空间上也不可用：它没有作用域凭据，清单配了也没有对象生效。
+  checks.defaultWorkspaceActionsDisabled = Boolean(defaultRename?.disabled && defaultDelete?.disabled
+    && defaultModels?.disabled);
 
-  // 切到 teamA：两个动作可用，改名会 PUT 到 /api/workspaces/teamA 并带上新名字。
+  // 切到 teamA：三个动作可用，改名会 PUT 到 /api/workspaces/teamA 并带上新名字。
   if (workspaceSelect) {
     workspaceSelect.value = "teamA";
     for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
@@ -807,6 +818,8 @@ if (scenario === "stale_key_prompts_login") {
   await settle();
   checks.namedWorkspaceActionsEnabled = Boolean(byClass("workspace-rename")[0]
     && !byClass("workspace-rename")[0].disabled);
+  checks.namedWorkspaceModelsEnabled = Boolean(byClass("workspace-models")[0]
+    && !byClass("workspace-models")[0].disabled);
   global.window.prompt = () => "teamC";
   const renameButton = byClass("workspace-rename")[0];
   if (renameButton) for (const handler of renameButton.listeners.click || []) await handler({});

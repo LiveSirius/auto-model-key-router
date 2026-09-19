@@ -265,7 +265,6 @@ export const api = {
         : { config_revision: revision, name },
     }),
   // 改名会把整组任务搬到新名字下；删除连同组内任务一起删。
-  // 没有 createWorkspace：空分组不进配置，空间由「在里面建第一个任务」隐式产生。
   renameWorkspace: (revision, workspace, name) =>
     request(`/api/workspaces/${encodeURIComponent(workspace)}`, {
       method: "PUT",
@@ -275,5 +274,18 @@ export const api = {
     request(`/api/workspaces/${encodeURIComponent(workspace)}`, {
       method: "DELETE",
       body: { config_revision: revision },
+    }),
+  // 换一把推理 key。旧 key 立刻失效，新明文只在这条响应里出现一次。
+  // 与面板 key 分开：面板 key 换掉会让已嵌入的页面立刻失效，两者轮换节奏不同。
+  rotateInferenceKey: (revision, workspace) =>
+    request(`/api/workspaces/${encodeURIComponent(workspace)}/inference-key`, {
+      method: "POST",
+      body: { config_revision: revision },
+    }),
+  // 设定本空间**允许直呼**的模型清单（空数组 = 一个都不许，只走任务名）。
+  setWorkspaceModels: (revision, workspace, models) =>
+    request(`/api/workspaces/${encodeURIComponent(workspace)}/models`, {
+      method: "PUT",
+      body: { config_revision: revision, models },
     }),
 };
