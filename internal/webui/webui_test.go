@@ -9,15 +9,19 @@ import (
 	"testing/fstest"
 )
 
-// assetsWithIndex 构造一个最小资产树：根有 index.html，另有 js/ 与 docs/。
+// assetsWithIndex 构造一个最小资产树：根有 index.html，另有 js/、docs/ 与 probes/。
 //
 // docs/ 刻意做成**没有** index.html 的目录，用来验证「不列目录」。
+// probes/ 代表只供开发/CI 的探针目录（不对外服务）；probesomething.js 用来证明
+// 「挡掉 probes/」是按**路径段**判定，而不是拿 "probes" 当前缀去匹配。
 func assetsWithIndex() fstest.MapFS {
 	return fstest.MapFS{
-		"index.html":     {Data: []byte("<html>amkr</html>")},
-		"styles.css":     {Data: []byte("body{}")},
-		"js/app.js":      {Data: []byte("console.log(1)")},
-		"docs/readme.md": {Data: []byte("hi")},
+		"index.html":        {Data: []byte("<html>amkr</html>")},
+		"styles.css":        {Data: []byte("body{}")},
+		"js/app.js":         {Data: []byte("console.log(1)")},
+		"docs/readme.md":    {Data: []byte("hi")},
+		"probes/auth.mjs":   {Data: []byte("// probe")},
+		"probesomething.js": {Data: []byte("// not a probe dir")},
 	}
 }
 
@@ -119,6 +123,14 @@ func TestHandlerServesFilesMatchesStaticFiles(t *testing.T) {
 		{"目录下有 index.html 时取其 index", "/js/", http.StatusNotFound, ""},
 		{"文件不存在", "/nope.js", http.StatusNotFound, ""},
 		{"空目录", "/docs/", http.StatusNotFound, ""},
+		// 探针目录不对外服务（理由见 webui.go 的 probesDir）。目录本身与其下的文件
+		// 都返回 404，与「文件不存在」不可区分。
+		{"探针目录", "/probes/", http.StatusNotFound, ""},
+		{"探针文件", "/probes/auth.mjs", http.StatusNotFound, ""},
+		{"探针目录下的不存在文件", "/probes/nope.mjs", http.StatusNotFound, ""},
+		// "probesomething.js" 不是 probes 目录，必须照常发送——这一条挡住「拿
+		// probes 当前缀做字符串匹配」的写法。
+		{"名字以 probes 开头的普通文件", "/probesomething.js", http.StatusOK, "// not a probe dir"},
 	}
 	for _, item := range cases {
 		t.Run(item.name, func(t *testing.T) {
@@ -198,6 +210,16 @@ func TestResolveNameMapsRootAndBlocksEscape(t *testing.T) {
 		"/../../etc/x": "etc/x",
 		// 折叠后为空：无法映射到根内任何名字。
 		"/..": "",
+		// 探针目录不对外服务：目录与其下文件都映射不到名字（理由见 probesDir）。
+		"/probes":           "",
+		"/probes/":          "",
+		"/probes/auth.mjs":  "",
+		"/probes/sub/x.mjs": "",
+		// 绕路同样要被折叠后挡住，否则改个写法就能读到探针。
+		"/js/../probes/a.mjs": "",
+		"/./probes/a.mjs":     "",
+		// 名字以 probes 开头的普通文件不受影响（按路径段判定，不是前缀匹配）。
+		"/probesomething.js": "probesomething.js",
 	}
 	for input, want := range cases {
 		got := resolveName(input)

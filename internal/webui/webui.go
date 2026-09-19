@@ -30,6 +30,20 @@ const MountPath = "/ui"
 // IndexFile 是「可用性」的判据，也是目录请求的默认文档。
 const IndexFile = "index.html"
 
+// probesDir 是只供开发/CI 使用的探针目录（webui/probes/*.mjs），**不对外服务**。
+//
+// 这 8 个 .mjs 是 webui/ 的开发期回归测试：CI 用 node 从**仓库检出**里逐个运行它们
+// （.github/workflows/ci.yml 的 webui 作业），浏览器从不加载——webui/ 下没有任何
+// 资产 import probes/。但资产的发布物是整个 webui/ 目录，//go:embed webui 又无法按
+// 子目录排除（embed 只支持「全部」或「跳过点/下划线开头的文件」），因此它们会被编进
+// 二进制并随 /ui/ 一起公开可取。
+//
+// 这是纯粹的信息暴露：探针里逐条写着 WebUI 的鉴权流程、面板 key 的存放与不存放规则
+// 以及各页面的内部结构（静态资产本身已公开，探针额外给出的是「我们怎么测它」）。对
+// 匿名访问者没有用途，对攻击者却是现成的实现说明。按目录整体挡掉没有功能代价，故在
+// 这里明确排除，而不是指望 embed 模式能表达排除。
+const probesDir = "probes"
+
 // Available 报告静态资产是否随当前安装一起发布。
 //
 // 对应 webui.py:25 的 webui_available()：只看 index.html 是否存在。
@@ -101,7 +115,8 @@ func serve(w http.ResponseWriter, r *http.Request, assets fs.FS) {
 	http.ServeFileFS(w, r, assets, name)
 }
 
-// resolveName 把请求路径转成资产根内的相对名；非法或越界时返回空串。
+// resolveName 把请求路径转成资产根内的相对名；非法、越界或落在不对外服务的目录里时
+// 返回空串（调用方据此返回 404，与「文件不存在」不可区分）。
 func resolveName(urlPath string) string {
 	trimmed := strings.TrimPrefix(urlPath, "/")
 	// path.Clean 会折叠 . 与 ..；若结果以 .. 开头说明试图越界。
@@ -112,6 +127,12 @@ func resolveName(urlPath string) string {
 		if trimmed == "" || trimmed == "." {
 			return IndexFile
 		}
+		return ""
+	}
+	// 开发/CI 探针目录不对外服务（理由见 probesDir）。判**首段**而不是前缀字符串：
+	// "probes" 与 "probesomething" 是两回事，前者是探针目录，后者该正常发送。
+	// 放在 Clean 之后，因此 "/js/../probes/x.mjs" 这类绕路同样被折叠到这里挡住。
+	if cleaned == probesDir || strings.HasPrefix(cleaned, probesDir+"/") {
 		return ""
 	}
 	return cleaned
