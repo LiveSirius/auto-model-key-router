@@ -235,8 +235,110 @@ func TestUnknownWorkspaceHeaderIsEmptyScope(t *testing.T) {
 	}
 }
 
-// —— 测试辅助 ——
+// TestCreateTaskWithoutModelIsAllowed 固化：创建接口不传 model 也能成功。
+//
+// 这是**有意的契约放宽**（Go 侧新增，见 docs/API.md 与 CHANGELOG）：参照实现的
+// CreateTask 把 model 列为必填，因此那条 tasks/create-missing-* 语料仍锁着「缺 name
+// 报 missing」，而 model 已经不在必填之列。
+func TestCreateTaskWithoutModelIsAllowed(t *testing.T) {
+	server, path := workspaceServer(t)
+	revision := currentRevision(t, path)
 
+	recorder := callTasks(t, server, http.MethodPost, "/api/tasks", "",
+		`{"config_revision":"`+revision+`","name":"placeholder"}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("不传 model 应能创建，实际 %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	// 响应里的 model 为空串而不是 null：它是任务自己的字段，不是可选项——只是还没选。
+	if !strings.Contains(body, `"name":"placeholder"`) {
+		t.Errorf("响应应包含任务名: %s", body)
+	}
+	if !strings.Contains(body, `"model":""`) {
+		t.Errorf("未指定模型的任务响应里 model 应为空串: %s", body)
+	}
+	// 关键：配置里不写 model 键（不是写 null）。
+	stored := lookupTask(t, path, "placeholder")
+	if _, present := stored.LookupOK("model"); present {
+		t.Errorf("未指定模型时不应写入 model 键，实际 %s", canonical.Dumps(stored))
+	}
+	// 之后可以补上模型。
+	revision = currentRevision(t, path)
+	recorder = callTasks(t, server, http.MethodPut, "/api/tasks/placeholder", "",
+		`{"config_revision":"`+revision+`","model":"model-b"}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("给占位任务补模型应成功，实际 %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+}
+
+// TestUpdateTaskDisplayNameCountsAsUpdate 固化：只改 display_name 不是空更新。
+//
+// 「至少需要提供一个要更新的字段」的判定必须把 display_name 算进去，否则界面上
+// 只改中文名会被 422 顶回来。
+func TestUpdateTaskDisplayNameCountsAsUpdate(t *testing.T) {
+	server, path := workspaceServer(t)
+	revision := currentRevision(t, path)
+
+	recorder := callTasks(t, server, http.MethodPut, "/api/tasks/shared", "",
+		`{"config_revision":"`+revision+`","display_name":"共享任务"}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("只改显示名应成功，实际 %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if !strings.Contains(body, `"display_name":"共享任务"`) {
+		t.Errorf("响应应回显显示名: %s", body)
+	}
+	// 原来的模型不能被这次更新碰掉。
+	if !strings.Contains(body, `"model":"model-a"`) {
+		t.Errorf("只改显示名不应影响模型: %s", body)
+	}
+
+	// 传 null 表示清掉显示名，此后响应里不再出现该字段。
+	revision = currentRevision(t, path)
+	recorder = callTasks(t, server, http.MethodPut, "/api/tasks/shared", "",
+		`{"config_revision":"`+revision+`","display_name":null}`)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("清空显示名应成功，实际 %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "display_name") {
+		t.Errorf("清空后响应不应再有 display_name: %s", recorder.Body.String())
+	}
+}
+
+// TestTaskResponseOmitsDisplayNameWhenUnset 固化兼容性：没取名的任务响应逐字节不变。
+//
+// display_name 只在设了名字时才出现，因此已发布接口对既有调用方零影响——这也正是
+// 那条 tasks/get 语料（任务没有显示名）在改动后仍然原封不动的原因。
+func TestTaskResponseOmitsDisplayNameWhenUnset(t *testing.T) {
+	server, _ := workspaceServer(t)
+
+	recorder := callTasks(t, server, http.MethodGet, "/api/tasks/shared", "", "")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("状态码 = %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	if strings.Contains(recorder.Body.String(), "display_name") {
+		t.Errorf("未取名的任务不应出现 display_name 字段: %s", recorder.Body.String())
+	}
+	// 字段顺序也必须保持原样：这条响应由语料逐字节锁定。
+	want := `{"name":"shared","model":"model-a","fallback_model":null,"params":{},`
+	if !strings.HasPrefix(recorder.Body.String(), want) {
+		t.Errorf("响应前缀应为 %s，实际 %s", want, recorder.Body.String())
+	}
+}
+
+// lookupTask 从磁盘配置里取一个默认空间的任务对象。
+func lookupTask(t *testing.T, path, name string) *canonical.Value {
+	t.Helper()
+	data := readConfigData(t, path)
+	tasks := data.Lookup("tasks")
+	if task := tasks.Lookup(name); task.IsObject() {
+		return task
+	}
+	t.Fatalf("配置里找不到任务 %s: %s", name, canonical.Dumps(data))
+	return nil
+}
+
+// —— 测试辅助 ——
 // currentRevision 读出磁盘配置的版本号。
 func currentRevision(t *testing.T, path string) string {
 	t.Helper()

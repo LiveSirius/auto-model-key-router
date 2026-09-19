@@ -69,17 +69,26 @@ func serializeUnified(cfg *config.RouterConfig) *canonical.Value {
 }
 
 // taskResponse 对应 management_api.py:1416 的 _task_response。
+//
+// display_name 是 Go 侧新增（无 Python 先例，见 docs/API.md 与 CHANGELOG），且**只在
+// 设了名字时才出现**：没有显示名的任务响应因此与改动前逐字节相同，已发布的 tasks
+// 接口对既有调用方零影响。这里的条件包含与 unified 响应里 image/embeddings 只在
+// 配置了才出现的写法一致。
 func taskResponse(task config.TaskConfig) *canonical.Value {
 	params := task.Params
 	if params == nil {
 		params = canonical.NewObject()
 	}
-	return objectOf(
+	result := objectOf(
 		canonical.ObjectPair{Key: "name", Value: canonical.NewString(task.Name)},
-		canonical.ObjectPair{Key: "model", Value: canonical.NewString(task.Model)},
-		canonical.ObjectPair{Key: "fallback_model", Value: nullableString(task.FallbackModel)},
-		canonical.ObjectPair{Key: "params", Value: params},
 	)
+	if task.DisplayName != "" {
+		result.SetKey("display_name", canonical.NewString(task.DisplayName))
+	}
+	result.SetKey("model", canonical.NewString(task.Model))
+	result.SetKey("fallback_model", nullableString(task.FallbackModel))
+	result.SetKey("params", params)
+	return result
 }
 
 // modelResponse 对应 management_api.py:1440 的 _model_response。

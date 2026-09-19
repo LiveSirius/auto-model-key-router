@@ -203,18 +203,27 @@ var specConfigImportRequest = newModelSpec("ConfigImportRequest",
 )
 
 // specTaskCreate 对应 TaskCreate。
+//
+// model 可省略（Go 侧放宽，见 docs/API.md 与 CHANGELOG）：任务可以先建出来占位，
+// 之后再选模型；被请求时由 proxy 明确报 404，而不是静默落到别的模型上。传了就必须
+// 非空且引用已配置的模型。
 var specTaskCreate = newModelSpec("TaskCreate",
 	req("config_revision", kindStr).minLenOf(1),
 	req("name", kindStr).minLenOf(1),
-	req("model", kindStr).minLenOf(1),
+	nul("model", kindStr),
+	nul("display_name", kindStr),
 	nul("fallback_model", kindStr),
 	nul("params", kindNested).withNested(specTaskParams),
 )
 
 // specTaskUpdate 对应 TaskUpdate。
+//
+// 三个可选字段都用 nul：显式传 null（或空串）表示清空该字段，因此不能再要求
+// model 非空——否则「清空模型」这条路径根本表达不出来。
 var specTaskUpdate = newModelSpec("TaskUpdate",
 	req("config_revision", kindStr).minLenOf(1),
-	nul("model", kindStr).minLenOf(1),
+	nul("model", kindStr),
+	nul("display_name", kindStr),
 	nul("fallback_model", kindStr),
 	nul("params", kindNested).withNested(specTaskParams),
 )
