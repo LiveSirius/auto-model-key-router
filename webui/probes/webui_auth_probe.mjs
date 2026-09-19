@@ -242,8 +242,21 @@ global.fetch = async (url, options = {}) => {
     });
   }
   if (path.startsWith("/api/workspaces")) {
-    // 目录与改名/删除都在这个前缀下（工作空间是管理面的正式资源）。
+    // 目录与创建/改名/删除都在这个前缀下（工作空间是管理面的正式资源）。
     // 放在鉴权分支**之后**：内容暴露配置结构，与 tasks 同级。
+    if (options.method === "POST") {
+      const payload = JSON.parse(options.body);
+      // 服务端生成 key，并**只在这一条响应里**回明文——目录接口刻意不含它，
+      // 垫片必须照做：否则"目录不含 key"这条断言测的就是假的。
+      server.workspaceWrites.push({ method: "POST", path, payload });
+      server.workspaces.push({ name: payload.name, task_count: 0 });
+      return respond(201, {
+        config_revision: "rev-2",
+        name: payload.name,
+        task_count: 0,
+        api_key: `amkr_ws_${payload.name}_generated`,
+      });
+    }
     if (options.method === "PUT" || options.method === "DELETE") {
       const payload = JSON.parse(options.body);
       server.workspaceWrites.push({ method: options.method, path, payload });
@@ -712,27 +725,61 @@ if (scenario === "stale_key_prompts_login") {
   // 新空间去（甚至因重名覆盖新空间里的同名任务）。
   checks.switchClearsEditor = !buttons().some((node) => node.textContent.trim() === "保存任务");
 
-  // 下拉里要有「新建工作空间…」入口：新空间由「在里面建第一个任务」隐式产生，
-  // 没有这个入口就没法进入一个尚不存在的空间。
+  // 下拉里要有「新建工作空间…」入口：显式创建是拿到面板 key 的唯一途径。
   checks.hasNewWorkspaceOption = Boolean(workspaceSelect?.children
     .some((o) => String(o.textContent).includes("新建工作空间")));
 
-  // 输入一个新名字：应切过去，且因为该空间还不在目录里，下拉要自己补一项，
-  // 否则显示成别的空间、与页面上的空列表对不上。
-  global.window.prompt = () => "teamB";
+  // 选中它 → 弹创建对话框。填名字并确认：必须发 POST /api/workspaces（而不是
+  // 仅仅在本地切一个名字），并把服务端回的面板 key 显示出来。
+  //
+  // 对话框由 ui.js 挂到 document.body（不是 root），因此断言要从那里找节点。
   if (workspaceSelect) {
     workspaceSelect.value = "";
     for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
   }
   await settle();
-  checks.newWorkspaceRequestsIt = server.taskWorkspaces.at(-1) === "teamB";
+  const bodyInputs = () => findAll(global.document.body, (n) => n.tagName === "input");
+  const bodyButtons = () => findAll(global.document.body, (n) => n.tagName === "button");
+  const clickBodyButton = async (label) => {
+    const target = bodyButtons().filter((b) => b.textContent.trim() === label).at(-1);
+    if (!target) throw new Error(`对话框里找不到按钮: ${label}`);
+    for (const handler of target.listeners.click || []) await handler({});
+  };
+  checks.openedCreateDialog = text().includes("新建工作空间") || bodyInputs().length > 0;
+  const createName = bodyInputs().find((n) => n.attrs["aria-label"] === "工作空间名");
+  checks.createDialogHasNameField = Boolean(createName);
+  // 没填名字就确认：必须报错且**不发请求**（不能建出一个空名字的空间）。
+  await clickBodyButton("创建");
+  await settle();
+  checks.rejectsBlankName = !server.workspaceWrites.some((w) => w.method === "POST");
+
+  if (createName) createName.value = "teamB";
+  await clickBodyButton("创建");
+  await settle();
+  const created = server.workspaceWrites.find((w) => w.method === "POST");
+  checks.createUsesWorkspaceEndpoint = created?.path === "/api/workspaces";
+  checks.createSendsName = created?.payload?.name === "teamB";
+  checks.createSendsRevision = typeof created?.payload?.config_revision === "string";
+  // 空 key 表示"由服务端生成"——界面不该自己编一个 key 出来。
+  // 面板 key 由应用侧提供是允许的（configops.CreateWorkspace 接受非空 api_key），
+  // 但 WebUI 没有这个入口，因此这里必须是 undefined。
+  checks.createOmitsGeneratedKey = created !== undefined && !("api_key" in created.payload);
+  // 关键：明文 key 只在这一条响应里回。界面必须当场显示它——关掉就再也拿不到了。
+  const bodyText = () => global.document.body.textContent;
+  checks.showsReturnedKey = bodyText().includes("amkr_ws_teamB_generated");
+  checks.warnsKeyShownOnce = bodyText().includes("只显示这一次");
+  checks.offersCopyKey = bodyButtons().some((b) => b.textContent.trim() === "复制 key");
+  // 嵌入片段：带 key 的 fragment + iframe 标签，复制即可用。
+  checks.showsEmbedSnippet = bodyText().includes("panel.html#k=")
+    && bodyText().includes("<iframe");
+  // 新空间要真的落进下拉（目录里有了），并且页面切到它。
   checks.newWorkspaceShownInSwitcher = Boolean(findAll(root, (n) => n.tagName === "select"
     && String(n.className || "").split(/\s+/).includes("workspace-select"))[0]?.children
     .some((o) => o.value === "teamB"));
+  checks.newWorkspaceRequestsIt = server.taskWorkspaces.at(-1) === "teamB";
+  // 创建后空间里还没有任务：空态要说清"调用方要指定任务名或模型别名"，
+  // 而不是留下一个看起来像加载失败的空壳。
   checks.newWorkspaceEmptyState = text().includes("teamB");
-  // 新空间还没有任务：这里必须说清「建了第一个任务才会写进配置」，否则用户会去
-  // 找一个并不存在的「保存空间」按钮。
-  checks.newWorkspaceExplainsPersistence = text().includes("才会写进配置");
 
   // 改名与删除是**空间自身**的操作，走 PUT/DELETE /api/workspaces/{name}，而不是
   // /api/tasks。改到 teamA 上（它是目录里的真实空间）。

@@ -49,7 +49,10 @@ function detailText(payload, status) {
 
 // WebUI 可能被挂在子路径下（独立运行是 /ui/，嵌入宿主是 /amkr/ui/），因此 API
 // 基址必须从当前页面路径反推。写死绝对路径会让嵌入后的每个请求打到宿主根路径。
-function apiBase() {
+//
+// 导出给 webui/panel.js：面板是同一套静态资源里的另一个入口，它的请求必须落在
+// 同一个基址上，否则挂子路径部署时面板会打到宿主根路径。
+export function apiBase() {
   const path = String(location.pathname || "");
   const index = path.lastIndexOf("/ui/");
   if (index >= 0) return path.slice(0, index);
@@ -252,6 +255,15 @@ export const api = {
   // 工作空间目录：列出有任务的工作空间及各自任务数，供任务页填充切换下拉。
   // GET /api/tasks 是按空间过滤的，因此从任务列表推不出「还有哪些空间」。
   workspaces: () => request("/api/workspaces"),
+  // 显式建空间：应用侧集成时先建空间拿一次 api_key，之后才往里填任务。
+  // 响应是**唯一**出现明文 key 的地方（目录接口刻意不含它）。
+  createWorkspace: (revision, name, apiKey) =>
+    request("/api/workspaces", {
+      method: "POST",
+      body: apiKey
+        ? { config_revision: revision, name, api_key: apiKey }
+        : { config_revision: revision, name },
+    }),
   // 改名会把整组任务搬到新名字下；删除连同组内任务一起删。
   // 没有 createWorkspace：空分组不进配置，空间由「在里面建第一个任务」隐式产生。
   renameWorkspace: (revision, workspace, name) =>

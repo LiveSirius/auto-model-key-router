@@ -6,9 +6,9 @@
 // 任务名只在**工作空间**内唯一：不同空间可以各有一个同名任务。界面因此始终工作在
 // 一个具体空间里（默认空间即「不带 X-AMKR-Workspace 头」的那个），顶部下拉切换。
 
-import { h, mount, errorText } from "../dom.js";
+import { h, mount, errorText, copyText } from "../dom.js";
 import { api } from "../api.js";
-import { card, cardHead, notice, badge, empty, loading, render, toast, buttonNode, input, select, confirmDialog, kv } from "../ui.js";
+import { card, cardHead, notice, badge, empty, loading, render, toast, buttonNode, input, select, confirmDialog, dialog, kv } from "../ui.js";
 
 const EFFORTS = [
   { value: "", label: "不固定" },
@@ -329,14 +329,16 @@ export function renderTasks(context) {
 
 // workspaceSwitcher 是页面顶部的空间切换下拉 + 「新建空间」入口 + 改名/删除。
 //
-// 空间由「在它里面建任务」隐式产生（没有独立的创建接口），因此这里不能只给一个
-// 下拉：新空间必须先被人**选中**，再在里面建第一个任务才会真正存在。做法是让下拉
-// 带一个「+ 新建工作空间…」项，选中时弹一个名字输入框，把 state.workspace 换成它
-// （此时它还不是配置里的分组，任务列表为空），用户接着点「新建任务」即可落地。
+// 空间有两条产生路径，界面上都在这里：
+//   - 「＋ 新建工作空间…」是**显式创建**（POST /api/workspaces）：空间立刻写进配置、
+//     服务端生成一个面板 key 并**只在那一次响应里**回明文，本页会当场把它显示出来
+//     让人复制（关掉就再也拿不到了）。
+//   - 任务也可以在别的空间里隐式产生，因此下拉始终跟着 GET /api/workspaces 的目录走。
 //
 // 改名与删除是**空间自身**的操作（PUT/DELETE /api/workspaces/{name}），与任务无关：
-// 改名把整组任务一起搬到新名字下，删除连同组内任务一起删。两者对默认空间都不可用：
-// 默认空间是不带 X-AMKR-Workspace 头的调用方命中的那个，删掉或改名会让所有人落空。
+// 改名把整组任务（连同 api_key）一起搬到新名字下，删除连同组内任务一起删。两者对
+// 默认空间都不可用：默认空间是不带 X-AMKR-Workspace 头的调用方命中的那个，删掉或
+// 改名会让所有人落空。
 function workspaceSwitcher() {
   const options = state.workspaces.map((item) => ({
     value: item.name,
@@ -346,14 +348,13 @@ function workspaceSwitcher() {
       : `${item.name}（${item.task_count}）`,
   }));
   const current = state.workspace;
-  // 当前空间不在目录里，说明它还没写进配置（刚输入的名字，或最后一个任务被别人的
-  // 会话删空了）。补一项进去，否则下拉会显示成默认空间、与页面上的空列表对不上。
+  // 当前空间不在目录里，说明它是刚被删空/改名，或本地记着一个早已不存在的名字。
+  // 补一项进去，否则下拉会显示成默认空间、与页面上的空列表对不上。
   const saved = options.some((option) => option.value === current);
   if (!saved) {
     options.push({ value: current, label: `${current}（未写入配置）` });
   }
-  // 新空间必须先被「选中」再在里面建任务才会存在（没有独立的创建接口），因此入口
-  // 就挂在下拉里：选中它即弹名字输入框。
+  // 显式创建入口就挂在下拉里：选中它即弹名字输入框，创建成功后当场显示面板 key。
   options.push({ value: NEW_WORKSPACE, label: "＋ 新建工作空间…" });
 
   // 没写进配置的空间（未落地的名字）没有可改可删的分组，两个动作都禁用。
@@ -399,22 +400,115 @@ function workspaceSwitcher() {
 // config 层对空名直接报「工作空间名不能为空」。
 const NEW_WORKSPACE = "";
 
-// promptNewWorkspace 询问一个新空间名并切过去。
+// promptNewWorkspace 询问一个新空间名并**显式创建**它，随后显示面板 key。
+//
+// 用 dialog 而不是 window.prompt：创建会返回一个只能看一次的凭据，把它放在一个
+// 不能被复制的系统弹窗里没有意义。
 function promptNewWorkspace() {
-  const name = window.prompt("新建工作空间：输入一个名字。任务名只在工作空间内唯一，不同空间可以有同名任务。");
-  if (name === null) { draw(); return; }
-  const trimmed = name.trim();
-  if (!trimmed) {
-    toast("工作空间名不能为空。", "error");
-    draw();
-    return;
-  }
-  if (trimmed === DEFAULT_WORKSPACE) {
-    toast(`「${DEFAULT_WORKSPACE}」是默认工作空间，不能重名。`, "error");
-    draw();
-    return;
-  }
-  switchWorkspace(trimmed);
+  const nameInput = input({
+    placeholder: "例如 teamA",
+    "aria-label": "工作空间名",
+  });
+  const errorHost = h("div");
+  const ref = dialog({
+    title: "新建工作空间",
+    body: h("div.stack", {},
+      h("p.muted", "空间创建后会立刻写入配置，并生成一个只属于它的面板 key——"
+        + "把它交给要嵌入工作空间面板的应用。"),
+      nameInput,
+      errorHost,
+    ),
+    actions: [{
+      label: "创建",
+      variant: "primary",
+      onClick: async () => {
+        const trimmed = nameInput.value.trim();
+        if (!trimmed) { render(errorHost, notice("工作空间名不能为空。", "error")); return; }
+        if (trimmed === DEFAULT_WORKSPACE) {
+          render(errorHost, notice(`「${DEFAULT_WORKSPACE}」是默认工作空间，不能重名。`, "error"));
+          return;
+        }
+        try {
+          const created = await api.createWorkspace(state.revision, trimmed);
+          ref.close();
+          await load();
+          await switchWorkspace(trimmed);
+          showWorkspaceKey(created);
+        } catch (error) {
+          render(errorHost, notice(errorText(error), "error"));
+          // 版本冲突说明手上的配置已过期，重新读一次再让人重试。
+          if (error.status === 409) await load().catch(() => {});
+        }
+      },
+    }],
+  });
+}
+
+// showWorkspaceKey 显示新建空间的面板 key，并给出可复制的嵌入片段。
+//
+// 这是明文 key 唯一出现的地方（目录接口刻意不含它，配置文件里那份不会再回到界面上），
+// 因此文案必须把"现在就复制"讲清楚，否则用户关掉弹窗就永久失去了它——只能删掉空间
+// 重建。key 本身不给输入框（readonly input 反而像是可编辑的），用 code + 复制按钮。
+function showWorkspaceKey(created) {
+  const key = created?.api_key || "";
+  if (!key) return;
+  const embed = panelEmbedURL(key);
+  const snippet = `<iframe src="${embed}" width="100%" height="720" style="border:0" title="AMKR 工作空间面板"></iframe>`;
+  dialog({
+    title: "工作空间已创建",
+    closeOnBackdrop: false,
+    body: h("div.stack", {},
+      notice("这个 key 只显示这一次。请立即复制并妥善保存；关闭后无法再查看，"
+        + "只能删除该工作空间后重建。", "warn"),
+      kv([
+        ["工作空间", created.name],
+        ["面板 key", h("code.mono", {}, key)],
+      ]),
+      h("div.inline", {},
+        buttonNode("复制 key", {
+          variant: "primary",
+          small: true,
+          onClick: () => copyText(key)
+            .then(() => toast("面板 key 已复制。"))
+            .catch((error) => toast(errorText(error), "error")),
+        }),
+        buttonNode("复制嵌入片段", {
+          small: true,
+          variant: "secondary",
+          onClick: () => copyText(snippet)
+            .then(() => toast("嵌入片段已复制。"))
+            .catch((error) => toast(errorText(error), "error")),
+        }),
+      ),
+      h("details", {},
+        h("summary", "面板地址与嵌入片段"),
+        h("p.muted", "面板是一个独立精简页，只能用这个 key 读写这一个空间的任务与用量。"
+          + "它支持被 iframe 直接嵌入。"),
+        h("pre.snippet", {}, snippet),
+      ),
+    ),
+    actions: [{ label: "我已保存", variant: "primary" }],
+  });
+}
+
+// panelEmbedURL 拼出面板页的地址，带上 key 的 fragment。
+//
+// key 放 fragment（#）而不是查询串：fragment 不会进 Referer、不进服务端访问日志，
+// 而查询串两处都会留下明文凭据（见 webui/panel-api.js）。
+function panelEmbedURL(key) {
+  return `${location.origin}${webuiBase()}/panel.html#k=${encodeURIComponent(key)}`;
+}
+
+// webuiBase 返回当前 WebUI 的挂载前缀（独立运行是 /ui，嵌入宿主是 /amkr/ui）。
+//
+// 与 api.js 的 apiBase 同源：面板页与主界面在同一个前缀下，写死 /ui 会让挂了子路径
+// 的部署复制到一个打不开的地址。
+function webuiBase() {
+  const path = String(location.pathname || "");
+  const index = path.lastIndexOf("/ui/");
+  if (index >= 0) return `${path.slice(0, index)}/ui`;
+  if (path.endsWith("/ui")) return path;
+  return "/ui";
 }
 
 // promptRenameWorkspace 把当前空间改名，整组任务跟着走。
