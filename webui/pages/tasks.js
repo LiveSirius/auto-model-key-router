@@ -1,7 +1,7 @@
 // 任务路由：把「模型 + 固定采样参数」打包成一个可直接当 model 传的任务名。
 //
 // 调用方传 model: "TASK_XXXXXX" 即可命中；因为参数由任务固定，调用方再传
-// temperature 这类采样参数会被服务端拒绝（reasoning_effort 例外，见后端说明）。
+// temperature 这类采样参数会被服务端拒绝（reasoning_effort 也一样，不是例外）。
 //
 // 任务名只在**工作空间**内唯一：不同空间可以各有一个同名任务。界面因此始终工作在
 // 一个具体空间里（默认空间即「不带 X-AMKR-Workspace 头」的那个），顶部下拉切换。
@@ -21,7 +21,7 @@ const EFFORTS = [
   { value: "max", label: "max" },
 ];
 
-// 数值型固定参数：标签 + 是否整数（top_k / seed 必须是整数）。
+// 数值型固定参数：标签 + 是否整数（top_k / seed / max_tokens 必须是整数）。
 const NUMERIC_PARAMS = [
   { key: "temperature", label: "temperature" },
   { key: "top_p", label: "top_p" },
@@ -29,6 +29,7 @@ const NUMERIC_PARAMS = [
   { key: "frequency_penalty", label: "frequency_penalty" },
   { key: "presence_penalty", label: "presence_penalty" },
   { key: "seed", label: "seed", integer: true },
+  { key: "max_tokens", label: "max_tokens", integer: true },
 ];
 
 const PARAM_LABELS = Object.fromEntries([
@@ -65,7 +66,7 @@ function rememberWorkspace(workspace) {
 const state = {
   tasks: [],
   models: [],
-  // workspaces 是 {name, task_count} 的列表，来自 /ui/workspaces.json。
+  // workspaces 是 {name, task_count} 的列表，来自 GET /api/workspaces。
   workspaces: [],
   workspace: storedWorkspace(),
   revision: null,
@@ -271,7 +272,7 @@ function taskEditor(task) {
     ),
     h("p.muted", "任务名就是调用方传的 model。任务名不能与模型 ID、别名或隐藏别名撞名。"),
     h("h4", "固定采样参数"),
-    h("p.muted", "填了的参数由任务说了算：调用方再传同名参数会被直接拒绝。留空的参数照常透传，max_tokens 一类不在列表里的参数也始终透传。"),
+    h("p.muted", "填了的参数由任务说了算：调用方再传同名参数（含 reasoning_effort）会被直接拒绝。留空的参数照常透传，不在这个列表里的参数也始终透传。"),
     h("div.form-grid", {}, NUMERIC_PARAMS.map((param) => h("label.field", h("span", param.label), numberInputs[param.key]))),
     h("label.field", h("span", "stop（多个用逗号分隔）"), stopInput),
     errorHost,
@@ -300,12 +301,16 @@ export function renderTasks(context) {
   return host;
 }
 
-// workspaceSwitcher 是页面顶部的空间切换下拉 + 「新建空间」入口。
+// workspaceSwitcher 是页面顶部的空间切换下拉 + 「新建空间」入口 + 改名/删除。
 //
 // 空间由「在它里面建任务」隐式产生（没有独立的创建接口），因此这里不能只给一个
 // 下拉：新空间必须先被人**选中**，再在里面建第一个任务才会真正存在。做法是让下拉
 // 带一个「+ 新建工作空间…」项，选中时弹一个名字输入框，把 state.workspace 换成它
 // （此时它还不是配置里的分组，任务列表为空），用户接着点「新建任务」即可落地。
+//
+// 改名与删除是**空间自身**的操作（PUT/DELETE /api/workspaces/{name}），与任务无关：
+// 改名把整组任务一起搬到新名字下，删除连同组内任务一起删。两者对默认空间都不可用：
+// 默认空间是不带 X-AMKR-Workspace 头的调用方命中的那个，删掉或改名会让所有人落空。
 function workspaceSwitcher() {
   const options = state.workspaces.map((item) => ({
     value: item.name,
@@ -317,27 +322,49 @@ function workspaceSwitcher() {
   const current = state.workspace;
   // 当前空间不在目录里，说明它还没写进配置（刚输入的名字，或最后一个任务被别人的
   // 会话删空了）。补一项进去，否则下拉会显示成默认空间、与页面上的空列表对不上。
-  if (!options.some((option) => option.value === current)) {
+  const saved = options.some((option) => option.value === current);
+  if (!saved) {
     options.push({ value: current, label: `${current}（未写入配置）` });
   }
   // 新空间必须先被「选中」再在里面建任务才会存在（没有独立的创建接口），因此入口
   // 就挂在下拉里：选中它即弹名字输入框。
   options.push({ value: NEW_WORKSPACE, label: "＋ 新建工作空间…" });
 
-  return select(options, {
-    value: current,
-    disabled: state.saving,
-    // 带一个可识别的类名：编辑器里还有首选/备选/推理强度三个下拉，探针需要一条
-    // 可靠的方式区分「页面级的工作空间切换」与「编辑器里的字段」。
-    class: "workspace-select",
-    onChange: (event) => {
-      if (event.target.value === NEW_WORKSPACE) {
-        promptNewWorkspace();
-        return;
-      }
-      switchWorkspace(event.target.value);
-    },
-  });
+  // 没写进配置的空间（未落地的名字）没有可改可删的分组，两个动作都禁用。
+  const actionable = saved && current !== DEFAULT_WORKSPACE;
+
+  return h("div.inline", {},
+    select(options, {
+      value: current,
+      disabled: state.saving,
+      // 带一个可识别的类名：编辑器里还有首选/备选/推理强度三个下拉，探针需要一条
+      // 可靠的方式区分「页面级的工作空间切换」与「编辑器里的字段」。
+      class: "workspace-select",
+      onChange: (event) => {
+        if (event.target.value === NEW_WORKSPACE) {
+          promptNewWorkspace();
+          return;
+        }
+        switchWorkspace(event.target.value);
+      },
+    }),
+    buttonNode("改名", {
+      small: true,
+      variant: "text",
+      class: "workspace-rename",
+      disabled: state.saving || !actionable,
+      title: current === DEFAULT_WORKSPACE ? "默认工作空间不能改名" : null,
+      onClick: () => promptRenameWorkspace(current),
+    }),
+    buttonNode("删除", {
+      small: true,
+      variant: "text",
+      class: "workspace-delete",
+      disabled: state.saving || !actionable,
+      title: current === DEFAULT_WORKSPACE ? "默认工作空间不能删除" : null,
+      onClick: () => confirmDeleteWorkspace(current),
+    }),
+  );
 }
 
 // NEW_WORKSPACE 是下拉里「新建工作空间…」那一项的哨兵值。
@@ -362,6 +389,76 @@ function promptNewWorkspace() {
     return;
   }
   switchWorkspace(trimmed);
+}
+
+// promptRenameWorkspace 把当前空间改名，整组任务跟着走。
+//
+// 改名之后必须把 state.workspace 指到新名字上：页面还停在这个空间里（只是换了名字），
+// 若不同步，下一次 load 会拿旧名字去查任务，得到一个空列表，看起来像任务全丢了。
+async function promptRenameWorkspace(workspace) {
+  const name = window.prompt(`把工作空间「${workspace}」改名为：其中 ${countOf(workspace)} 个任务会一起搬过去。`, workspace);
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === workspace) return;
+  if (trimmed === DEFAULT_WORKSPACE) {
+    toast(`「${DEFAULT_WORKSPACE}」是默认工作空间，不能重名。`, "error");
+    return;
+  }
+  state.saving = true;
+  draw();
+  try {
+    await api.renameWorkspace(state.revision, workspace, trimmed);
+    // 改名后旧名字不复存在，localStorage 里记的也得跟着换。
+    state.workspace = trimmed;
+    workspacePinned = true;
+    rememberWorkspace(trimmed);
+    state.editing = null;
+    state.tasks = [];
+    await load();
+    toast(`工作空间已改名为 ${trimmed}。`);
+  } catch (error) {
+    toast(errorText(error), "error");
+    if (error.status === 409) await load().catch(() => {});
+  }
+  state.saving = false;
+  draw();
+}
+
+// confirmDeleteWorkspace 删除当前空间连同其中的全部任务。
+function confirmDeleteWorkspace(workspace) {
+  const count = countOf(workspace);
+  confirmDialog({
+    title: "删除工作空间",
+    // 把任务数写进确认文案：删空间会连带删掉里面的任务，这是不可逆的。
+    message: count
+      ? `删除工作空间 ${workspace}？其中 ${count} 个任务会一起被删除。`
+      : `删除工作空间 ${workspace}？`,
+    confirmLabel: "删除",
+    danger: true,
+    onConfirm: async () => {
+      try {
+        await api.deleteWorkspace(state.revision, workspace);
+        // 删完之后这个空间不存在了，留在原地会让页面显示一个空列表 + 「未写入配置」
+        // 的下拉项；切回默认空间，至少保证用户看到的是一个真实存在的空间。
+        state.workspace = DEFAULT_WORKSPACE;
+        workspacePinned = true;
+        rememberWorkspace(DEFAULT_WORKSPACE);
+        state.editing = null;
+        state.tasks = [];
+        await load();
+        toast("工作空间已删除。");
+      } catch (error) {
+        toast(errorText(error), "error");
+      }
+      draw();
+    },
+  });
+}
+
+// countOf 返回目录里某个空间的任务数（不在目录里时按 0 算）。
+function countOf(workspace) {
+  const entry = state.workspaces.find((item) => item.name === workspace);
+  return entry ? entry.task_count : 0;
 }
 
 function draw() {

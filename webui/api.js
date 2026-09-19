@@ -251,5 +251,17 @@ export const api = {
 
   // 工作空间目录：列出有任务的工作空间及各自任务数，供任务页填充切换下拉。
   // GET /api/tasks 是按空间过滤的，因此从任务列表推不出「还有哪些空间」。
-  workspaces: () => request("/ui/workspaces.json"),
+  workspaces: () => request("/api/workspaces"),
+  // 改名会把整组任务搬到新名字下；删除连同组内任务一起删。
+  // 没有 createWorkspace：空分组不进配置，空间由「在里面建第一个任务」隐式产生。
+  renameWorkspace: (revision, workspace, name) =>
+    request(`/api/workspaces/${encodeURIComponent(workspace)}`, {
+      method: "PUT",
+      body: { config_revision: revision, name },
+    }),
+  deleteWorkspace: (revision, workspace) =>
+    request(`/api/workspaces/${encodeURIComponent(workspace)}`, {
+      method: "DELETE",
+      body: { config_revision: revision },
+    }),
 };

@@ -116,9 +116,11 @@ const server = {
   tasks: [],
   tasksWorkspace: "default",
   writes: [],
-  // 工作空间目录（/ui/workspaces.json）。默认只有默认空间，与真实后端一致：
+  // 工作空间目录（GET /api/workspaces）。默认只有默认空间，与真实后端一致：
   // 默认空间永远在清单里，哪怕它一个任务都没有。
   workspaces: [{ name: "default", task_count: 0 }],
+  // 工作空间的改名/删除请求（PUT/DELETE /api/workspaces/{name}）。
+  workspaceWrites: [],
   // 任务路由按空间过滤：记录每次请求带的空间头，好断言切换真的传到了后端。
   taskWorkspaces: [],
   // 成本页探针用：价格目录（null = 服务端尚未就绪，应回 503）与该窗口的上游用量。
@@ -239,9 +241,25 @@ global.fetch = async (url, options = {}) => {
       ],
     });
   }
-  // 工作空间目录：挂在 WebUI 前缀下，但要鉴权（内容暴露配置结构）。
-  // 因此放在鉴权分支**之后**，与 tasks 同级。
-  if (path === "/ui/workspaces.json") {
+  if (path.startsWith("/api/workspaces")) {
+    // 目录与改名/删除都在这个前缀下（工作空间是管理面的正式资源）。
+    // 放在鉴权分支**之后**：内容暴露配置结构，与 tasks 同级。
+    if (options.method === "PUT" || options.method === "DELETE") {
+      const payload = JSON.parse(options.body);
+      server.workspaceWrites.push({ method: options.method, path, payload });
+      // 目录要跟着动：否则改名后页面拿到的仍是旧清单，重命名过的空间会显示成
+      // 「未写入配置」，它的改名/删除按钮也就一直是禁用的——那是垫片不真实，
+      // 不是页面缺陷。
+      const from = decodeURIComponent(path.slice("/api/workspaces/".length));
+      const entry = server.workspaces.find((w) => w.name === from);
+      if (entry && options.method === "PUT") entry.name = payload.name;
+      if (entry && options.method === "DELETE") {
+        server.workspaces = server.workspaces.filter((w) => w !== entry);
+      }
+      // 需要观察"保存进行中"的状态时，把响应挂住，由用例自己放行。
+      if (server.holdSave) return new Promise((resolve) => { server.releaseSave = () => resolve(respond(200, { config_revision: "rev-2" })); });
+      return respond(200, { config_revision: "rev-2", name: payload.name, task_count: entry?.task_count ?? 0 });
+    }
     return respond(200, { workspaces: server.workspaces });
   }
   if (path.startsWith("/api/tasks")) {
@@ -573,7 +591,7 @@ if (scenario === "stale_key_prompts_login") {
   // 打开编辑器，改一个固定参数并保存。
   await clickButton("编辑");
   checks.explainsRejection = text().includes("会被直接拒绝");
-  checks.hasAllParamFields = inputs().filter((node) => node.attrs.placeholder === "留空表示不固定").length === 6;
+  checks.hasAllParamFields = inputs().filter((node) => node.attrs.placeholder === "留空表示不固定").length === 7;
   const taskInput = inputs().find((node) => node.value === "TASK_000001");
   // 编辑时任务名不可改（它是调用方用的 model 名，改名等于换了个任务）。
   checks.taskNameReadOnly = Boolean(taskInput) && taskInput.disabled === true;
@@ -641,8 +659,8 @@ if (scenario === "stale_key_prompts_login") {
   // 新建时任务名可填（编辑既有任务时才只读）。
   const nameInput = inputs().find((node) => node.attrs.placeholder === "TASK_000001");
   checks.hasNameField = Boolean(nameInput) && nameInput.disabled !== true;
-  // 6 个数值参数 + stop，全部为空且可编辑。
-  checks.hasAllParamFields = inputs().filter((node) => node.attrs.placeholder === "留空表示不固定").length === 6;
+  // 7 个数值参数 + stop，全部为空且可编辑。
+  checks.hasAllParamFields = inputs().filter((node) => node.attrs.placeholder === "留空表示不固定").length === 7;
   checks.hasStopField = inputs().some((node) => node.attrs.placeholder === "逗号分隔，留空表示不固定");
 
   // 填名字后保存：新建走 POST，任务名放在 body 里。
@@ -711,6 +729,60 @@ if (scenario === "stale_key_prompts_login") {
   // 新空间还没有任务：这里必须说清「建了第一个任务才会写进配置」，否则用户会去
   // 找一个并不存在的「保存空间」按钮。
   checks.newWorkspaceExplainsPersistence = text().includes("才会写进配置");
+
+  // 改名与删除是**空间自身**的操作，走 PUT/DELETE /api/workspaces/{name}，而不是
+  // /api/tasks。改到 teamA 上（它是目录里的真实空间）。
+  if (workspaceSelect) {
+    workspaceSelect.value = "teamA";
+    for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
+  }
+  await settle();
+  // 默认空间不可改名/删除：那两个按钮必须禁用（默认空间是缺省调用方命中的空间）。
+  if (workspaceSelect) {
+    workspaceSelect.value = "default";
+    for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
+  }
+  await settle();
+  const defaultRename = byClass("workspace-rename")[0];
+  const defaultDelete = byClass("workspace-delete")[0];
+  checks.hasWorkspaceActions = Boolean(defaultRename && defaultDelete);
+  checks.defaultWorkspaceActionsDisabled = Boolean(defaultRename?.disabled && defaultDelete?.disabled);
+
+  // 切到 teamA：两个动作可用，改名会 PUT 到 /api/workspaces/teamA 并带上新名字。
+  if (workspaceSelect) {
+    workspaceSelect.value = "teamA";
+    for (const handler of workspaceSelect.listeners.change || []) await handler({ target: workspaceSelect });
+  }
+  await settle();
+  checks.namedWorkspaceActionsEnabled = Boolean(byClass("workspace-rename")[0]
+    && !byClass("workspace-rename")[0].disabled);
+  global.window.prompt = () => "teamC";
+  const renameButton = byClass("workspace-rename")[0];
+  if (renameButton) for (const handler of renameButton.listeners.click || []) await handler({});
+  await settle();
+  const rename = server.workspaceWrites.find((w) => w.method === "PUT");
+  checks.renameUsesWorkspaceEndpoint = Boolean(rename) && rename.path === "/api/workspaces/teamA";
+  checks.renameSendsNewName = rename?.payload?.name === "teamC";
+  checks.renameSendsRevision = typeof rename?.payload?.config_revision === "string";
+  // 改名后页面必须跟着新名字走，否则下一次读取会拿旧名字查任务、显示成空列表。
+  checks.renameFollowsNewName = storage.get("amkr.workspace") === "teamC"
+    && server.taskWorkspaces.at(-1) === "teamC";
+
+  // 删除：确认后 DELETE 到 /api/workspaces/teamC，并切回默认空间。
+  const deleteButton = byClass("workspace-delete")[0];
+  if (deleteButton) for (const handler of deleteButton.listeners.click || []) await handler({});
+  await settle();
+  // 确认对话框由 ui.js 挂到 document.body（不是 root），因此从那里找确认按钮。
+  const confirm = findAll(global.document.body, (n) => n.tagName === "button"
+    && n.textContent.trim() === "删除").at(-1);
+  checks.deleteAsksForConfirmation = Boolean(confirm);
+  if (confirm) for (const handler of confirm.listeners.click || []) await handler({});
+  await settle();
+  const removed = server.workspaceWrites.find((w) => w.method === "DELETE");
+  checks.deleteUsesWorkspaceEndpoint = removed?.path === "/api/workspaces/teamC";
+  checks.deleteSendsRevision = typeof removed?.payload?.config_revision === "string";
+  // 删掉的是当前空间：必须切回一个真实存在的空间，不能停在已消失的名字上。
+  checks.deleteReturnsToDefault = storage.get("amkr.workspace") === "default";
 } else if (scenario === "cost_page_renders_with_pricing") {
   await settle();
   // 页面骨架与四张卡都在。
