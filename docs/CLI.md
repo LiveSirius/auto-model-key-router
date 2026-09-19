@@ -1,37 +1,14 @@
 # CLI 参数文档
 
-Auto Model Key Router 安装后提供两个等价命令：
+`amkr` 是单一静态二进制，从 GitHub Releases 下载或本地 `go build ./cmd/amkr` 产出。
+它同时以 `auto-model-key-router` 这个名字提供（同一份程序的两个入口名）。
 
-```text
-amkr
-auto-model-key-router
-```
+安装与升级方式见 [README 的「安装」一节](../README.md#安装)：一行脚本会校验 sha256 后
+落盘，`amkr --update` 可就地自更新。
 
-也可以通过模块运行：
+## 提示“找不到 amkr”
 
-```bash
-python -m auto_model_key_router.main
-```
-
-> 只有在当前 Python 环境已经安装 AMKR 时，`python -m` 才能运行。`pipx` 和 `uv tool` 会使用独立环境，因此优先使用它们创建的 console script。
-
-## 安装后提示“找不到 amkr”
-
-这是 PATH 激活问题时最常见的表现：包已经安装，但当前终端没有找到 pipx/uv tool 的 bin 目录。先确认工具本身已安装：
-
-```bash
-pipx list
-uv tool list
-```
-
-然后执行对应的 PATH 设置命令，并关闭后重新打开终端：
-
-```bash
-pipx ensurepath
-uv tool update-shell
-```
-
-检查当前终端实际找到的命令：
+这是 PATH 问题：程序已经落盘，但当前终端没找到它。先确认它在哪里：
 
 ```bash
 # macOS / Linux
@@ -41,27 +18,15 @@ command -v amkr
 where.exe amkr
 ```
 
-如果仍然找不到，查询安装目录：
+一行安装脚本默认装到 `/usr/local/bin`，没有写权限时退回 `~/.local/bin`；Windows 上装到
+`%LOCALAPPDATA%\Programs\AutoModelKeyRouter\amkr.exe`。把该目录加进当前用户 PATH 后
+**重新打开终端**——PATH 变化不会自动刷新已经打开的终端、IDE 或系统服务进程。
 
-```bash
-uv tool dir --bin
-pipx environment --value PIPX_BIN_DIR
-```
-
-将输出目录加入当前用户 PATH 后重新打开终端。Windows PowerShell 也可以直接调用完整路径验证：
+Windows PowerShell 也可以直接调用完整路径验证：
 
 ```powershell
-& "$(uv tool dir --bin)\amkr.exe" --version
-& "$(pipx environment --value PIPX_BIN_DIR)\amkr.exe" --version
+& "$env:LOCALAPPDATA\Programs\AutoModelKeyRouter\amkr.exe" --version
 ```
-
-临时验证而不依赖 PATH：
-
-```bash
-uvx --from auto-model-key-router amkr --version
-```
-
-如果 `uvx` 能运行而 `amkr` 不能运行，说明分发包和入口配置正常，只需修复 PATH。PATH 变化不会自动刷新已经打开的终端、IDE 或系统服务进程。
 
 ## 基本语法
 
@@ -69,11 +34,14 @@ uvx --from auto-model-key-router amkr --version
 amkr [全局参数] [操作参数]
 ```
 
-不提供操作参数时启动 Terminal UI：
+不提供操作参数时前台启动服务，并自动打开 WebUI：
 
 ```bash
 amkr
 ```
+
+日志同时输出到终端与 `log_file_path`。终端交互界面已随 Python 版退役，WebUI
+（`http://127.0.0.1:8000/ui/`）是唯一的界面。
 
 建议每次只使用一个操作参数。程序没有为这些参数建立互斥组；同时传入多个操作时，只会执行优先级最高的一个。
 
@@ -101,7 +69,7 @@ amkr
 | `--host HOST` | 地址 | 配置值 | 在当前 CLI 进程中覆盖监听地址 |
 | `--port PORT` | 整数 | 配置值 | 在当前 CLI 进程中覆盖监听端口 |
 
-`--host` 和 `--port` 不会写回配置文件。后台启动和系统服务会在子进程中重新读取配置文件，因此要永久修改监听地址，应通过 Terminal UI 或直接修改配置文件。
+`--host` 和 `--port` 不会写回配置文件。后台启动和系统服务会在子进程中重新读取配置文件，因此要永久修改监听地址，应通过 WebUI 设置页或直接修改配置文件。
 
 ## 启动开关
 
@@ -126,7 +94,6 @@ amkr --config router-config.json --no-ops
 | `--show-address` | 显示 AMKR 的监听 IP、端口和服务地址后退出，不启动服务 |
 | `--show-api-key`（别名：`--get-api-key`、`--get-key`） | 输出当前 AMKR 的本地授权 Key 后退出，不启动服务 |
 | `--show-unified-model` | 显示请求模型 `unified-model` 当前指向的真实模型和 Key |
-| `--show-logs [N]` | 打开调用日志界面，并显示最近 N 行运行日志；省略 N 时为 20 |
 
 示例：
 
@@ -134,11 +101,11 @@ amkr --config router-config.json --no-ops
 amkr --config router-config.json --show-config
 amkr --config router-config.json --show-address
 amkr --config router-config.json --get-key
-amkr --config router-config.json --show-logs
-amkr --config router-config.json --show-logs 100
+amkr --config router-config.json --show-unified-model
 ```
 
-调用统计明细在日志界面中固定为每页 10 行；`N` 只控制运行日志的初始行数。
+运行日志写在配置的 `log_file_path`（前台启动同时输出到终端）；调用统计与日志明细在
+WebUI 的「用量统计」与「服务日志」页。
 
 ## 统一模型切换
 
@@ -170,7 +137,7 @@ amkr --config router-config.json --show-unified-model
 - MODEL 不存在、Key 不存在或 Key 已禁用时，命令返回失败且不写入无效配置。
 - 修改会原子写回配置文件；运行中的服务会在后续请求时热重载。
 
-> 任务路由（把 `TASK_XXXXXX` 当模型名传，见 [`USAGE.md`](USAGE.md#9-任务路由)）**没有对应的命令行参数**，请在 WebUI 的 **配置 → 任务路由** 页或管理 API 的 `/api/tasks` 中维护。它有多个字段（首选/备选模型、一组固定参数），做成命令行开关并不合适。
+> 任务路由（把 `TASK_XXXXXX` 当模型名传，见 [`USAGE.md`](USAGE.md#9-任务路由)）**没有对应的命令行参数**，请在 WebUI 的**任务路由**页或管理 API 的 `/api/tasks` 中维护。它有多个字段（首选/备选模型、一组固定参数），做成命令行开关并不合适。
 
 ## 后台进程
 
@@ -178,7 +145,7 @@ amkr --config router-config.json --show-unified-model
 
 | 参数 | 说明 |
 | --- | --- |
-| `--serve` | 跳过 Terminal UI，以独立后台进程启动服务 |
+| `--serve` | 以独立后台进程启动服务（不占用当前终端） |
 | `--status` | 查询配置中 `host`、`port` 对应服务的健康状态 |
 | `--stop` | 根据 PID 文件停止 CLI 后台进程 |
 
@@ -312,7 +279,7 @@ amkr --config router-config.json --update
 12. `--install-service`
 13. `--service`
 14. `--serve-foreground`
-15. 无 `--serve` 时进入 Terminal UI
+15. 无操作参数时前台启动服务并打开 WebUI
 16. `--serve`
 
 例如同时传入 `--show-config --serve` 时，只显示配置，不会启动服务。

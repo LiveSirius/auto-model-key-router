@@ -21,48 +21,36 @@ Auto Model Key Router（简称 AMKR）是一个本地 OpenAI-compatible API 路�
 
 ## 2. 安装
 
-AMKR 需要 Python `>=3.12`。
+`amkr` 是单一静态二进制（Windows / macOS / Linux，amd64 + arm64），没有运行时依赖。
+推荐从 GitHub Releases 下载预编译产物，安装脚本会校验 sha256 后再落盘；也可以本地
+`go build ./cmd/amkr` 自行构建。完整步骤见 [README 的「安装」一节](../README.md#安装)。
 
-推荐用 `pipx` 或 `uv tool` 安装成独立命令行工具。两者都会把 `amkr` 安装到自己的 bin 目录；如果该目录尚未在 PATH 中，安装成功后仍可能提示找不到命令：
-
-使用 pipx：
-
-```bash
-pipx install auto-model-key-router
-pipx ensurepath
-```
-
-或使用 uv：
+一行安装（Linux / macOS）：
 
 ```bash
-uv tool install auto-model-key-router
-uv tool update-shell
+curl -fsSL https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.sh | sh
 ```
 
-执行 PATH 设置命令后，请关闭并重新打开终端，再运行：
+Windows PowerShell：
+
+```powershell
+irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 -OutFile "$env:TEMP\amkr-install.ps1"; & "$env:TEMP\amkr-install.ps1"
+```
+
+装完确认：
 
 ```bash
 amkr --version
 auto-model-key-router --version
 ```
 
-Windows PowerShell 中可用 `uv tool dir --bin` 或 `pipx environment --value PIPX_BIN_DIR` 查看需要加入 PATH 的目录；macOS/Linux 中可用 `command -v amkr` 检查命令位置。PATH 变化不会自动刷新已经打开的终端、IDE 或服务进程。
+两个名字指向同一份程序。一行脚本默认装到 `/usr/local/bin`，没有写权限时退回
+`~/.local/bin`；Windows 上装到 `%LOCALAPPDATA%\Programs\AutoModelKeyRouter\amkr.exe`，
+不需要管理员权限。若提示找不到命令，把该目录加进当前用户 PATH 并**重新打开终端**——
+PATH 变化不会自动刷新已经打开的终端、IDE 或系统服务进程。
 
-如果暂时只想确认包本身可以运行，不依赖当前 shell 的 PATH，可使用：
-
-```bash
-uvx --from auto-model-key-router amkr --version
-```
-
-若 `uvx` 成功而 `amkr` 失败，就是 PATH 激活问题，不是项目没有提供命令入口。使用 `pipx list` 或 `uv tool list` 可确认工具是否已安装。
-
-如需启用访客 Key 功能，请安装 `visitor` extra：
-
-```bash
-pipx install "auto-model-key-router[visitor]"
-# 或
-uv tool install "auto-model-key-router[visitor]"
-```
+访客 Key 是**常驻功能**，没有额外的安装步骤或可选依赖：在配置里给某个 Key 打开
+`allow_visitor` 即可。
 
 ---
 
@@ -157,43 +145,44 @@ cp router-config.example.json router-config.json
 - `stream_first_byte_timeout` 默认 60 秒，从发起流式上游请求开始，覆盖等待响应头和第一块响应体的总时间。
 - `stream_idle_timeout` 默认 60 秒，控制收到第一块后相邻响应块的最大等待时间。
 
-三个值都应大于 0。流式响应头返回前超时时，下游响应尚未建立，AMKR 会按现有重试策略切换 Key；下游流建立后发生首块或空闲超时时，只结束当前流，不会自动重放请求，以免产生重复事件、重复计费或非幂等工具调用。可在 TUI 的 **CLI 设置 → 超时配置** 中统一修改这三个值。
+三个值都应大于 0。流式响应头返回前超时时，下游响应尚未建立，AMKR 会按现有重试策略切换 Key；下游流建立后发生首块或空闲超时时，只结束当前流，不会自动重放请求，以免产生重复事件、重复计费或非幂等工具调用。可在 WebUI 的 **设置 → 超时配置** 中统一修改这三个值。
 
 ---
 
-## 4. 用 Terminal UI 配置和管理
+## 4. 用 WebUI 配置和管理
 
-启动 Terminal UI：
+启动服务后会自动打开 WebUI：
 
 ```bash
 amkr --config router-config.json
 ```
 
-不加 `--config` 时会管理默认缓存目录中的配置。
+不加 `--config` 时会管理默认缓存目录中的配置。也可以手动访问
+`http://127.0.0.1:8000/ui/`。终端交互界面已随 Python 版退役，WebUI 是唯一的界面。
 
-TUI 里最常用的入口：
+WebUI 里最常用的页面：
 
-| 菜单 | 主要用途 |
+| 页面 | 主要用途 |
 | --- | --- |
-| 一键配置 | 注册路由服务，或自动配置 Claude Code / Codex / Pi Agent 使用 AMKR |
+| 概览 / 用量统计 / 工作空间 / 服务日志 / 成本 | 运行状态、请求明细、各空间用量与流向图、日志、基于 models.dev 的成本估算 |
 | 供应商 | 添加供应商与 Key、管理 Key、刷新能力探测（可按 Key 与端点范围）、设置 Base URL / 路由 |
-| 模型设置 | 管理模型别名、隐藏别名、路由模式，把供应商 Key 绑定/解绑到模型、修改上游模型名 |
+| 模型路由 | 管理模型别名、隐藏别名、路由模式，把供应商 Key 绑定/解绑到模型、修改上游模型名 |
 | 统一模型 | 设置 `unified-model` 当前指向的真实模型，并选择自动路由或固定 Key |
-| CLI 设置 | 管理监听地址、端口、本地鉴权、请求超时、配置迁移、版本更新等 |
-
-> 任务路由（[第 9 节](#9-任务路由)）目前只在 WebUI 的 **配置 → 任务路由** 页和管理 API 中维护，TUI 没有对应菜单。
+| 任务路由 | 维护任务路由，以及任务工作空间的切换、改名与删除（[第 9 节](#9-任务路由)） |
+| 集成 | 让本机的 Claude Code / Codex / Pi Agent 通过 AMKR 统一入口发请求，可应用与回退 |
+| 设置 | 监听地址、端口、本地鉴权、请求超时、服务控制与注册、配置迁移、WebUI 开关、版本更新 |
 
 推荐的新手流程：
 
-1. 进入 **供应商 → 添加供应商**，输入供应商 ID、Base URL 和第一个 API Key；AMKR 会自动探测这个新 Key 可服务的模型，多选后自动建立本地模型并完成绑定（同一供应商以后再添加 Key 也会只探测该新 Key，互不复用探测结果）。
-2. 给同一模型继续添加 Key，或给模型绑定其他供应商的 Key：进入 **模型设置** 选择模型，用「管理 Key / 绑定 Key」调整。
+1. 进入 **供应商**，添加供应商 ID、Base URL 和第一个 API Key；AMKR 会自动探测这个新 Key 可服务的模型，多选后自动建立本地模型并完成绑定（同一供应商以后再添加 Key 也会只探测该新 Key，互不复用探测结果）。
+2. 给同一模型继续添加 Key，或给模型绑定其他供应商的 Key：进入 **模型路由** 选择模型，调整 Key 绑定。
 3. 进入 **统一模型**，把 `unified-model` 指向该模型。
-4. 进入 **一键配置 → 路由服务**，启动或注册本地路由服务。
+4. 进入 **设置 → 服务控制**，启动或注册本地路由服务。
 5. 用客户端请求 `http://127.0.0.1:8000/v1/...`，模型名可以写真实模型、别名、`unified-model` 或任务名 `TASK_XXXXXX`。
 
 > **能力探测与缓存（按 Key 独立）**：探测缓存按 Key 保存（磁盘为 `providers.<id>.keys.<key>.capabilities`，含该 Key 的模型清单 `models`、各路由可用性 `route_status`、`errors` 与 `checked_at`）。同一供应商的不同 Key 能访问的模型集可能不同（如免费/付费额度、不同订阅），所以每次添加 Key 时只探测这个新 Key，结果不复用、不折叠。
 >
-> 手动刷新：在 **供应商** 菜单选择「刷新能力探测」→ 「1 刷新全部 Key」或「2 指定 Key」（指定 Key 后可再选端点范围：「1 全部路由模式 / 2 仅 Chat (openai) / 3 仅 Messages (anthropic) / 4 仅 Responses」），「0 返回」。刷新只更新探测缓存，不会改动模型与绑定；管理 API 对应入口见 [`docs/API.md`](API.md) 的 probe 接口。
+> 手动刷新：在 **供应商** 页选择刷新能力探测，可刷新全部 Key 或指定 Key（指定后可再选端点范围：全部路由模式 / 仅 Chat (openai) / 仅 Messages (anthropic) / 仅 Responses）。刷新只更新探测缓存，不会改动模型与绑定；管理 API 对应入口见 [`docs/API.md`](API.md) 的 probe 接口。
 
 ---
 
@@ -316,7 +305,7 @@ AMKR 会在转发给上游前把请求体里的模型名改写为真实模型 ID
 - 隐藏别名只在**本地调用**时生效。visitor 只能用 `amkr-{真实模型ID}`，看不到也用不了隐藏别名。
 - 名字冲突时真实模型 ID 与 `aliases` 优先；多个模型指向同一上游名时按 `models` 顺序取第一个匹配。
 - 手写的 `hidden_aliases` 参与重名校验：与任何模型 ID、`aliases` 或其他模型的手写隐藏别名冲突都会报错。
-- 在 TUI「模型设置 → 隐藏别名」或 WebUI 的模型路由页可以编辑手写隐藏别名；自动推导的部分无需维护（同步调整绑定 Key 时的上游模型名即可）。
+- 在 WebUI 的模型路由页可以编辑手写隐藏别名；自动推导的部分无需维护（同步调整绑定 Key 时的上游模型名即可）。
 
 ---
 
@@ -439,7 +428,7 @@ auto-model-key-router --config router-config.json --switch-model text-embedding-
 
 `unified-model` 适合「客户端固定一个入口、模型在 AMKR 侧切换」；任务路由解决的是另一个问题：**不同任务该用不同模型和不同的采样参数**。把模型名与参数一起固化在服务端，客户端只要传任务名，就不必（也不能）关心这些细节。
 
-在 WebUI 的 **配置 → 任务路由** 页新建一个任务：
+在 WebUI 的 **任务路由** 页新建一个任务：
 
 | 字段 | 说明 |
 | --- | --- |
@@ -735,11 +724,7 @@ WebUI 通过 `GET /ui/pricing.json` 读取这份快照（与 `/ui/` 同级、不
 
 ## 15. 使用访客 Key
 
-访客功能需要安装：
-
-```bash
-pipx install "auto-model-key-router[visitor]"
-```
+访客功能是**常驻能力**，不需要额外安装，也没有可选依赖。
 
 访客固定 Key 是：
 
@@ -793,13 +778,13 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 AMKR 支持 Anthropic Messages 风格入口 `/v1/messages`，可供 Claude Code 使用。
 
-在 **一键配置 → Claude Code** 中可选择三种状态：
+在 **集成 → Claude Code** 中可选择三种状态：
 
 - **AMKR unified-model 模式**：先设置 `unified-model`，再由 AMKR 写入路由、本地鉴权和 `unified-model` 的 Claude 模型环境变量。
 - **AMKR 原生模式**：只写入路由和本地鉴权；首次接管会保留已有的 Claude 模型配置。从 unified-model 模式切换时会移除 AMKR 写入的模型变量，由用户手动配置 Claude Code 默认模型。
 - **未接管**：选择回退原配置，AMKR 会恢复首次应用前的完整文件内容。
 
-两种 AMKR 接管模式都要求 `local_api_key` 不为空。原生模式不要求设置 `unified-model`，但 Claude Code 使用的每个模型名必须先在 AMKR 的**模型设置**中配置；否则请求会明确提示缺失的模型名。
+两种 AMKR 接管模式都要求 `local_api_key` 不为空。原生模式不要求设置 `unified-model`，但 Claude Code 使用的每个模型名必须先在 AMKR 的**模型路由**页配置；否则请求会明确提示缺失的模型名。
 
 AMKR 会更新：
 
@@ -823,7 +808,7 @@ unified-model 模式写入的核心环境变量包括：
 }
 ```
 
-原生模式保留 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 和 AMKR 流量控制变量，但不会注入模型名。应用前的原始配置会备份到 AMKR 缓存目录，可在 TUI 中回退。
+原生模式保留 `ANTHROPIC_BASE_URL`、`ANTHROPIC_AUTH_TOKEN` 和 AMKR 流量控制变量，但不会注入模型名。应用前的原始配置会备份到 AMKR 缓存目录，可在 WebUI 的集成页回退。
 
 ---
 
@@ -831,9 +816,9 @@ unified-model 模式写入的核心环境变量包括：
 
 AMKR 支持 OpenAI Responses 风格入口 `/v1/responses`，可供 Codex 使用。
 
-在 **一键配置 → Codex** 中可选择 unified-model 模式、原生模式或回退原配置。两种接管模式都写入 AMKR OpenAI Provider 和 `auth.json` 的本地鉴权 key；只有 unified-model 模式需要预先设置 `unified-model`。
+在 **集成 → Codex** 中可选择 unified-model 模式、原生模式或回退原配置。两种接管模式都写入 AMKR OpenAI Provider 和 `auth.json` 的本地鉴权 key；只有 unified-model 模式需要预先设置 `unified-model`。
 
-原生模式不会注入模型：首次接管会保留用户已有的 `model`、`review_model` 和 `model_reasoning_effort`；从 unified-model 模式切换时会移除这些 AMKR 写入字段。用户需要手动配置 Codex 的 `model`、`review_model` 等模型名，并先将每个名称添加到 AMKR 的**模型设置**中；模型不存在时路由器会返回包含该名称的配置提示。
+原生模式不会注入模型：首次接管会保留用户已有的 `model`、`review_model` 和 `model_reasoning_effort`；从 unified-model 模式切换时会移除这些 AMKR 写入字段。用户需要手动配置 Codex 的 `model`、`review_model` 等模型名，并先将每个名称添加到 AMKR 的**模型路由**页；模型不存在时路由器会返回包含该名称的配置提示。
 
 AMKR 会更新：
 
@@ -866,15 +851,15 @@ requires_openai_auth = true
 }
 ```
 
-一键配置只会更新上述模型调用字段，以及 `auth.json` 中的 `OPENAI_API_KEY`。原生模式始终保留 Provider 与本地鉴权配置。现有的其他 Codex 设置、注释、OpenAI Provider 自定义字段和其他鉴权字段都会保留；旧版本已经写入的非模型字段也不会被主动删除。
+集成应用只会更新上述模型调用字段，以及 `auth.json` 中的 `OPENAI_API_KEY`。原生模式始终保留 Provider 与本地鉴权配置。现有的其他 Codex 设置、注释、OpenAI Provider 自定义字段和其他鉴权字段都会保留；旧版本已经写入的非模型字段也不会被主动删除。
 
-应用前的原始配置同样会备份，可在 TUI 中回退。
+应用前的原始配置同样会备份，可在 WebUI 的集成页回退。
 
 ---
 
 ## 18. 接入 Pi Agent
 
-在 **一键配置 → Pi Agent** 中，AMKR 只提供 `unified-model` 模式，不提供原生模型模式。应用前需要先设置 `unified-model` 和本地鉴权 key；回退会恢复首次应用前的完整配置文件。
+在 **集成 → Pi Agent** 中，AMKR 只提供 `unified-model` 模式，不提供原生模型模式。应用前需要先设置 `unified-model` 和本地鉴权 key；回退会恢复首次应用前的完整配置文件。
 
 AMKR 会更新：
 
@@ -903,7 +888,7 @@ AMKR 会更新：
 }
 ```
 
-Pi 的 `/model` 会继续显示其内置及其他自定义提供商的模型；选择 `amkr/unified-model` 会经由 AMKR 的统一路由，选择其他 `amkr/<模型或别名>` 则直接请求对应的 AMKR 模型。重新执行一键配置即可同步新增或删除的模型。
+Pi 的 `/model` 会继续显示其内置及其他自定义提供商的模型；选择 `amkr/unified-model` 会经由 AMKR 的统一路由，选择其他 `amkr/<模型或别名>` 则直接请求对应的 AMKR 模型。重新在集成页应用即可同步新增或删除的模型。
 
 ---
 
@@ -976,9 +961,10 @@ AMKR 的代理入口是 `/v1/{path}`，主要兼容：
 
 ### 如何迁移配置到另一台机器？
 
-使用 TUI：
+使用 WebUI 的**设置 → 配置迁移**：
 
-1. 源机器进入 **CLI 设置 → 配置迁移 → 复制 Key 配置**。
-2. 目标机器进入 **CLI 设置 → 配置迁移 → 粘贴并应用**。
+1. 源机器点「导出」，得到一份可迁移配置 JSON。
+2. 目标机器把它粘进文本框，点「导入配置」。
 
-迁移内容包含模型与上游 Key；安装 `visitor` extra 时还会包含访客权限。目标端已有监听、本地鉴权、路径等设置会保留。
+迁移内容包含模型、上游 Key、任务与工作空间；访客权限随配置一起走（访客功能常驻，不再
+是可选安装项）。目标端已有的监听地址、本地鉴权、路径等本机设置会保留。

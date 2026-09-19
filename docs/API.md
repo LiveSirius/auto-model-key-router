@@ -8,15 +8,9 @@
 http://127.0.0.1:8000
 ```
 
-FastAPI 同时提供自动生成的接口页面：
-
-- Swagger UI：`/docs`
-- ReDoc：`/redoc`
-- OpenAPI JSON：`/openapi.json`
-
 ## 鉴权
 
-除 `HEAD /`、`GET /health` 和 FastAPI 文档页面外，业务接口通常需要本地 API key。
+除 `HEAD /` 与 `GET /health` 外，业务接口通常需要本地 API key。
 
 ```http
 Authorization: Bearer your-local-api-key
@@ -728,7 +722,7 @@ curl -X POST http://127.0.0.1:8000/api/models \
 
 ### Key 接口
 
-Key 接口操作的是「模型绑定的 Key」（v4 中即该模型 `targets[]` 对应的供应商 Key）。路径参数 `model_id` 为真实模型 ID；`key_name` 是该模型内的 Key 名称（解析时兼容供应商原始 Key 名与 `供应商ID-Key名` 限定名）。这些操作与 TUI 的模型 Key 管理一致：供应商 Key 被其他模型绑定时，写操作会先把该模型解耦到独立的供应商 Key 克隆，再应用修改，避免影响其他模型。
+Key 接口操作的是「模型绑定的 Key」（v4 中即该模型 `targets[]` 对应的供应商 Key）。路径参数 `model_id` 为真实模型 ID；`key_name` 是该模型内的 Key 名称（解析时兼容供应商原始 Key 名与 `供应商ID-Key名` 限定名）。这些操作与 WebUI 模型路由页的 Key 管理等价：供应商 Key 被其他模型绑定时，写操作会先把该模型解耦到独立的供应商 Key 克隆，再应用修改，避免影响其他模型。
 
 #### `GET /api/models/{model_id}/keys`
 
@@ -759,7 +753,7 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 #### `DELETE /api/models/{model_id}/keys/{key_name}`
 
-成功返回 `204 No Content`。该接口与 TUI 的模型 Key 操作一致：解绑当前模型的这条 Key 绑定。若该 Key 不再被任何模型绑定，会连带删除供应商下的这个 Key；供应商随后没有 Key 时也会一并删除。若这是模型的最后一条绑定，模型会被自动删除。
+成功返回 `204 No Content`。该接口与 WebUI 模型路由页的 Key 操作等价：解绑当前模型的这条 Key 绑定。若该 Key 不再被任何模型绑定，会连带删除供应商下的这个 Key；供应商随后没有 Key 时也会一并删除。若这是模型的最后一条绑定，模型会被自动删除。
 
 ### 任务路由接口
 
@@ -876,7 +870,7 @@ curl -X POST http://127.0.0.1:8000/api/providers/openai/keys/main/probe \
 
 响应额外包含 `key` 对象（含 `capabilities`，未探测时为 `null`）。
 
-> 说明：探测缓存是机器本地信息（不同机器、不同 Key 权限看到的模型可能不同），只由以上手动刷新入口更新；TUI「供应商 → 刷新能力探测」的语义与此一致（刷新全部 Key，或指定 Key 并可限定端点范围）。管理 API 的 Key 创建、模型绑定等写操作不会自动发起探测。
+> 说明：探测缓存是机器本地信息（不同机器、不同 Key 权限看到的模型可能不同），只由以上手动刷新入口更新；WebUI 供应商页的「刷新能力探测」语义与此一致（刷新全部 Key，或指定 Key 并可限定端点范围）。管理 API 的 Key 创建、模型绑定等写操作不会自动发起探测。
 
 #### `POST /api/probes/keys`（兼容接口）
 
@@ -927,7 +921,7 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 {"error": {"message": "错误信息"}}
 ```
 
-管理 API 的 FastAPI 错误通常使用：
+管理 API 的错误使用：
 
 ```json
 {"detail": "错误信息"}
@@ -936,7 +930,7 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 Anthropic Messages 错误可能使用 Anthropic 风格的 `type` 和 `error` 对象。
 ## 内置 WebUI 与运维 API
 
-AMKR 自带一套可选的 WebUI，用于在浏览器中完成与 TUI 等价的日常管理。**资产随软件包一起安装，没有单独的安装步骤，也没有额外依赖**；是否启用只由配置字段 `webui_enabled`（或启动参数 `--webui` / `--no-webui`）决定。
+AMKR 自带一套可选的 WebUI，用于在浏览器中完成日常管理。**资产随二进制一起发布（`//go:embed`），没有单独的安装步骤，也没有额外依赖**；是否启用只由配置字段 `webui_enabled`（或启动参数 `--webui` / `--no-webui`）决定。
 
 ### 启用方式
 
@@ -947,7 +941,7 @@ amkr --config router-config.json --webui
 amkr --config router-config.json --no-webui
 ```
 
-也可以在 TUI 的「CLI 设置 → WebUI」中切换，或调用 `POST /api/tool/webui`。
+也可以在 WebUI 的设置页切换，或调用 `POST /api/tool/webui`。
 
 启用后访问：
 
@@ -1178,17 +1172,21 @@ http://127.0.0.1:8000/ui/
 
 从备份恢复该 Agent 的原配置；没有备份时返回 `409`。
 
-## 作为中间件嵌入宿主应用
+## 嵌入宿主
 
-AMKR 可以直接挂进一个已有的 FastAPI / Starlette 服务，把整套 OpenAI 兼容接口与
-管理 API 作为子路径提供，而不必单独起进程。
+AMKR 的装配入口是 `internal/server` 的 `Options` 与 `New`（没有单独的 `mount_app`
+层）。`internal/server` 是 Go 的内部包，因此嵌入只在**本模块内**可用（例如
+`cmd/amkr`）；外部程序请把 AMKR 当成独立进程用。
 
-```python
-from fastapi import FastAPI
-from auto_model_key_router import RouterConfig, mount_app
-
-host = FastAPI()
-mount_app(host, "/amkr", RouterConfig.load("router-config.json"), "router-config.json")
+```go
+app, err := server.New(server.Options{
+    ConfigPath: "router-config.json",
+    Config:     cfg,
+    // 嵌入到宿主的某个前缀下时给出；独立运行时留空。
+    MountPrefix: "/amkr",
+})
+if err != nil { /* ... */ }
+hostMux.Handle("/amkr/", http.StripPrefix("/amkr", app.Handler()))
 ```
 
 挂载后的路径：
@@ -1201,103 +1199,68 @@ mount_app(host, "/amkr", RouterConfig.load("router-config.json"), "router-config
 | `GET /api/settings` | `GET /amkr/api/settings` |
 | `WS /ws/events` | `WS /amkr/ws/events` |
 
-要自定义路由注册（例如换前缀、复用已有实例），用 `create_app`：
-
-```python
-from auto_model_key_router import create_app
-
-app = create_app(config, config_path, enable_ops=False)
-host.mount("/llm", app)   # 仍建议改用 mount_app，理由见下
-```
-
-### 必须用 `mount_app` 而不是 `host.mount()`
-
-Starlette **不会**为 `Mount` 的子应用运行 lifespan。直接 `host.mount(prefix, app)`
-会静默跳过 AMKR 的启动与收尾：指标广播任务不会启动（`/metrics` 与 WebSocket 推送
-没有数据），退出时 httpx client 与 SQLite 连接也不会关闭。`mount_app` 会把子应用的
-lifespan 链进宿主，宿主自身的 lifespan 仍会正常执行。
-
-如果确实要手动挂载，必须自己补上生命周期：
-
-```python
-from contextlib import asynccontextmanager
-
-@asynccontextmanager
-async def lifespan(host_app):
-    async with amkr_app.router.lifespan_context(amkr_app):
-        yield
-```
+`MountPrefix` 只影响报出的路径（`/health` 的 `webui_path`）与 WebUI、价格目录、自更新
+入口这些挂在 `/ui/` 之下的路由；它**不会**改写管理 API 的 `/api` 前缀。
 
 ### 嵌入时的行为差异
 
-| 行为 | 说明 |
-| --- | --- |
-| 运维接口 | `mount_app` 与 `create_app(enable_ops=False)` 默认**不注册** |
-
-运维接口（`/api/logs`、`/api/service/*`、`/api/integrations/*`、`/api/tool`）作用于
-「服务所在的这台机器」——启停后台进程、注册系统服务、改写 Claude Code / Codex 的
-本地配置——嵌入到别人的进程里语义不成立，因此默认关闭。需要时显式开：
-`mount_app(host, "/amkr", config, enable_ops=True)`。
-
-`enable_ops` 为 `None` 时跟随配置字段 `ops_enabled`（默认 `true`）。独立部署想整体关掉
-运维面时用 `amkr --no-ops`，比逐个路径拉黑可靠；关闭后 `/health` 的 `ops_enabled`
-为 `false`。
+配置里的 `ops_enabled` 决定运维接口（`/api/logs`、`/api/service/*`、
+`/api/integrations/*`、`/api/tool`）是否注册。这些接口作用于「服务所在的这台机器」——
+启停后台进程、注册系统服务、改写 Claude Code / Codex 的本地配置——嵌入到别人的进程里
+语义不成立，因此独立部署想整体关掉运维面时用 `amkr --no-ops`，比逐个路径拉黑可靠；
+关闭后 `/health` 的 `ops_enabled` 为 `false`。
 
 其余接口（代理、`/health`、`/metrics`、WebSocket、`/api/settings` 等配置管理接口）
-在挂载下与独立运行完全一致；`request.app.state` 会被正确解析到 AMKR 自己的实例。
+在挂载下与独立运行完全一致。
 
 ### 配置持久化
 
-管理接口写配置要求已知配置文件路径。通过 `mount_app(host, path, config)` 只传
-`config` 而不传 `config_path` 时，`GET /api/settings` 等读写接口会返回 `409`：
+管理接口写配置要求已知配置文件路径。`Options.ConfigPath` 为空时，`GET /api/settings`
+等读写接口会返回 `409`：
 
-> 传入 `config_path`（`mount_app(host, "/amkr", config, "router-config.json")`）
-> 即可获得完整的管理能力。
+> 传入 `ConfigPath` 即可获得完整的管理能力。
 
-WebUI 的前端会根据当前页面路径（`.../ui/`）自动推导 API 基址，因此挂载到任意前缀
-下都不需要额外配置。
+WebUI 的前端会根据当前页面路径（`.../ui/`）自动推导 API 基址，因此挂载到任意前缀下
+都不需要额外配置。
 
 ### 复用宿主的身份体系（可插拔鉴权）
 
-嵌入时宿主通常已经有自己的身份认证（session cookie、JWT、网关注入的身份头）。默认
-的「本地 API key」在这种场景下很别扭：把 `local_api_key` 留空等于**整体关闭鉴权**，
-否则就得让调用方额外再持有一套 AMKR 的 key。
+嵌入时宿主通常已经有自己的身份认证（session cookie、JWT、网关注入的身份头）。默认的
+「本地 API key」在这种场景下很别扭：把 `local_api_key` 留空等于**整体关闭鉴权**，否则
+就得让调用方额外再持有一套 AMKR 的 key。
 
-`authenticator` 可以整体替换鉴权判定：
+`Options.Authorizer` 可以整体替换鉴权判定：
 
-```python
-from fastapi import FastAPI
-from auto_model_key_router import AuthContext, RouterConfig, mount_app
-
-
-async def host_authenticator(request, config):
-    user = request.session.get("user")        # 宿主的身份体系
-    if user is None:
-        return None                            # None = 拒绝，返回 401
-    if user.is_admin:
-        return AuthContext("full")
-    return AuthContext("visitor")              # 受限，见下
-
-
-mount_app(host, "/amkr", RouterConfig.load(path), path,
-          authenticator=host_authenticator)
+```go
+app, err := server.New(server.Options{
+    ConfigPath: "router-config.json",
+    Config:     cfg,
+    Authorizer: func(r *http.Request, localAPIKey string) *auth.Context {
+        user := hostUser(r)              // 宿主的身份体系
+        if user == nil {
+            return nil                   // nil = 拒绝，返回 401
+        }
+        if user.IsAdmin {
+            return auth.Full()
+        }
+        return auth.Visitor()            // 受限，见下
+    },
+})
 ```
 
-`AuthContext.mode` 只有两个取值，语义与默认鉴权完全一致：
+`auth.Context` 只有两种模式，语义与默认鉴权完全一致：
 
-| mode | 权限 |
+| 模式 | 权限 |
 | --- | --- |
-| `"full"` | 全部接口，全部模型 |
-| `"visitor"` | 仅 `/v1/models` 与 `/v1/*`，且只能用标记了 `allow_visitor` 的 Key 与 `amkr-{模型ID}` 形式；拿不到 `/metrics` 与配置管理接口 |
+| full | 全部接口，全部模型 |
+| visitor | 仅 `/v1/models` 与 `/v1/*`，且只能用标记了 `allow_visitor` 的 Key 与 `amkr-{模型ID}` 形式；拿不到 `/metrics` 与配置管理接口 |
 
-`visitor` **不是「权限更小的 full」而是一套模型级规则**（visitor 不能用内部别名、
-真实模型 ID 或 `unified-model`），因此钩子必须显式选择它，不能用布尔值表达。
+`visitor` **不是「权限更小的 full」而是一套模型级规则**（visitor 不能用内部别名、真实
+模型 ID 或 `unified-model`），因此钩子必须显式选择它，不能用布尔值表达。
 
-同时覆盖 WebSocket：`/ws/events` 只对 `full` 开放。WebSocket 握手无法携带自定义头，
-所以 AMKR 的凭据只能走首帧 `{"type":"auth","token":"..."}`；该 token 会被折算成
-`Authorization: Bearer <token>` 后交给同一个钩子。宿主的 cookie 在握手头中，因此
-用 cookie / session 鉴权时握手即可通过，无需处理首帧。钩子拒绝时连接以 `4003` 关闭。
+同时覆盖 WebSocket：`/ws/events` 只对 full 开放。WebSocket 握手无法携带自定义头，所以
+AMKR 的凭据只能走首帧 `{"type":"auth","token":"..."}`；该 token 会被折算成
+`Authorization: Bearer <token>` 后交给同一个钩子。宿主的 cookie 在握手头中，因此用
+cookie / session 鉴权时握手即可通过，无需处理首帧。钩子拒绝时连接以 `4003` 关闭。
 
-默认行为在未传 `authenticator` 时保持不变（本地 key 或固定 visitor key），因此现有
-部署不受影响。
-
+未传 `Authorizer` 时行为不变（本地 key 或固定 visitor key）。

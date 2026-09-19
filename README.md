@@ -375,7 +375,7 @@ node webui/probes/webui_auth_probe.mjs   # 鉴权与任务路由页；不带参�
 - [更新日志](CHANGELOG.md)：版本变更记录。
 - [配置示例](router-config.example.json)：可复制修改的完整 JSON 示例。
 
-> `docs/` 下的 `USAGE.md` / `CLI.md` / `API.md` 仍保留 Python 时代的描述（终端交互界面、已移除的参数、包管理器安装方式），与当前二进制不符的部分以本 README 和 `amkr --help` 为准；`WORKSPACE.md` 是 Go 版新增能力的文档，不涉及 Python 历史。
+> `docs/` 下的 `USAGE.md` / `CLI.md` / `API.md` / `WORKSPACE.md` 描述当前 Go 实现：安装方式为预编译二进制 + 一行脚本，界面为 WebUI，命令行参数以 `amkr --help` 与实际行为为准。
 
 ## 安全提示
 
