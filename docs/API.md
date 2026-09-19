@@ -68,6 +68,8 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `GET/PUT/DELETE` | `/api/routes/{route_id}` | 仅本地 | 查询、更新或删除模型路由 |
 | `GET/POST` | `/api/tasks` | 仅本地 | 查询或创建任务路由（`TASK_XXXXXX` → 模型 + 固定参数）；可用 `X-AMKR-Workspace` 头指定工作空间 |
 | `GET/PUT/DELETE` | `/api/tasks/{task_name}` | 仅本地 | 查询、更新或删除任务路由；可用 `X-AMKR-Workspace` 头指定工作空间 |
+| `GET` | `/api/workspaces` | 仅本地 | 列出**有任务**的工作空间及各自任务数 |
+| `PUT/DELETE` | `/api/workspaces/{workspace}` | 仅本地 | 重命名或删除工作空间（组内任务一并搬走/删除）；默认空间 `default` 不可改删 |
 | `GET/PUT` | `/api/settings` | 仅本地 | 查询或更新监听、超时和重试设置 |
 | `POST` | `/api/settings/local-api-key` | 仅本地 | 重置本地鉴权 Key；新 Key 仅在本次响应返回 |
 | `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 GitHub Releases 版本检查 |
@@ -88,12 +90,20 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/integrations/{agent}` | 仅本地 | 以 `unified-model` 或 `native` 模式接管该 Agent 配置 |
 | `POST` | `/api/integrations/{agent}/rollback` | 仅本地 | 回退该 Agent 到备份配置 |
 
-### 为什么新增能力挂在 `/ui/` 而不是新增 `/api/` 路由
+### 新增能力挂在 `/api/` 还是 `/ui/`
 
-管理面的 47 条与运维面的 7 条路由被逐字节语料锁定，那些语料由已退役的 Python 参照
-实现产出，是本项目兼容性的唯一凭证。自更新与工作空间目录都是 Go 版**新增**的能力，
-Python 侧没有对应实现，给它们手写 `/api` 语料等于伪造兼容性证据。因此与价格目录一样
-挂在 `/ui/` 前缀下——那里不在任何冻结清单之内。
+管理面的 47 条与运维面的 7 条路由列在 `routePatterns()` / `opsRoutePatterns()` 里，响应
+由逐字节语料锁定——那是**已发布接口**的回归凭证，不能随意增减。新增能力因此分两类：
+
+- **管理面的正式资源**（工作空间自身的读/改/删）注册在 `/api` 之下，但列在**另一份**
+  清单（`workspacePatterns()`）里。它们没有历史版本可对照，塞进那 47 条会让「这 47 条
+  逐字节等于已发布行为」这句话失去意义。两批注册在同一棵 mux 上，因此错方法的
+  `405` / `Allow` 判定要同时看两份清单。
+- **本项目自有的读数**（价格目录 `/ui/pricing.json`、自更新入口、工作空间用量
+  `/ui/workspace-usage.json`）挂在 `/ui/` 前缀下：它们与被锁定的 `/api` 面在语义上不
+  连续，挂 `/ui/` 既落在冻结清单之外，也让「不开 WebUI 就没有这些读数」顺理成章。
+
+判断标准是**它是不是管理面的正式资源**，而不是「能不能挂到 `/ui/` 躲开语料」。
 
 工作空间对**既有**代理与管理路由的影响只体现为新增的 `X-AMKR-Workspace` 请求头：
 不带该头的请求（也就是全部语料）行为逐字节不变，因此 `tasks/list` 这类被锁定的响应
@@ -102,7 +112,7 @@ Python 侧没有对应实现，给它们手写 `/api` 语料等于伪造兼容�
 与 `/ui/pricing.json` 的区别是**鉴权**：价格目录是公开只读数据，自更新会替换磁盘上的
 可执行文件并重启服务，因此 `/ui/update/apply` 要求完整权限（访客 key 一律 401），
 只有 `/ui/update/status` 不鉴权（它只回答「这个构建有没有自更新能力」）。
-`/ui/workspaces.json` 与自更新同类，要求完整权限。
+`/ui/workspace-usage.json` 与自更新同类，要求完整权限。
 
 `/api/update/check` 保持不变，仍用于「只检查、不安装」。
 
@@ -178,6 +188,8 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - 未配置的工作空间名不是错误：任务查表落空后会按普通模型名继续解析，因此最终和「模型未配置」是同一个 `404`。
 - 工作空间只隔离任务：模型的 ID、别名、隐藏别名与 `unified-model` 仍然全局唯一，任务名也不能与它们撞名。
 - 访客 Key 不能使用任务，带上该头也一样。
+
+工作空间本身的管理（列出/改名/删除）走 `/api/workspaces*`，见下方「任务路由接口」一节。
 
 成功选中路由后，服务会把传给上游的 `model` 改为真实模型 ID，并用选中 Key 的密钥替换鉴权头。其他兼容参数通常会继续传给上游。
 
@@ -771,7 +783,7 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 任务随 `/api/config/export`、`/api/config/import` 一同迁移（命名工作空间也在其中）；导入时引用不到模型的任务会被跳过（与「该模型从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有备选没了则退化为单模型任务。
 
-#### `GET /ui/workspaces.json`
+#### `GET /api/workspaces`
 
 列出**有任务**的工作空间及各自任务数，供 WebUI 填充切换下拉：
 
@@ -781,7 +793,23 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 默认工作空间 `default` 固定排在首位。没有任何任务的工作空间不会出现——空间由「在它里面建任务」隐式产生，空分组既不可观测也没有意义（删空的工作空间也会从配置里消失）。
 
-该端点挂在 WebUI 前缀下（`/ui/...`，与 `pricing.json` 同类），因此它**不在**管理 API 的 47 条路由清单里：那些路由的响应字节由已退役的参照实现生成的语料逐字节锁定，而工作空间是 Go 侧新增的能力，没有可比对的 oracle。默认需要本地鉴权（与其它管理端点一致）；WebUI 关闭时该路径不注册。
+这个目录是必要的：`GET /api/tasks` 是**按空间过滤**的，因此从它推不出「还有哪些空间存在」。
+
+#### `PUT /api/workspaces/{workspace}`
+
+把工作空间改名为请求体里的 `name`，组内任务整体跟着搬到新键下。请求体为 `{"config_revision": "...", "name": "..."}`，成功返回 `200` 与 `{"name": "<新名>", "task_count": <任务数>, "config_revision": "..."}`。
+
+- `400`：目标是默认工作空间（`default` 不可改名）。
+- `404`：源空间没有任务（空间由任务反推，空的不存在）。
+- `409`：目标名已被占用，或目标名就是 `default`。**不会合并**两个空间——合并会瞬间造出重名任务，而任务名在同一空间内唯一是配置层的硬校验。
+
+#### `DELETE /api/workspaces/{workspace}`
+
+删除工作空间**连同其中的全部任务**。请求体只需 `config_revision`（可省略），成功返回 `204`。`400` 删除默认空间，`404` 空间不存在。
+
+#### 没有 `POST /api/workspaces`
+
+空分组不进配置（见上），空间由「在里面建第一个任务」隐式产生——建任务就是建空间。多一条 `POST` 只会造出配置层随后要清掉的空壳。
 
 ### 供应商接口与能力探测
 
@@ -933,13 +961,9 @@ http://127.0.0.1:8000/ui/
 
 `/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
 
-### `GET /ui/workspaces.json`
+### `GET /api/workspaces`、`PUT|DELETE /api/workspaces/{workspace}`
 
-列出有任务的工作空间及各自任务数，供任务路由页填充切换下拉。**需要鉴权**（内容反映配置结构，不是公开数据）。详见「任务路由接口」一节的说明。
-
-```json
-{"workspaces": [{"name": "default", "task_count": 2}, {"name": "teamA", "task_count": 1}]}
-```
+工作空间自身的读/改/删。这些是管理面的正式资源，因此挂在 `/api` 之下（详见「任务路由接口」一节），而不是像价格目录那样挂 `/ui/`。
 
 ### `GET /ui/workspace-usage.json`
 

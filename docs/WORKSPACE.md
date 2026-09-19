@@ -78,6 +78,26 @@
 > 手写的配置是唯一能短暂出现空分组的地方（例如 `"teamB": {}`），它会被解析接受、
 > 但不会出现在工作空间清单里，并在下一次写回时消失。
 
+### 改与删
+
+「空分组不存在」这条决定了两个既有动作的形状（`internal/configops/tasks.go`）：
+
+- **改名**（`RenameWorkspace`）就是**把整组任务搬到新键下**：旧键清空后由
+  `writeWorkspaceTasks` 自动抹掉，因此不需要（也不能）单独「新建一个空间再搬」。
+  先写新键再清旧键，顺序不能反——两条路径共用同一批任务对象，先清旧键会把要搬的
+  内容一起丢掉。
+- **删除**（`DeleteWorkspace`）就是**清空该组的任务**，分组随后自动消失。它因此
+  没有独立的删除逻辑，也不会留下空壳。
+
+两条动作的拒绝路径都由「默认空间不可动」与「空间由任务反推」推出：
+
+| 情形 | 结果 | 理由 |
+| --- | --- | --- |
+| 改名/删除默认空间 | `400` | 默认空间是不带 `X-AMKR-Workspace` 头的调用方命中的那个，动它会让所有缺省调用方落空 |
+| 改名/删除不存在的空间 | `404` | 空间由任务反推，没有任务就是不存在，没有可改可删的东西 |
+| 改成另一个已存在的空间名 | `409` | **不合并**：两个空间各有一批任务时，合并会瞬间造出重名任务，而任务名在同一空间内唯一是配置层的硬校验 |
+| 改成默认空间名 | `409` | 同「与既有空间重名」，默认空间只是那个必然存在的特例 |
+
 ## 5. 未知工作空间名不是错误
 
 调用方写了一个没建过的空间名时，**不报错**：那里没有任务，于是任务查表落空，接着按
@@ -85,6 +105,10 @@
 
 `NormalizeWorkspace` 因此只做去空白，**不校验存在性**。单加一条「空间不存在」的错误
 既没有信息量（调用方真正需要知道的是任务或模型名不对），也会多一种需要维护的状态。
+
+这条只适用于**调用方按请求头选空间**的读路径。管理面的改/删（`PUT`/`DELETE
+/api/workspaces/{workspace}`）是另一回事：那两个动作有副作用，悄悄成功比报错危险得多，
+因此对不存在的空间报 `404`（见上节）。
 
 ## 6. 兼容性契约
 
@@ -98,11 +122,20 @@
 2. **不带 `X-AMKR-Workspace` 头的请求行为逐字节不变。** 正因如此，被语料锁定的响应体
    （`tasks/list` 锁定了 `{"tasks":[{name,model,fallback_model,params}],"config_revision"}`）
    **没有、也不允许**新增 `workspace` 字段——当前空间由请求头决定，不体现在响应里。
-3. **不新增 `/api` 路由。** 管理面 47 条与运维面 7 条路由被逐字节语料锁定，那些语料由
-   已退役的 Python 实现产出，是本项目兼容性的唯一凭证。工作空间是 Python 侧没有的
-   新能力，给它手写 `/api` 语料等于伪造兼容性证据。因此工作空间目录挂在
-   `/ui/workspaces.json`（与 `pricing.json`、自更新入口同类），那里不在任何冻结清单
-   之内。
+3. **新增的 `/api` 路由与冻结清单分开维护。** 管理面 47 条与运维面 7 条路由的响应被
+   逐字节语料锁定（`routePatterns()` / `opsRoutePatterns()`），那些语料是本项目**已
+   发布接口**的回归凭证。工作空间自身的操作（`GET /api/workspaces`、
+   `PUT|DELETE /api/workspaces/{workspace}`）是管理面的正式资源，因此注册在
+   `/api` 之下，但列在**另一份**清单（`workspacePatterns()`）里：它们没有历史版本
+   可对照，塞进那 47 条会让「这 47 条逐字节等于已发布行为」这句话失去意义。两批都
+   注册在同一棵 mux 上，因此错方法的 `405` / `Allow` 判定必须同时看两份清单
+   （`internal/api/server.go` 的 `patterns`）。
+
+   反过来说，**其余新增能力**（价格目录 `/ui/pricing.json`、自更新入口、工作空间用量
+   `/ui/workspace-usage.json`）仍然挂 `/ui/`：那些是本项目自有的读数，与被锁定的
+   `/api` 面在语义上不连续，挂 `/ui/` 既落在冻结清单之外，也让「不开 WebUI 就没有
+   这些读数」这件事顺理成章。判断标准是**它是不是管理面的正式资源**，而不是「能不
+   能挂到 /ui 躲开语料」。
 4. **访客 Key 不能使用任务**，带上该头也一样。
 5. **错误文本**：工作空间引入的新错误（`workspaces 必须是对象`、`工作空间名不能为空`、
    `工作空间名重复: %s`、`工作空间 %s 必须是对象`、`workspaces.<空间>.tasks...`）没有
@@ -139,14 +172,14 @@
 | 运行时查表（`taskPlans` / `taskParams` 的键是 `[2]string`） | `internal/keypool/pool.go` |
 | 读头、选空间（`RequestContext.Workspace`） | `internal/proxy/handler.go` |
 | 阻止该头外泄 | `internal/proxysupport/support.go` |
-| 管理端点感知空间 | `internal/api/handlers_meta.go` |
-| 工作空间目录 `/ui/workspaces.json` | `internal/server/workspaces.go` |
+| 管理端点感知空间（`X-AMKR-Workspace` 头） | `internal/api/handlers_meta.go` |
+| 空间自身的读/改/删（`/api/workspaces*`、`workspacePatterns()`） | `internal/api/handlers_workspaces.go`、`internal/api/router.go` |
 | 归属落库（`RecordParams.Workspace`、`request_workspace` 旁挂表） | `internal/metrics/store.go`、`internal/metrics/schema.go` |
 | 归属贯穿（`MetricRecord.Workspace` ← `RequestContext.Workspace`） | `internal/proxy/retry.go`、`internal/server/metricsadapter.go` |
 | 空间用量与流向查询（`WorkspaceUsage`） | `internal/metrics/workspace.go` |
 | 读数端点（`/ui/workspace-usage.json`） | `internal/server/workspace_usage.go` |
 | 流向图基元与页面 | `webui/charts.js`、`webui/chart-math.js`、`webui/pages/workspaces.js` |
-| 界面切换 | `webui/pages/tasks.js`、`webui/api.js` |
+| 界面切换与改名/删除 | `webui/pages/tasks.js`、`webui/api.js` |
 
 `WorkspaceNames()` 由任务反推，默认空间固定排首位——界面上的下拉顺序因此与配置文件
 里的书写顺序无关，且默认空间永远可直接选中。
@@ -237,7 +270,10 @@ scale），不能让每层各自缩放到满高。后者会让同一节点的入
 
 - [ ] 新代码是否让「不带 `X-AMKR-Workspace` 头」的行为发生了变化？语料会立刻发现。
 - [ ] 是否给被语料锁定的响应体新增了字段？（`tasks/list` 等）
-- [ ] 是否新增了 `/api` 路由？应挂 `/ui/` 并说明理由。
+- [ ] 新增的 `/api` 路由是否放在了 `workspacePatterns()` 这类**独立清单**里，并同步
+      了 `internal/api/server.go` 的 `patterns`（错方法的 405 判定）？
+- [ ] 挂 `/ui/` 的新能力是否真的是「非管理面读数」？管理面的正式资源不该借 `/ui/`
+      躲开语料冻结。
 - [ ] 冲突检查是否被意外地收窄到空间内？模型名冲突必须保持**全局**。
 - [ ] 空分组的两处口径是否仍然一致？（`configops.writeWorkspaceTasks` 与
       `RouterConfig.WorkspaceNames`）
