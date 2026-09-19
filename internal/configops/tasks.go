@@ -41,9 +41,13 @@ func WorkspaceTasks(data *canonical.Value, workspace string) *canonical.Value {
 // 与 WorkspaceTasks 互为逆操作。默认工作空间直接落在 data["tasks"]；命名工作空间
 // 逐层建出 `workspaces` 与 `workspaces.<名字>`。
 //
-// 传入空任务映射时会把这个工作空间**整个删掉**：工作空间只是「一组任务」的分组，
-// 组里没有成员时它既不可观测也没有意义。这样 `workspaces` 段始终只包含非空分组，
-// 管理面也就无须发明一套「新建/删除空工作空间」的接口。
+// 传入空任务映射时，**没有 api_key** 的工作空间会被整个删掉：工作空间只是「一组
+// 任务」的分组，组里没有成员时它既不可观测也没有意义。这样 `workspaces` 段始终只
+// 包含非空分组，管理面也就无须发明一套「新建/删除空工作空间」的接口。
+//
+// 带 api_key 的工作空间是**例外**，要留住：它是应用侧先建空间拿 key、之后才慢慢填
+// 任务的落脚点，任务删光了不代表这个空间该消失——那样面板会指向一个不存在的空间，
+// 而嵌入方手上的 key 却还在。默认工作空间无条件留住（它恒在清单里）。
 func writeWorkspaceTasks(data *canonical.Value, workspace string, tasks *canonical.Value) {
 	if workspace == "" || workspace == config.DefaultWorkspace {
 		if !tasks.IsObject() || tasks.Obj.Len() == 0 {
@@ -53,16 +57,24 @@ func writeWorkspaceTasks(data *canonical.Value, workspace string, tasks *canonic
 		data.SetKey("tasks", tasks)
 		return
 	}
+	workspaces := lookup(data, "workspaces")
+	entry := lookup(workspaces, workspace)
+	entryIsObject := entry.IsObject()
 	if !tasks.IsObject() || tasks.Obj.Len() == 0 {
+		if entryIsObject && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != "" {
+			// 有 key：只清任务，留壳（壳里的 api_key 原样保留）。
+			entry.DeleteKey("tasks")
+			workspaces.SetKey(workspace, entry)
+			data.SetKey("workspaces", workspaces)
+			return
+		}
 		deleteWorkspace(data, workspace)
 		return
 	}
-	workspaces := lookup(data, "workspaces")
 	if !workspaces.IsObject() {
 		workspaces = canonical.NewObject()
 	}
-	entry := lookup(workspaces, workspace)
-	if !entry.IsObject() {
+	if !entryIsObject {
 		entry = canonical.NewObject()
 	}
 	entry.SetKey("tasks", tasks)
@@ -342,10 +354,13 @@ func DeleteTaskIn(data *canonical.Value, workspace, taskName string) error {
 	return nil
 }
 
-// RenameWorkspace 把命名工作空间的任务整体搬到新名字下，旧名字随之消失。
+// RenameWorkspace 把命名工作空间整体搬到新名字下，旧名字随之消失。
 //
-// 工作空间只是「一组任务」的容器（见 WorkspaceTasks 的说明），因此改名就是把整组
-// 任务换个键：任务本身一个字都不用动，也不需要逐条重建。
+// 工作空间只是「一组任务」的容器（见 WorkspaceTasks 的说明），因此改名就是把整个
+// 分组换个键：任务本身一个字都不用动，也不需要逐条重建。
+//
+// 搬的是**整个分组**而不是只有 tasks：分组里还可能有 api_key，它属于这个空间，
+// 改名时把它落下会让嵌入方的面板突然失效（key 指向的名字已经不存在了）。
 //
 // 目标名已存在时报 409 而不是合并——两个空间各有一批任务时，合并会在一瞬间产生
 // 重名任务，而重名任务在 config 层是非法的，等于用一个必然失败的中间态做一次
@@ -369,19 +384,22 @@ func RenameWorkspace(data *canonical.Value, workspace, newName string) (string, 
 	if target == source {
 		return target, nil
 	}
-	if WorkspaceTasks(data, target).Obj.Len() > 0 {
+	if workspaceExists(data, target) {
 		return "", opErrf(409, "工作空间已存在: %s", target)
 	}
-	// 先写目标再清来源：两处都持有同一批任务对象，顺序反了会把刚搬过去的任务删掉。
-	writeWorkspaceTasks(data, target, WorkspaceTasks(data, source))
-	writeWorkspaceTasks(data, source, canonical.NewObject())
+	// 同一个对象换到新键下，再删掉旧键——把它想成「移动」而不是「复制后清空」，
+	// 这样 api_key 与 tasks 一起走，也不会出现中间态。
+	workspaces := lookup(data, "workspaces")
+	workspaces.SetKey(target, lookup(workspaces, source))
+	data.SetKey("workspaces", workspaces)
+	deleteWorkspace(data, source)
 	return target, nil
 }
 
 // DeleteWorkspace 删除命名工作空间及其中的全部任务。
 //
-// 它等价于「把这个空间里的任务一次删光」——空分组不进配置，因此删除之后这个名字
-// 就不再存在，而不是留下一个空壳。
+// 连同 api_key 一起删：key 是这个空间的凭据，空间没了它就不该再能开门（否则删掉
+// 再建个同名空间，旧 key 会凭空复活）。
 func DeleteWorkspace(data *canonical.Value, workspace string) error {
 	name, err := requireNamedWorkspace(workspace)
 	if err != nil {
@@ -390,7 +408,7 @@ func DeleteWorkspace(data *canonical.Value, workspace string) error {
 	if err := requireWorkspaceTasks(data, name); err != nil {
 		return err
 	}
-	writeWorkspaceTasks(data, name, canonical.NewObject())
+	deleteWorkspace(data, name)
 	return nil
 }
 
@@ -407,14 +425,25 @@ func requireNamedWorkspace(workspace string) (string, error) {
 	return name, nil
 }
 
-// requireWorkspaceTasks 确认工作空间里确实有任务。
+// requireWorkspaceTasks 确认工作空间存在。
 //
-// 工作空间由任务反推（空分组不进配置），所以「空间存在」就等于「它里面有任务」。
+// 工作空间通常由任务反推（空分组不进配置），所以「空间存在」大多等于「它里面有
+// 任务」；但带 api_key 的工作空间可以没有任务仍然存在（见 writeWorkspaceTasks），
+// 因此这里必须把 key 也算作存在依据，否则改名/删除会把刚建好的空面板空间判成 404。
 func requireWorkspaceTasks(data *canonical.Value, workspace string) error {
-	if WorkspaceTasks(data, workspace).Obj.Len() == 0 {
+	if !workspaceExists(data, workspace) {
 		return opErrf(404, "工作空间不存在: %s", workspace)
 	}
 	return nil
+}
+
+// workspaceExists 报告命名工作空间是否存在于配置里（有任务或有 api_key）。
+func workspaceExists(data *canonical.Value, workspace string) bool {
+	if WorkspaceTasks(data, workspace).Obj.Len() > 0 {
+		return true
+	}
+	entry := lookup(lookup(data, "workspaces"), workspace)
+	return entry.IsObject() && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != ""
 }
 
 // RepairTasks 删掉引用已不存在模型（或参数非法）的任务，返回被清理的任务名（升序）。

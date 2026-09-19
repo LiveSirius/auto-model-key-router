@@ -36,6 +36,19 @@ func GenerateLocalAPIKey() (string, error) {
 	return "amkr_" + base64.RawURLEncoding.EncodeToString(randomBytes), nil
 }
 
+// GenerateWorkspaceKey 生成工作空间面板 key，格式 "amkr_ws_" + 43 字符 base64url。
+//
+// 与 GenerateLocalAPIKey 同一套随机源与编码，只换了前缀：多一段 "ws_" 让运维一眼
+// 分得清「这是某个空间的面板 key」与「这是本地主 key」——两者权限差一个数量级，
+// 混在一起看太危险。长度因此是 50 字符，也是对外契约（应用侧会把它整串存下来）。
+func GenerateWorkspaceKey() (string, error) {
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	return "amkr_ws_" + base64.RawURLEncoding.EncodeToString(randomBytes), nil
+}
+
 // EmptyConfigDict 返回新建配置的默认内容。
 //
 // 字段顺序与参照实现一致：它决定落盘文件的键序（保存时用 indent=2 且不排序），

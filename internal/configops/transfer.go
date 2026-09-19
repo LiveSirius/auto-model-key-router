@@ -70,8 +70,20 @@ func TransferableConfig(data *canonical.Value, includeVisitor bool) (*canonical.
 		result.SetKey("tasks", tasks.Clone())
 	}
 	// 工作空间随任务一起迁移，否则导入方只剩默认空间，命名空间的任务全丢。
+	//
+	// 但**必须摘掉 api_key**：和 local_api_key 同类，它是本实例的入站凭据。导出文件
+	// 会被贴到工单、聊天记录、文档里，把面板 key 一起带出去等于把每个空间的门禁卡
+	// 散出去；导入方也会凭空获得一堆能开自己实例面板的 key（而原名空间可能压根不是
+	// 同一回事）。工作空间有自己的独立迁移通道（带 key，见 workspace.go），那是**有意
+	// 的**凭据搬迁，与这里顺手带出去性质完全不同。
 	if workspaces := lookup(data, "workspaces"); workspaces.IsObject() && workspaces.Obj.Len() > 0 {
-		result.SetKey("workspaces", workspaces.Clone())
+		exported := workspaces.Clone()
+		for _, workspace := range objectItems(exported) {
+			if workspace.Value.IsObject() {
+				workspace.Value.DeleteKey("api_key")
+			}
+		}
+		result.SetKey("workspaces", exported)
 	}
 	return result, nil
 }

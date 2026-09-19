@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/hmac"
 	"strings"
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
@@ -88,6 +89,22 @@ func NormalizeWorkspace(workspace string) string {
 	return DefaultWorkspace
 }
 
+// WorkspaceConfig 是一个命名工作空间的声明。
+//
+// 它**不只是**任务的容器：从有了面板 key 起，一个工作空间可以「有 key、没任务」地
+// 独立存在（应用侧先建空间拿 key、再慢慢填任务）。这是对「空分组不存在」的一处
+// 有意放宽，放宽的边界很窄——只有带 key 的分组才留得住，`{"teamB": {}}` 这种纯空
+// 壳仍然会被清掉（见 WorkspaceNames 与 configops.writeWorkspaceTasks）。
+type WorkspaceConfig struct {
+	Name string
+	// APIKey 是给嵌入方面板用的凭据；空串表示这个空间没有面板（调用方只能用
+	// 本地 key 从管理面操作它）。
+	//
+	// 与 local_api_key 一样是**入站凭据**，因此不随 /api/config/export 迁移
+	// （workspace 有自己的迁移通道，见 configops 的 WorkspaceBundle）。
+	APIKey string
+}
+
 // TaskConfig 是任务名路由：model 传任务名时改用这里的模型与固定参数。
 type TaskConfig struct {
 	Name string
@@ -156,7 +173,13 @@ type RouterConfig struct {
 	UnifiedModel   *UnifiedModelConfig
 	// Tasks 是**扁平**的全部任务，每项带自己的 Workspace（顶层 `tasks` 段的任务
 	// 归属 DefaultWorkspace）。工作空间名从这份列表反推，见 WorkspaceNames。
-	Tasks        []TaskConfig
+	Tasks []TaskConfig
+	// Workspaces 只装**声明了 api_key** 的命名工作空间。
+	//
+	// 不带 key 的空间不需要在这里留记录：它们完全由 Tasks 反映（见 WorkspaceNames）。
+	// 只收带 key 的那些，是为了让这份列表恰好等于「需要参与鉴权匹配的空间」，不多
+	// 不少——否则每次鉴权都要把一堆没有 key 的名字过一遍。
+	Workspaces   []WorkspaceConfig
 	WebUIEnabled bool
 	OpsEnabled   bool
 	// ReasoningEffortByModel 是 model.id -> reasoning_effort（仅非空项）。
@@ -271,9 +294,12 @@ func fromMigrated(raw *canonical.Value) (*RouterConfig, error) {
 	if config.UnifiedModel, err = parseUnifiedModel(raw, models); err != nil {
 		return nil, err
 	}
-	if config.Tasks, err = parseTasks(raw, models); err != nil {
+	tasks, workspaces, err := parseTasks(raw, models)
+	if err != nil {
 		return nil, err
 	}
+	config.Tasks = tasks
+	config.Workspaces = workspaces
 
 	// 顶层 upstream_routes 刻意不参与：参照实现从空字典起步。
 	for _, provider := range config.Providers {
@@ -576,43 +602,50 @@ func parseUnifiedModel(raw *canonical.Value, models []ModelConfig) (*UnifiedMode
 // 对齐 config.py:869 的 tasks 语义，并在其上叠加工作空间：顶层 `tasks` 就是
 // DefaultWorkspace，`workspaces.<名字>.tasks` 是其余工作空间。返回的任务是**扁平**
 // 的一份列表，每项带自己的 Workspace，方便运行时按 (工作空间, 任务名) 查表。
-func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, error) {
+//
+// 第二个返回值只收**带 api_key** 的命名工作空间（见 RouterConfig.Workspaces）：
+// 面板 key 必须能在没有任务时也把空间留住，因此它不能像任务那样反推。
+func parseTasks(raw *canonical.Value, models []ModelConfig) ([]TaskConfig, []WorkspaceConfig, error) {
 	idsByName := modelIDsByName(models)
 
 	tasks, err := parseTaskGroup(raw.Lookup("tasks"), DefaultWorkspace, "tasks", idsByName)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	rawWorkspaces := raw.Lookup("workspaces")
 	if rawWorkspaces == nil || rawWorkspaces.IsNull() {
-		return tasks, nil
+		return tasks, nil, nil
 	}
 	if !rawWorkspaces.IsObject() {
-		return nil, errf("workspaces 必须是对象")
+		return nil, nil, errf("workspaces 必须是对象")
 	}
 
+	var workspaces []WorkspaceConfig
 	seen := map[string]bool{DefaultWorkspace: true}
 	for _, rawName := range rawWorkspaces.Obj.Keys() {
 		name := strings.TrimSpace(rawName)
 		if name == "" {
-			return nil, errf("工作空间名不能为空")
+			return nil, nil, errf("工作空间名不能为空")
 		}
 		if seen[name] {
-			return nil, errf("工作空间名重复: %s", name)
+			return nil, nil, errf("工作空间名重复: %s", name)
 		}
 		seen[name] = true
 		workspace := rawWorkspaces.Lookup(rawName)
 		if !workspace.IsObject() {
-			return nil, errf("工作空间 %s 必须是对象", name)
+			return nil, nil, errf("工作空间 %s 必须是对象", name)
 		}
 		group, err := parseTaskGroup(workspace.Lookup("tasks"), name, "workspaces."+name+".tasks", idsByName)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		tasks = append(tasks, group...)
+		if key := strings.TrimSpace(workspace.Lookup("api_key").StringValue()); key != "" {
+			workspaces = append(workspaces, WorkspaceConfig{Name: name, APIKey: key})
+		}
 	}
-	return tasks, nil
+	return tasks, workspaces, nil
 }
 
 // parseTaskGroup 解析一段 `{任务名: {...}}`，workspace 是它归属的工作空间。
@@ -718,6 +751,28 @@ func (c *RouterConfig) Validate() error {
 	}
 	if c.LocalAPIKey == VISITOR_API_KEY {
 		return errf("local_api_key 不能使用保留的访客 key: %s", VISITOR_API_KEY)
+	}
+
+	// 工作空间面板 key 是**入站凭据**，因此要满足与 local_api_key 同一组底线：不能
+	// 占用保留的访客 key，也不能与本地 key 相同。
+	//
+	// 与 local_api_key 相同是必须挡的：本地 key 给的是全量权限（含配置与 /v1 代理），
+	// 若某个空间的面板 key 恰好等于它，那么「嵌出去的 key」与「主凭据」就是同一个，
+	// 一旦嵌进第三方页面就等于交出了整个实例。这不可能是有意为之。
+	keyOwner := map[string]string{}
+	for _, workspace := range c.Workspaces {
+		if workspace.APIKey == VISITOR_API_KEY {
+			return errf("工作空间 %s 的 api_key 不能使用保留的访客 key: %s", workspace.Name, VISITOR_API_KEY)
+		}
+		if c.LocalAPIKey != "" && workspace.APIKey == c.LocalAPIKey {
+			return errf("工作空间 %s 的 api_key 不能与 local_api_key 相同", workspace.Name)
+		}
+		// 两个空间同 key 时判定结果会取决于遍历顺序，等于随机给其中一个空间开门，
+		// 因此直接判非法而不是「取第一个」。
+		if owner, exists := keyOwner[workspace.APIKey]; exists {
+			return errf("工作空间 %s 与 %s 的 api_key 重复", owner, workspace.Name)
+		}
+		keyOwner[workspace.APIKey] = workspace.Name
 	}
 
 	modelNames := map[string]bool{}
@@ -921,13 +976,17 @@ func (c *RouterConfig) TaskForWorkspace(workspace, name string) (TaskConfig, boo
 	return TaskConfig{}, false
 }
 
-// WorkspaceNames 返回全部**有任务**的工作空间名：默认工作空间始终在首位，其余按
-// 配置中出现顺序。
+// WorkspaceNames 返回全部工作空间名：默认工作空间始终在首位，其余按「配置里出现的
+// 顺序」——先是有任务的空间，再是只声明了 api_key 的空间。
 //
-// 刻意由任务反推而不是直接回放配置里的 `workspaces` 键：一个没有任何任务的分组既
-// 不可观测也没有意义（调用方按名字取不到任何东西）。手写的空分组因此不会出现在
-// 这里，与 configops 写回时「删空即删分组」的语义一致——两边口径必须相同，否则
-// 界面上会列出一个删不掉的幽灵分组。
+// 有任务的空间刻意由任务反推而不是直接回放配置里的 `workspaces` 键：一个既没有任务
+// 也没有 api_key 的分组既不可观测也没有意义（调用方按名字取不到任何东西，面板也进
+// 不去）。手写的这种空分组因此不会出现在这里，与 configops 写回时「删空即删分组」
+// 的语义一致——两边口径必须相同，否则界面上会列出一个删不掉的幽灵分组。
+//
+// 带 api_key 的空间是**例外**：它是应用侧先建空间、后填任务的落脚点，没有任务时也
+// 必须存在（否则 key 换来的面板会指向一个不存在的空间）。这部分见 RouterConfig 的
+// Workspaces 字段与 configops.writeWorkspaceTasks。
 func (c *RouterConfig) WorkspaceNames() []string {
 	names := []string{DefaultWorkspace}
 	seen := map[string]bool{DefaultWorkspace: true}
@@ -942,7 +1001,34 @@ func (c *RouterConfig) WorkspaceNames() []string {
 		seen[workspace] = true
 		names = append(names, workspace)
 	}
+	for _, workspace := range c.Workspaces {
+		if seen[workspace.Name] {
+			continue
+		}
+		seen[workspace.Name] = true
+		names = append(names, workspace.Name)
+	}
 	return names
+}
+
+// WorkspaceForAPIKey 找出持有该 key 的工作空间，没有则返回空串。
+//
+// 空 key 一律不匹配：没有面板的空间不该被空 key 命中（调用方随便发个空 Authorization
+// 就能进别人的面板是荒谬的）。比较用恒定时间，与 auth 包同一理由——避免按字节提前
+// 返回泄漏 key 内容。
+//
+// 同一个 key 配给两个空间是配置错误（见 Validate），因此这里不需要「取第一个」的
+// 兜底语义：合法的配置最多命中一个。
+func (c *RouterConfig) WorkspaceForAPIKey(apiKey string) string {
+	if apiKey == "" {
+		return ""
+	}
+	for _, workspace := range c.Workspaces {
+		if hmac.Equal([]byte(apiKey), []byte(workspace.APIKey)) {
+			return workspace.Name
+		}
+	}
+	return ""
 }
 
 // HiddenModelNames 返回可直接调用、但不出现在 /v1/models 中的名字 -> 本地模型 ID。

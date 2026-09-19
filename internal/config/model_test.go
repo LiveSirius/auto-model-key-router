@@ -376,6 +376,80 @@ func TestWorkspacesIsolateTaskNames(t *testing.T) {
 	}
 }
 
+// TestWorkspaceWithAPIKeySurvivesWithoutTasks 固化：带 api_key 的空空间仍然存在。
+//
+// 这是对「空分组不存在」的一处**有意放宽**：应用侧先建空间拿 key、之后才填任务，
+// 中间这段时间空间必须留得住，否则嵌入方手上的 key 会指向一个不存在的空间。
+//
+// 放宽的边界很窄：同一份配置里的 `empty`（既没任务也没 key）依然不出现。
+func TestWorkspaceWithAPIKeySurvivesWithoutTasks(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"t":{"model":"model-a"}},
+		"workspaces":{"teamA":{"tasks":{"only-a":{"model":"model-a"}}},
+			"panel":{"api_key":"amkr_ws_panel"},"empty":{}}}`))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	want := []string{"default", "teamA", "panel"}
+	got := cfg.WorkspaceNames()
+	if len(got) != len(want) {
+		t.Fatalf("工作空间清单 %v，期望 %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("工作空间清单 %v，期望 %v", got, want)
+		}
+	}
+	if owner := cfg.WorkspaceForAPIKey("amkr_ws_panel"); owner != "panel" {
+		t.Errorf("amkr_ws_panel 应属于 panel，实际 %q", owner)
+	}
+	if owner := cfg.WorkspaceForAPIKey(""); owner != "" {
+		t.Errorf("空 key 不应命中任何空间，实际 %q", owner)
+	}
+	if owner := cfg.WorkspaceForAPIKey("amkr_ws_nope"); owner != "" {
+		t.Errorf("未知 key 不应命中任何空间，实际 %q", owner)
+	}
+}
+
+// TestWorkspaceAPIKeyValidation 固化面板 key 的底线。
+//
+// 三种情况都必须挡：占用保留访客 key、与本地主 key 相同（等于把全量权限的凭据
+// 嵌进第三方页面）、两个空间同 key（判定结果会取决于遍历顺序）。
+func TestWorkspaceAPIKeyValidation(t *testing.T) {
+	build := func(workspaces string) string {
+		return `{"config_version":4,"local_api_key":"k",
+			"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+			"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+			"workspaces":` + workspaces + `}`
+	}
+	// 合法：与本地 key 不同、彼此也不同。
+	if _, err := FromDict(mustParse(t, build(`{"a":{"api_key":"ka"},"b":{"api_key":"kb"}}`))); err != nil {
+		t.Errorf("合法配置不应报错: %v", err)
+	}
+	cases := []struct {
+		name       string
+		workspaces string
+		want       string
+	}{
+		{"占用访客 key", `{"a":{"api_key":"amkr-visitor"}}`, "工作空间 a 的 api_key 不能使用保留的访客 key: amkr-visitor"},
+		{"与本地 key 相同", `{"a":{"api_key":"k"}}`, "工作空间 a 的 api_key 不能与 local_api_key 相同"},
+		{"两空间同 key", `{"a":{"api_key":"same"},"b":{"api_key":"same"}}`, "工作空间 a 与 b 的 api_key 重复"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := FromDict(mustParse(t, build(testCase.workspaces)))
+			if err == nil {
+				t.Fatalf("应报错: %s", testCase.want)
+			}
+			if err.Error() != testCase.want {
+				t.Errorf("错误文本 = %q，期望 %q", err.Error(), testCase.want)
+			}
+		})
+	}
+}
+
 // TestWorkspacesOptional 固化兼容性：没有 workspaces 段的既有配置行为不变。
 func TestWorkspacesOptional(t *testing.T) {
 	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
