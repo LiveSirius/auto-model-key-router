@@ -372,3 +372,195 @@ func TestDefaultWorkspaceAliasesLegacyAPI(t *testing.T) {
 		t.Error("既有 API 不应碰命名空间")
 	}
 }
+
+// TestCreateTaskWithoutModel 固化：不传模型也能建任务，且不写 model 键。
+//
+// 关键是**不写这个键**而不是写 null / 空串：config 层把缺失、null、空白串都当作
+// 「尚未指定」，但配置里多一个 "model": null 会让 `router-config.json` 的 diff
+// 变得难读，也会让「用户从没选过模型」和「用户选过又清掉了」这两种历史无法区分。
+func TestCreateTaskWithoutModel(t *testing.T) {
+	data := workspaceData(t)
+
+	task, err := CreateTask(data, "placeholder", CreateTaskOptions{})
+	if err != nil {
+		t.Fatalf("不传模型应能建任务: %v", err)
+	}
+	if _, present := task.LookupOK("model"); present {
+		t.Errorf("未指定模型时不应写入 model 键，实际 %s", canonical.Dumps(task))
+	}
+	// 配置仍须整体可解析：放宽的是「可以没有模型」，不是「配置可以不自洽」。
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("未指定模型的任务应可解析: %v", err)
+	}
+
+	// 之后再补上模型：这是占位任务的主要用法，必须能走通。
+	chosen := "model-b"
+	if _, err := UpdateTask(data, "placeholder", UpdateTaskOptions{Model: &chosen}); err != nil {
+		t.Fatalf("给占位任务补模型失败: %v", err)
+	}
+	stored, err := RequireTask(data, "placeholder")
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	if got := lookup(stored, "model").StringValue(); got != "model-b" {
+		t.Errorf("补上的模型应为 model-b，实际 %q", got)
+	}
+}
+
+// TestCreateTaskFallbackWithoutModelRejected 固化：没有首选的备选必须被拒。
+//
+// 备选是「首选用不了时的退路」，没有首选就无处可退。config.Validate 不查这一条
+// （它的校验顺序与文案是对外契约，不能插入新分支），因此这道闸在这里。
+func TestCreateTaskFallbackWithoutModelRejected(t *testing.T) {
+	data := workspaceData(t)
+	fallback := "model-b"
+	_, err := CreateTask(data, "placeholder", CreateTaskOptions{FallbackModel: &fallback})
+	var opErr *ConfigOperationError
+	if !errors.As(err, &opErr) || opErr.StatusCode != 422 {
+		t.Fatalf("没有首选时的备选应报 422，实际 %v", err)
+	}
+	if opErr.Message != "任务 placeholder 指定了备选但没有首选模型" {
+		t.Errorf("错误文本不一致: %s", opErr.Message)
+	}
+	if task, ok := WorkspaceTasks(data, config.DefaultWorkspace).LookupOK("placeholder"); ok && task.IsObject() {
+		t.Error("被拒的任务不应写进配置")
+	}
+}
+
+// TestUpdateTaskDisplayName 固化显示名的增删改。
+func TestUpdateTaskDisplayName(t *testing.T) {
+	data := workspaceData(t)
+
+	// 取名字。
+	name := "  长文摘要  "
+	if _, err := UpdateTask(data, "shared", UpdateTaskOptions{DisplayName: &name}); err != nil {
+		t.Fatalf("设置显示名失败: %v", err)
+	}
+	stored, err := RequireTask(data, "shared")
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	// 两端空白要清掉，否则界面上就是「 长文摘要 」。
+	if got := lookup(stored, "display_name").StringValue(); got != "长文摘要" {
+		t.Errorf("显示名应去空白，实际 %q", got)
+	}
+
+	// 空串表示清掉这个名字（而不是写一个空字符串进配置）。
+	empty := ""
+	if _, err := UpdateTask(data, "shared", UpdateTaskOptions{DisplayName: &empty}); err != nil {
+		t.Fatalf("清空显示名失败: %v", err)
+	}
+	stored, err = RequireTask(data, "shared")
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	if _, present := stored.LookupOK("display_name"); present {
+		t.Errorf("清空后不应残留 display_name 键，实际 %s", canonical.Dumps(stored))
+	}
+
+	// 不传 DisplayName 时不能动它：nil 是「不改」，不是「清空」。
+	named := "摘要"
+	if _, err := UpdateTask(data, "shared", UpdateTaskOptions{DisplayName: &named}); err != nil {
+		t.Fatalf("设置显示名失败: %v", err)
+	}
+	other := "model-b"
+	if _, err := UpdateTask(data, "shared", UpdateTaskOptions{Model: &other}); err != nil {
+		t.Fatalf("只改模型失败: %v", err)
+	}
+	stored, err = RequireTask(data, "shared")
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	if got := lookup(stored, "display_name").StringValue(); got != "摘要" {
+		t.Errorf("只改模型时显示名不应受影响，实际 %q", got)
+	}
+}
+
+// TestUpdateTaskCanClearModel 固化：清空首选会连带清掉备选。
+//
+// 否则配置里会留下「只有备选没有首选」的非法组合，下一次写盘时整个配置都解析不了。
+func TestUpdateTaskCanClearModel(t *testing.T) {
+	data := workspaceData(t)
+	fallback := "model-b"
+	if _, err := UpdateTask(data, "shared", UpdateTaskOptions{
+		FallbackModel: &fallback, UpdateFallback: true}); err != nil {
+		t.Fatalf("设置备选失败: %v", err)
+	}
+
+	empty := ""
+	if _, err := UpdateTask(data, "shared", UpdateTaskOptions{Model: &empty}); err != nil {
+		t.Fatalf("清空模型失败: %v", err)
+	}
+	stored, err := RequireTask(data, "shared")
+	if err != nil {
+		t.Fatalf("读取失败: %v", err)
+	}
+	if _, present := stored.LookupOK("model"); present {
+		t.Errorf("清空后不应残留 model 键，实际 %s", canonical.Dumps(stored))
+	}
+	if _, present := stored.LookupOK("fallback_model"); present {
+		t.Errorf("清空首选时应一并清掉备选，实际 %s", canonical.Dumps(stored))
+	}
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("清空模型后的配置应仍可解析: %v", err)
+	}
+}
+
+// TestRepairTasksKeepsTaskWithoutModel 固化：repair 不会删掉未指定模型的任务。
+//
+// 这是 repair 唯一不沿用「解析不了就删」的分支。若沿用，用户刚建好的占位任务会在
+// 任何一次导入/合并（都会走 RepairTasks）时凭空消失。
+func TestRepairTasksKeepsTaskWithoutModel(t *testing.T) {
+	data := mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"placeholder":{"display_name":"长文摘要","params":{"temperature":0.5}},"gone":{"model":"model-typo"}}}`)
+
+	removed, err := RepairTasks(data)
+	if err != nil {
+		t.Fatalf("修复失败: %v", err)
+	}
+	// 引用了不存在模型的任务照旧删掉。
+	if len(removed) != 1 || removed[0] != "gone" {
+		t.Errorf("应只删掉 gone，实际 %v", removed)
+	}
+	placeholder := lookup(WorkspaceTasks(data, config.DefaultWorkspace), "placeholder")
+	if !placeholder.IsObject() {
+		t.Fatalf("未指定模型的任务不应被删掉: %s", canonical.Dumps(data))
+	}
+	// 固定参数要原样保留——占位任务的价值就在于先把参数定下来。
+	if got, ok := lookup(lookup(placeholder, "params"), "temperature").AsFloat(); !ok || got != 0.5 {
+		t.Errorf("占位任务的固定参数应保留，实际 %v（ok=%v）", got, ok)
+	}
+	// 显示名同样要保留：它不是能靠模型名反推出来的信息，丢了就真丢了。
+	if got := lookup(placeholder, "display_name").StringValue(); got != "长文摘要" {
+		t.Errorf("占位任务的显示名应保留，实际 %q", got)
+	}
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("修复后的配置应可解析: %v", err)
+	}
+}
+
+// TestRepairTasksDropsFallbackWithoutModel 固化：repair 清掉无首选的备选。
+//
+// 这种组合是非法配置，留着会让后续每次 FromDict 都失败、配置再也写不回去。
+func TestRepairTasksDropsFallbackWithoutModel(t *testing.T) {
+	data := mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"placeholder":{"fallback_model":"model-a"}}}`)
+
+	if _, err := RepairTasks(data); err != nil {
+		t.Fatalf("修复失败: %v", err)
+	}
+	task := lookup(WorkspaceTasks(data, config.DefaultWorkspace), "placeholder")
+	if !task.IsObject() {
+		t.Fatal("任务本身应保留")
+	}
+	if _, present := task.LookupOK("fallback_model"); present {
+		t.Errorf("无首选的备选应被清掉，实际 %s", canonical.Dumps(task))
+	}
+	if _, err := config.FromDict(data); err != nil {
+		t.Fatalf("修复后的配置应可解析: %v", err)
+	}
+}

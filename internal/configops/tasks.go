@@ -1,6 +1,8 @@
 package configops
 
 import (
+	"strings"
+
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
@@ -155,7 +157,10 @@ func validateTaskIn(data *canonical.Value, workspace, taskName string, task *can
 
 // CreateTaskOptions 是 CreateTask 的参数。
 type CreateTaskOptions struct {
+	// Model 为首选模型；空串表示**尚未指定**——任务可以先建出来占位，请求它时由
+	// proxy 明确报 404，而不是静默落到别的模型上。
 	Model         string
+	DisplayName   string
 	FallbackModel *string
 	Params        *canonical.Value
 }
@@ -185,12 +190,24 @@ func CreateTaskIn(
 	if existing.Obj.Has(name) {
 		return nil, opErrf(409, "任务已存在: %s", name)
 	}
-	primary, err := resolveTaskModel(data, canonical.NewString(options.Model), "model")
-	if err != nil {
-		return nil, err
+	// model 为空即「尚未指定」：不写这个键，也不做存在性解析（解析空串只会报
+	// 「不能为空」，那不是这里要表达的语义）。备选在没有首选时由 config 层拒绝。
+	primary := ""
+	if strings.TrimSpace(options.Model) != "" {
+		if primary, err = resolveTaskModel(data, canonical.NewString(options.Model), "model"); err != nil {
+			return nil, err
+		}
 	}
-	task := canonical.NewObjectOf(canonical.ObjectPair{Key: "model", Value: canonical.NewString(primary)})
-	if options.FallbackModel != nil && *options.FallbackModel != "" {
+	task := canonical.NewObject()
+	if primary != "" {
+		task.SetKey("model", canonical.NewString(primary))
+	}
+	if options.FallbackModel != nil && strings.TrimSpace(*options.FallbackModel) != "" {
+		// 没有首选的备选无处可退：config 层不查这一条（它的校验顺序是对外契约，
+		// 不能插新分支），因此在写盘前于此处拒掉。
+		if primary == "" {
+			return nil, opErrf(422, "任务 %s 指定了备选但没有首选模型", name)
+		}
 		fallback, err := resolveTaskModel(data, canonical.NewString(*options.FallbackModel), "fallback_model")
 		if err != nil {
 			return nil, err
@@ -202,6 +219,11 @@ func CreateTaskIn(
 	if options.Params != nil && options.Params.Truthy() {
 		task.SetKey("params", options.Params.Clone())
 	}
+	// display_name 落在最后：既有任务的键序因此一个字节都不变，只有真正取了名的
+	// 任务才多出一个键。
+	if displayName := strings.TrimSpace(options.DisplayName); displayName != "" {
+		task.SetKey("display_name", canonical.NewString(displayName))
+	}
 	if err := validateTaskIn(data, workspace, name, task); err != nil {
 		return nil, err
 	}
@@ -210,8 +232,13 @@ func CreateTaskIn(
 }
 
 // UpdateTaskOptions 是 UpdateTask 的可选参数。
+//
+// nil 表示「不动这个字段」；非 nil 表示「要更新」。要清空某个字符串字段时传指向
+// 空串的指针，而不是 nil——nil 已经被「不改」占用了。这与既有 Model 的语义一致
+// （fallback_model 用了独立的 UpdateFallback 开关，那是语料锁定的历史写法）。
 type UpdateTaskOptions struct {
 	Model          *string
+	DisplayName    *string
 	FallbackModel  *string
 	UpdateFallback bool
 	Params         *canonical.Value
@@ -239,14 +266,28 @@ func UpdateTaskIn(
 	}
 	updated := current.Clone()
 	if options.Model != nil {
-		resolved, err := resolveTaskModel(data, canonical.NewString(*options.Model), "model")
-		if err != nil {
-			return "", err
+		// 传空串（或经 API 传来的显式 null）就是「清掉模型」：把任务退回占位状态。
+		// 备选随首选一起清掉——没有首选的备选是非法配置。
+		if strings.TrimSpace(*options.Model) == "" {
+			updated.DeleteKey("model")
+			updated.DeleteKey("fallback_model")
+		} else {
+			resolved, err := resolveTaskModel(data, canonical.NewString(*options.Model), "model")
+			if err != nil {
+				return "", err
+			}
+			updated.SetKey("model", canonical.NewString(resolved))
 		}
-		updated.SetKey("model", canonical.NewString(resolved))
+	}
+	if options.DisplayName != nil {
+		if displayName := strings.TrimSpace(*options.DisplayName); displayName != "" {
+			updated.SetKey("display_name", canonical.NewString(displayName))
+		} else {
+			updated.DeleteKey("display_name")
+		}
 	}
 	if options.UpdateFallback {
-		if options.FallbackModel != nil && *options.FallbackModel != "" {
+		if options.FallbackModel != nil && strings.TrimSpace(*options.FallbackModel) != "" {
 			resolved, err := resolveTaskModel(data, canonical.NewString(*options.FallbackModel), "fallback_model")
 			if err != nil {
 				return "", err
@@ -453,17 +494,26 @@ func repairTaskGroup(
 			removed[removeKey] = true
 			continue
 		}
-		primary, known := aliasToID[lookup(task, "model").StringValue()]
-		if !known {
-			current.DeleteKey(name)
-			removed[removeKey] = true
-			continue
+		// model 为空是「尚未指定模型」这个合法状态，不是引用失效：它没有可解析的
+		// 模型名，因此不能按「引用了不存在的模型」丢掉——那样用户刚建好的占位任务
+		// 会在下一次导入/修复时凭空消失。repair 只有这一个分支不沿用「解析不了就删」。
+		primary := ""
+		rawPrimary := lookup(task, "model")
+		if strings.TrimSpace(rawPrimary.StringValue()) != "" {
+			resolved, known := aliasToID[rawPrimary.StringValue()]
+			if !known {
+				current.DeleteKey(name)
+				removed[removeKey] = true
+				continue
+			}
+			primary = resolved
+			task.SetKey("model", canonical.NewString(primary))
 		}
-		task.SetKey("model", canonical.NewString(primary))
 		if fallbackName, present := task.LookupOK("fallback_model"); present && !fallbackName.IsNull() {
 			fallback, known := aliasToID[fallbackName.StringValue()]
-			// 备选没了就退化成单模型任务；与首选撞车同理。
-			if !known || fallback == primary {
+			// 备选没了就退化成单模型任务；与首选撞车同理；没有首选时备选也无处可退
+			// （config 层会因此判整个配置非法），一并删掉。
+			if !known || fallback == primary || primary == "" {
 				task.DeleteKey("fallback_model")
 			} else {
 				task.SetKey("fallback_model", canonical.NewString(fallback))
