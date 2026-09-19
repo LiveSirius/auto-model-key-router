@@ -450,8 +450,8 @@ func TestApplyTaskParamsMatchesPython(t *testing.T) {
 	}
 }
 
-// TestTaskParamConflictsMatchesPython 锁定冲突检测的两条特殊规则。
-func TestTaskParamConflictsMatchesPython(t *testing.T) {
+// TestTaskParamConflicts 锁定冲突检测的规则（reasoning_effort 的差异单列，见下）。
+func TestTaskParamConflicts(t *testing.T) {
 	cases := []struct {
 		payload string
 		task    string
@@ -464,12 +464,20 @@ func TestTaskParamConflictsMatchesPython(t *testing.T) {
 		// Anthropic 方言：任务的 stop 对应载荷的 stop_sequences。
 		{`{"stop_sequences":["a"]}`, `{"stop":["b"]}`, []string{"stop_sequences"}},
 		{`{"stop":["a"]}`, `{"stop":["b"]}`, []string{"stop"}},
-		// reasoning_effort 刻意不算冲突。
-		{`{"reasoning_effort":"low"}`, `{"reasoning_effort":"high"}`, nil},
 		// 不在任务里的载荷字段不算冲突。
 		{`{"max_tokens":5}`, `{"temperature":1}`, nil},
 		{`{"temperature":0.5}`, `{"temperature":1,"stop":["b"]}`, []string{"temperature"}},
 		{`{"stop_sequences":["a"]}`, `{"stop":["b"],"top_p":0.5}`, []string{"stop_sequences"}},
+		// max_tokens 与 stop 同理：任务固定了就拒绝调用方传。
+		{`{"max_tokens":5}`, `{"max_tokens":32}`, []string{"max_tokens"}},
+		// Responses 方言里输出上限叫 max_output_tokens，视为同一个参数。
+		// 检查必须发生在归一化之前：归一化后 max_output_tokens 已变成 max_tokens，
+		// 那时再看载荷就什么都看不到了。
+		{`{"max_output_tokens":5}`, `{"max_tokens":32}`, []string{"max_output_tokens"}},
+		// 两个都传也只报告一次冲突（键不同，报告各自的那个）。
+		{`{"max_tokens":5,"max_output_tokens":6}`, `{"max_tokens":32}`, []string{"max_tokens"}},
+		// 任务没固定 max_tokens 时，调用方随便传。
+		{`{"max_output_tokens":5}`, `{"temperature":1}`, nil},
 	}
 	for _, item := range cases {
 		got := TaskParamConflicts(mustValue(t, item.payload), mustValue(t, item.task))
@@ -483,6 +491,42 @@ func TestTaskParamConflictsMatchesPython(t *testing.T) {
 				break
 			}
 		}
+	}
+}
+
+// TestTaskParamConflictsRejectsCallerReasoningEffort 记录一处**与参照实现的有意差异**。
+//
+// 参照实现（proxy_support.py:147）把 reasoning_effort 排除在冲突之外：客户端框架常自动
+// 带上它，静默覆盖即可。Go 侧刻意不例外——任务路由是给别的 AI 服务用的，不是给 Agent
+// 用的：调用方显式传了任务已固定的 reasoning_effort 时必须和 temperature 一样被明确拒绝
+// （400），否则「我传的值没生效」这种沉默的错配会一直藏着。
+//
+// 语料不受影响：internal/proxy/testdata/handler.jsonl 与
+// internal/upstream/testdata/python_upstream_fixtures.jsonl 里没有任何一条任务用例由
+// 调用方传 reasoning_effort（后者那条 test_task_allows_caller_reasoning_effort_but_still_
+// overrides_it 是 Python 侧录的，Go 不做回放），因此这是纯语义增补，不是语料回归。
+func TestTaskParamConflictsRejectsCallerReasoningEffort(t *testing.T) {
+	cases := []struct {
+		payload string
+		task    string
+	}{
+		{`{"reasoning_effort":"low"}`, `{"reasoning_effort":"high"}`},
+		{`{"reasoning_effort":"high"}`, `{"reasoning_effort":"high"}`},
+		// 值与任务完全相同也算冲突：判断的是「调用方有没有传」，不是「值是否一致」。
+		{`{"reasoning_effort":"minimal"}`, `{"reasoning_effort":"minimal"}`},
+	}
+	for _, item := range cases {
+		got := TaskParamConflicts(mustValue(t, item.payload), mustValue(t, item.task))
+		if len(got) != 1 || got[0] != "reasoning_effort" {
+			t.Errorf("TaskParamConflicts(%s, %s) = %v，期望 [reasoning_effort]",
+				item.payload, item.task, got)
+		}
+	}
+
+	// 任务没固定 reasoning_effort 时，调用方照常透传。
+	if got := TaskParamConflicts(
+		mustValue(t, `{"reasoning_effort":"low"}`), mustValue(t, `{"temperature":1}`)); got != nil {
+		t.Errorf("任务未固定 reasoning_effort 时不应冲突，实得 %v", got)
 	}
 }
 

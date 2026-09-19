@@ -283,11 +283,20 @@ func ApplyTaskParams(payload, taskParams *canonical.Value) *canonical.Value {
 // TaskParamConflicts 列出调用方显式传了、但任务已经固定的采样参数。
 //
 // 移植 proxy_support.py:147。冲突交给调用方决定是否拒绝——静默覆盖会让调用方以为
-// 自己的值生效了。两条特殊规则：
+// 自己的值生效了。
 //
-//   - reasoning_effort 不算冲突（客户端框架常自动带上，且与模型级设置一致）。
-//   - 任务的 `stop` 与载荷的 `stop_sequences` 视为同一个参数的冲突（Anthropic 方言
-//     里 stop 叫 stop_sequences），此时报告的是 `stop_sequences`。
+// **与参照实现的有意差异**：Python 把 reasoning_effort 排除在冲突之外（客户端框架常
+// 自动带上，且与模型级设置一致）。Go 侧不再例外——任务路由是给别的 AI 服务用的，
+// 不是给 Agent 用的：调用方显式传了任务已固定的 reasoning_effort，就该和 temperature
+// 一样被明确拒绝，而不是收下再被静默覆盖。见 support_test.go 的
+// TestTaskParamConflictsRejectsCallerReasoningEffort。
+//
+// 另一条特殊规则保留：任务的 `stop` 与载荷的 `stop_sequences` 视为同一个参数的冲突
+// （Anthropic 方言里 stop 叫 stop_sequences），此时报告的是 `stop_sequences`。
+// 同一条规则也适用于 `max_tokens` 与载荷的 `max_output_tokens`（Responses 方言里
+// 输出上限叫 max_output_tokens，protocol.requestNormalizeChatCompatParameters 会把
+// 它归一成 max_tokens）。缺了这条，调用方用 Responses 方言传的 max_output_tokens 会
+// 被静默丢掉——而检查必须在归一化**之前**做：归一化之后载荷里已经没有这个键了。
 //
 // 返回顺序与 taskParams 的键顺序一致（`{}` 在 Python 3.7+ 保序）。
 func TaskParamConflicts(payload, taskParams *canonical.Value) []string {
@@ -296,16 +305,21 @@ func TaskParamConflicts(payload, taskParams *canonical.Value) []string {
 	}
 	var conflicts []string
 	for _, key := range taskParams.Obj.Keys() {
-		if key == "reasoning_effort" {
-			continue
-		}
 		if _, ok := payload.Obj.Get(key); ok {
 			conflicts = append(conflicts, key)
 			continue
 		}
-		if key == "stop" {
-			if _, ok := payload.Obj.Get("stop_sequences"); ok {
-				conflicts = append(conflicts, "stop_sequences")
+		// 同一参数在不同方言里的别名，命中即为冲突（报告别名本身）。
+		alias := ""
+		switch key {
+		case "stop":
+			alias = "stop_sequences"
+		case "max_tokens":
+			alias = "max_output_tokens"
+		}
+		if alias != "" {
+			if _, ok := payload.Obj.Get(alias); ok {
+				conflicts = append(conflicts, alias)
 			}
 		}
 	}

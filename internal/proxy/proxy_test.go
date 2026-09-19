@@ -1054,6 +1054,82 @@ func TestContentEncodingIsNotDecoded(t *testing.T) {
 	}
 }
 
+// TestTaskFixedReasoningEffortRejectsCaller 记录一处**有意差异**（产品决策）。
+//
+// 参照实现把 reasoning_effort 排除在任务冲突检查之外：调用方传了就传了，服务端收下
+// 再静默覆盖成任务的值。Go 侧不再例外——任务路由是给别的 AI 服务用的，不是给 Agent
+// 用的，调用方显式传了任务已固定的 reasoning_effort 就该和 temperature 一样收到 400，
+// 而不是拿到一个「我传的值没生效」的静默结果。
+//
+// 同一测试顺带锁定 max_tokens 进入任务白名单后的冲突行为：包括 Responses 方言里
+// 叫 max_output_tokens 的同义字段——冲突检查跑在归一化之前，所以这个别名必须在这里
+// 就被认出来，否则它会绕过后被静默丢掉。
+func TestTaskFixedReasoningEffortRejectsCaller(t *testing.T) {
+	cases := []struct {
+		name   string
+		params string
+		body   string
+		want   string
+	}{
+		{
+			name:   "调用方传 reasoning_effort 被拒",
+			params: `{"reasoning_effort":"high"}`,
+			body:   `{"model":"TASK_X","messages":[],"reasoning_effort":"low"}`,
+			want:   "任务 TASK_X 已固定参数 reasoning_effort，调用方不能再传这些参数",
+		},
+		{
+			name:   "任务固定 max_tokens 后调用方传 max_tokens 被拒",
+			params: `{"max_tokens":32}`,
+			body:   `{"model":"TASK_X","messages":[],"max_tokens":5}`,
+			want:   "任务 TASK_X 已固定参数 max_tokens，调用方不能再传这些参数",
+		},
+		{
+			// Responses 方言的输出上限叫 max_output_tokens，归一化后会变成 max_tokens。
+			// 报告的是调用方实际写的那个键名（与 stop/stop_sequences 一致）。
+			name:   "Responses 方言的 max_output_tokens 同样被拒",
+			params: `{"max_tokens":32}`,
+			body:   `{"model":"TASK_X","input":"hi","max_output_tokens":5}`,
+			want:   "任务 TASK_X 已固定参数 max_output_tokens，调用方不能再传这些参数",
+		},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			cfg := &config.RouterConfig{
+				Models: []config.ModelConfig{
+					testModel("task-model", []config.KeyConfig{testKey("tk1", "https://upstream.test")}),
+				},
+				Tasks: []config.TaskConfig{{
+					Name: "TASK_X", Model: "task-model",
+					Params: taskParamsValue(t, item.params),
+				}},
+			}
+			env := newTestEnv(t, cfg, Options{BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+			recorder := env.request(http.MethodPost, "chat/completions", item.body, nil)
+
+			if recorder.Code != http.StatusBadRequest {
+				t.Fatalf("状态码: got %d want 400（body=%s）", recorder.Code, recorder.Body.String())
+			}
+			if got := recorder.Body.String(); got != `{"error":{"message":"`+item.want+`"}}` {
+				t.Fatalf("响应体不符:\n got=%s\nwant=%s", got, item.want)
+			}
+			// 冲突在触达上游之前就判掉了。
+			if len(env.transport.calls) != 0 {
+				t.Fatalf("冲突请求不该触达上游，实得 %v", describeUpstreams(env.transport.calls))
+			}
+		})
+	}
+}
+
+// taskParamsValue 把任务的 params 字面量解析成 canonical 值。
+func taskParamsValue(t *testing.T, text string) *canonical.Value {
+	t.Helper()
+	value, err := canonical.ParseString(text)
+	if err != nil {
+		t.Fatalf("解析任务参数 %s 失败: %v", text, err)
+	}
+	return value
+}
+
 // TestMissingUpstreamClientFailsClosed 记录一处**有意增补**：装配错误时失败关闭。
 //
 // 参照实现不会遇到这种情况（它直接持有 httpx 客户端）；Go 侧的上游客户端是接口，

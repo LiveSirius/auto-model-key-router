@@ -3731,7 +3731,7 @@
       "outcome": {
         "ok": false,
         "error_type": "ConfigOperationError",
-        "error": "任务 T2 的 params 不支持的参数: bogus（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, reasoning_effort）",
+        "error": "任务 T2 的 params 不支持的参数: bogus（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, max_tokens, reasoning_effort）",
         "status_code": 422,
         "data": "{\"config_version\":4,\"local_api_key\":\"sk-local\",\"providers\":{\"openai\":{\"base_url\":\"https://api.openai.com\",\"keys\":{\"k1\":{\"api_key\":\"s1\",\"enabled\":true,\"allow_visitor\":true},\"k2\":{\"api_key\":\"s2\"}}},\"anthropic\":{\"base_url\":\"https://api.anthropic.com/\",\"keys\":{\"ak\":{\"api_key\":\"s3\"}}}},\"models\":{\"m1\":{\"aliases\":[\"m1a\"],\"routing_mode\":\"round_robin\",\"targets\":[{\"provider\":\"openai\",\"key\":\"k1\",\"upstream_model\":\"gpt-4o\"},{\"provider\":\"anthropic\",\"key\":\"ak\",\"upstream_model\":\"claude\"}]},\"m2\":{\"targets\":[{\"provider\":\"openai\",\"key\":\"k2\",\"upstream_model\":\"gpt-4o-mini\"}],\"hidden_aliases\":[\"h2\"]}},\"unified_model\":{\"default\":{\"primary\":{\"model\":\"m1\",\"key\":\"k1\"}}},\"tasks\":{\"T1\":{\"model\":\"m1\",\"params\":{\"temperature\":0.3}}}}"
       }
@@ -3836,7 +3836,7 @@
       "outcome": {
         "ok": false,
         "error_type": "ConfigOperationError",
-        "error": "任务 T1 的 params 不支持的参数: bogus（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, reasoning_effort）",
+        "error": "任务 T1 的 params 不支持的参数: bogus（可用: temperature, top_p, top_k, frequency_penalty, presence_penalty, seed, stop, max_tokens, reasoning_effort）",
         "status_code": 422,
         "data": "{\"config_version\":4,\"local_api_key\":\"sk-local\",\"providers\":{\"openai\":{\"base_url\":\"https://api.openai.com\",\"keys\":{\"k1\":{\"api_key\":\"s1\",\"enabled\":true,\"allow_visitor\":true},\"k2\":{\"api_key\":\"s2\"}}},\"anthropic\":{\"base_url\":\"https://api.anthropic.com/\",\"keys\":{\"ak\":{\"api_key\":\"s3\"}}}},\"models\":{\"m1\":{\"aliases\":[\"m1a\"],\"routing_mode\":\"round_robin\",\"targets\":[{\"provider\":\"openai\",\"key\":\"k1\",\"upstream_model\":\"gpt-4o\"},{\"provider\":\"anthropic\",\"key\":\"ak\",\"upstream_model\":\"claude\"}]},\"m2\":{\"targets\":[{\"provider\":\"openai\",\"key\":\"k2\",\"upstream_model\":\"gpt-4o-mini\"}],\"hidden_aliases\":[\"h2\"]}},\"unified_model\":{\"default\":{\"primary\":{\"model\":\"m1\",\"key\":\"k1\"}}},\"tasks\":{\"T1\":{\"model\":\"m1\",\"params\":{\"temperature\":0.3}}}}"
       }

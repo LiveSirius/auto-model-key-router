@@ -230,13 +230,42 @@ func TestTaskParamWhitelistIsEnforcedTwice(t *testing.T) {
 		t.Fatalf("params.config_revision 应当 422, got %d", got)
 	}
 	want := "任务 task-quirk 的 params 不支持的参数: config_revision（可用: temperature, top_p, top_k, " +
-		"frequency_penalty, presence_penalty, seed, stop, reasoning_effort）"
+		"frequency_penalty, presence_penalty, seed, stop, max_tokens, reasoning_effort）"
 	if !strings.Contains(configLayer.body(), want) {
 		t.Fatalf("config 层白名单提示不对: %s", configLayer.body())
 	}
 
 	if got := harness.replayNamed("tasks/create").status(); got != http.StatusCreated {
 		t.Fatalf("全部合法参数应当 201, got %d", got)
+	}
+}
+
+// TestTaskMaxTokensAcceptedByBothLayers 锁定 max_tokens 进了任务白名单（Go 侧新增）。
+//
+// 白名单在这里被校验两次（Pydantic 的字段声明 + config 层的 normalize）：只加其中
+// 一处就会露馅——只加 config 层会在 Pydantic 变成 extra_forbidden（422 英文），
+// 只加 Pydantic 会在 config 层变成「不支持的参数」（422 中文）。这里直接建一个带
+// max_tokens 的任务，两关都过才算数。
+// 顺便钉住 max_tokens 是**整数**字段：3.5 必须被 Pydantic 挡下，不能落到 config 层
+// 去报另一种错。
+func TestTaskMaxTokensAcceptedByBothLayers(t *testing.T) {
+	harness := newHarness(t)
+
+	created := harness.replayRequest("POST", "/api/tasks", `{"name":"task-max","model":"model-a",`+
+		`"params":{"max_tokens":32,"temperature":0.5},"config_revision":"$REV"}`, "local-key")
+	if got := created.status(); got != http.StatusCreated {
+		t.Fatalf("带 max_tokens 建任务应当 201, got %d（body=%s）", got, created.body())
+	}
+
+	// 整数约束：3.5 在 Pydantic 层就被拒（错误形状是 extra/类型错误，不是 config 层的
+	// 中文白名单提示）。
+	fractional := harness.replayRequest("POST", "/api/tasks", `{"name":"task-bad","model":"model-a",`+
+		`"params":{"max_tokens":3.5},"config_revision":"$REV"}`, "local-key")
+	if got := fractional.status(); got != http.StatusUnprocessableEntity {
+		t.Fatalf("max_tokens 传小数应当 422, got %d（body=%s）", got, fractional.body())
+	}
+	if !strings.Contains(fractional.body(), "int") {
+		t.Fatalf("小数应报整数类型错误: %s", fractional.body())
 	}
 }
 

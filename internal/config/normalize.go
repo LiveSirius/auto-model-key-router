@@ -18,9 +18,10 @@ const VISITOR_API_KEY = "amkr-visitor"
 // reasoningEfforts 是允许的推理强度取值。
 var reasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
 
-// taskSamplingParams 是任务可固定的采样参数。
+// taskSamplingParams 是任务可固定的采样参数（含 max_tokens 这个输出上限）。
 var taskSamplingParams = []string{
 	"temperature", "top_p", "top_k", "frequency_penalty", "presence_penalty", "seed", "stop",
+	"max_tokens",
 }
 
 // TaskParamKeys 是任务参数的完整白名单（采样参数 + reasoning_effort）。
@@ -217,7 +218,7 @@ func NormalizeTaskParams(raw *canonical.Value, taskName string) (*canonical.Valu
 			}
 			continue
 		}
-		if key == "top_k" || key == "seed" {
+		if key == "top_k" || key == "seed" || key == "max_tokens" {
 			number, ok := value.AsFloat()
 			if !ok {
 				return nil, errf("任务 %s 的 %s 必须是整数", taskName, key)

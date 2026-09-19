@@ -148,6 +148,7 @@ var specTaskParams = newModelSpec("TaskParams",
 	nul("presence_penalty", kindFloat),
 	nul("seed", kindInt),
 	nul("stop", kindStrList),
+	nul("max_tokens", kindInt),
 	nul("reasoning_effort", kindStr),
 )
 

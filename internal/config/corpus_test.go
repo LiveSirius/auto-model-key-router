@@ -145,6 +145,59 @@ func TestNormalizeTaskParamsMatchesPython(t *testing.T) {
 	}
 }
 
+// TestNormalizeTaskParamsMaxTokens 锁定 Go 侧新增的 max_tokens 任务参数。
+//
+// max_tokens 是**参照实现没有的**能力（Go 侧的增补，产品需求：任务路由要能固定输出
+// 上限），因此没有对拍语料可依，只能手写。它按整数校验，理由与 top_k / seed 一致：
+// int(1.5) 会静默截断成 1，那是在替调用方改参数值，宁可报错（见 normalize.go）。
+// 同时它必须和 top_k / seed 一样渲染成 32 而不是 32.0——canonical 的 int 与 float
+// 输出不同，用 NewFloat 会让落盘配置多出一个 ".0"。
+func TestNormalizeTaskParamsMaxTokens(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		ok    bool
+		want  string
+	}{
+		{name: "整数", input: `{"max_tokens":32}`, ok: true, want: `{"max_tokens":32}`},
+		// 40.0 是整值浮点，接受并归成 int（与 top_k_float_integral 同一条规则）。
+		{name: "整值浮点", input: `{"max_tokens":40.0}`, ok: true, want: `{"max_tokens":40}`},
+		{name: "字符串整数", input: `{"max_tokens":"64"}`, ok: true, want: `{"max_tokens":64}`},
+		// 关键：渲染成 32 而不是 32.0。
+		{name: "不渲染成浮点", input: `{"max_tokens":32}`, ok: true, want: `{"max_tokens":32}`},
+		// 小数必须报错而不是截断。
+		{name: "小数被拒", input: `{"max_tokens":1.5}`,
+			want: "任务 T1 的 max_tokens 必须是整数"},
+		{name: "非数字被拒", input: `{"max_tokens":"abc"}`,
+			want: "任务 T1 的 max_tokens 必须是整数"},
+		// 与别的参数共存，且在白名单里（不再报「不支持的参数」）。
+		{name: "与温度共存", input: `{"temperature":1,"max_tokens":32}`,
+			ok: true, want: `{"max_tokens":32,"temperature":1.0}`},
+		// null 照旧跳过。
+		{name: "null 跳过", input: `{"max_tokens":null}`, ok: true, want: `{}`},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			got, err := NormalizeTaskParams(mustParse(t, item.input), "T1")
+			if item.ok {
+				if err != nil {
+					t.Fatalf("期望成功，实得错误: %v", err)
+				}
+				if text := canonical.Dumps(got); text != item.want {
+					t.Fatalf("输出不符:\n got=%s\nwant=%s", text, item.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("期望报错 %q，实际成功并输出 %s", item.want, canonical.Dumps(got))
+			}
+			if err.Error() != item.want {
+				t.Fatalf("错误文本不符:\n got=%s\nwant=%s", err.Error(), item.want)
+			}
+		})
+	}
+}
+
 // routesToValue 把路由 map 转成 canonical Value，便于与语料比对。
 //
 // 语料的 expected 是 canonical 形式（键已排序），因此这里同样按键排序构造。
