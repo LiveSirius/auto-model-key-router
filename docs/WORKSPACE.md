@@ -71,32 +71,40 @@
 （按名字取不到任何东西）也没有意义。允许它存在会立刻带来三处口径分叉——配置里能写、
 删空后留不留、界面上列不列——而每一处都要单独决定。由任务反推后只剩一个口径。
 
-### 例外：带面板 key 的工作空间
+### 例外：带凭据或模型清单的工作空间
 
-一个工作空间可以带一把**面板 key**（`workspaces.<空间>.api_key`，见第 10 节）。这种
-空间即使**一个任务都没有**也会保留，并有独立的创建入口（`POST /api/workspaces`）。
+一个工作空间可以带**面板 key**（`workspaces.<空间>.api_key`，见第 9 节）、**推理 key**
+（`workspaces.<空间>.inference_key`，见第 10 节）或**可直呼模型清单**
+（`workspaces.<空间>.models`）。这三种东西任一个存在，这个空间即使**一个任务都没有**
+也会保留，并有独立的创建入口（`POST /api/workspaces`）。
 
-这不是放松上面那条规则，而是它多了一份**任务之外的可观测内容**：key 本身。带 key 的
-空间正是「应用先建空间拿到 key、之后才陆续填任务」这个时序的产物——如果它因为没有任务
-就被清掉，那个应用手里的 key 会在下一次配置写回时无声失效。
+这不是放松上面那条规则，而是它多了一份**任务之外的可观测内容**。带面板 key 的空间
+正是「应用先建空间拿到 key、之后才陆续填任务」这个时序的产物——如果它因为没有任务
+就被清掉，那个应用手里的 key 会在下一次配置写回时无声失效。推理 key 同理，而且更隐蔽：
+它被配进了各个项目的**环境变量**里，配置里消失之后调用方只会看到 401，很难联想到
+「空间被清理了」。
 
-口径仍然只有一条：
+`models` 也计入：它是运维显式写下的授权配置。最常见的形态正是「一个**已经有任务**的
+空间被加上了模型限制」——此时它两把 key 都没有。若因为「没有凭据」把它丢掉，限制会在
+热重载后静默消失：界面看起来配过，实际完全没生效。
+
+口径仍然只有一条（两个层各有一份实现，必须同时改）：
 
 ```go
-// writeWorkspaceTasks：只在 api_key 为空时才删空分组
-if entryIsObject && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != "" {
-    // 保留这个空壳
+// configops.hasWorkspaceCredential：凭据或模型清单任一存在就留住这个分组
+func hasWorkspaceCredential(entry *canonical.Value) bool {
+    return 有 api_key || 有 inference_key || 有 models
 }
 ```
 
-`WorkspaceNames()` 相应地把带 key 的空间一并列出（排在任务反推出的空间之后）。
+`WorkspaceNames()` 相应地把这些空间一并列出（排在任务反推出的空间之后）。
 
 **反过来说**，界面上的「新建工作空间」走的是显式入口（`POST /api/workspaces`），因为
-它的产物（那把 key）必须能立刻交付给用户。不建 key 的空壳依然不存在——手写
+它的产物（两把 key）必须能立刻交付给用户。什么都不带的空壳依然不存在——手写
 `"teamB": {}` 照旧会被清掉。
 
-> 手写的配置是唯一能短暂出现无 key 空分组的地方（例如 `"teamB": {}`），它会被解析接受、
-> 但不会出现在工作空间清单里，并在下一次写回时消失。
+> 手写的配置是唯一能短暂出现无名无凭据空分组的地方（例如 `"teamB": {}`），它会被解析
+> 接受、但不会出现在工作空间清单里，并在下一次写回时消失。
 
 ### 改与删
 
@@ -174,24 +182,34 @@ if entryIsObject && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != 
   "tasks": {"summarize": {"model": "gpt-4o-mini"}},
   "workspaces": {
     "teamA": {"tasks": {"summarize": {"model": "claude-sonnet-4"}}},
-    "panel": {"api_key": "amkr_ws_…"}
+    "panel": {"api_key": "amkr_ws_…"},
+    "worker": {"inference_key": "amkr_ik_…", "models": ["gpt-4o-mini"]}
   }
 }
 ```
 
-`api_key` 可选；带上它，这个空间就有了嵌入方面板凭据，且即使没有任务也保留（第 4 节）。
+三个字段都可选，且都让这个空间即使没有任务也保留（第 4 节）：
+
+- `api_key`：嵌入方面板凭据（第 9 节）。
+- `inference_key`：推理凭据，给项目做 `/v1` 调用（第 10 节）。
+- `models`：允许**直呼**的模型名清单。省略 = 不限制；`[]` = 一个都不许直呼（只走
+  任务名）；有内容 = 只许这些。名字可以是模型 id 或别名，逐个校验能解析到已配置的
+  模型。**任务名不受它限制**——任务自己固定的模型就是该空间被授权用的。
 
 解析后是**扁平**的一份 `[]TaskConfig`，每项带自己的 `Workspace`（顶层 `tasks` 的
 任务归属 `default`）。扁平化让运行时查表退化成一次线性扫描或一次二元组查表，不必在
 每个调用点先选分组。
+
+凭据本身另收在 `RouterConfig.Workspaces`（`[]WorkspaceConfig`，只装带凭据或 `models`
+的分组）——这份列表恰好等于「需要参与鉴权匹配与模型收窄的空间」，不多不少。
 
 各层的落点：
 
 | 关注点 | 位置 |
 | --- | --- |
 | 常量与归一化（`DefaultWorkspace` / `WorkspaceHeader` / `NormalizeWorkspace`） | `internal/config/model.go` |
-| 解析 `workspaces`、按 `(空间, 任务名)` 校验唯一性、面板 key 的三条底线 | `internal/config/model.go` 的 `parseTasks` / `Validate` |
-| key 的生成（`GenerateWorkspaceKey`）与反查（`WorkspaceForAPIKey`） | `internal/config/persist.go`、`internal/config/model.go` |
+| 解析 `workspaces`、按 `(空间, 任务名)` 校验唯一性、两把 key 的底线与跨类型撞车、`models` 引用校验 | `internal/config/model.go` 的 `parseTasks` / `Validate` / `parseWorkspaceModels` |
+| key 的生成（`GenerateWorkspaceKey` / `GenerateInferenceKey`）与反查（`WorkspaceForAPIKey` / `WorkspaceForInferenceKey` / `WorkspaceAllowedModels`） | `internal/config/persist.go`、`internal/config/model.go` |
 | 任务 CRUD（`*TaskIn` 系列）、`RepairTasks`、`CreateWorkspace`、导入导出 | `internal/configops/tasks.go`、`transfer.go` |
 | 工作空间**整包**迁移（带 key，与配置迁移隔离） | `internal/configops/workspace_bundle.go` |
 | 运行时查表（`taskPlans` / `taskParams` 的键是 `[2]string`） | `internal/keypool/pool.go` |
@@ -201,6 +219,9 @@ if entryIsObject && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != 
 | 空间自身的读/改/删（`/api/workspaces*`、`workspacePatterns()`） | `internal/api/handlers_workspaces.go`、`internal/api/router.go` |
 | 空间迁移端点（`/api/workspaces/export|import`） | `internal/api/handlers_workspace_migration.go` |
 | 面板 key 的解析（钉死空间、忽略请求头） | `internal/api/server.go` 的 `authorizedTaskConfig` |
+| 推理 key 的解析（钉死空间、忽略请求头、模型白名单） | `internal/proxy/handler.go` 的 `authorize` 与模型解析段 |
+| `/v1/models` 按作用域收窄 | `internal/server/handlers.go` 的 `handleModels` / `scopedModelNames` |
+| 推理 key 轮换与模型清单端点 | `internal/api/handlers_workspaces.go`、`internal/api/validate.go` |
 | 归属落库（`RecordParams.Workspace`、`request_workspace` 旁挂表） | `internal/metrics/store.go`、`internal/metrics/schema.go` |
 | 归属贯穿（`MetricRecord.Workspace` ← `RequestContext.Workspace`） | `internal/proxy/retry.go`、`internal/server/metricsadapter.go` |
 | 空间用量与流向查询（`WorkspaceUsage`） | `internal/metrics/workspace.go` |
@@ -354,7 +375,7 @@ https://<amkr>/ui/panel.html#k=amkr_ws_…&api=https://<amkr>
 那个接口会被列表页轮询，把凭据挂在上面等于每次刷新都重新分发一遍。
 
 因此 WebUI 在建完空间后会立刻弹出「复制 key」与「复制嵌入片段」，并明说这个 key 只显示
-这一次。同样的理由让配置导出剥掉 key（见第 10 节）。
+这一次。同样的理由让配置导出剥掉 key（见第 11 节）。
 
 ### 面板与完整权限页的分工
 
@@ -377,7 +398,75 @@ https://<amkr>/ui/panel.html#k=amkr_ws_…&api=https://<amkr>
 > 同源（或宿主自己做反代/关同源策略）时可用，跨源直连会被浏览器挡下。这条取舍写在
 > [`PANEL.md` 第 5 节](PANEL.md#5-关于-api-与跨源重要)。
 
-## 10. 整包迁移：一条独立通道
+## 10. 推理 key：让一个空间共用同一台网关
+
+面板 key 解决的是「嵌一个只看得见自己的面板」，但它**不能调 `/v1`**。当 AMKR 要作为
+多个项目共用的网关时，还缺一样东西：给每个项目一把**只能推理、且只属于自己空间**的
+凭据。这就是推理 key（`workspaces.<空间>.inference_key`）。
+
+创建空间时与面板 key **一起**发放：`POST /api/workspaces` 的 201 响应同时给出
+`api_key` 与 `inference_key`（服务端生成 `amkr_ik_` + 43 位 base64url，共 50 字符）。
+一次发两把，是因为建空间是**唯一**能拿到明文 key 的时刻——AMKR 没有任何端点会再回一次
+已有 key。若只给面板 key，应用侧就还得再找一条路要推理凭据。
+
+### 权限范围
+
+| 能做 | 不能做 |
+| --- | --- |
+| 调 `/v1/*` 推理，空间由 key 决定 | 管理面（`/api/*` 一律 `401`），包括本空间的任务 CRUD |
+| 直呼 `models` 清单内的模型（未配清单则不限制） | 清单外的模型（`403`，且不触达上游） |
+| 用本空间的**任务名**（不受清单限制） | 别的空间的任务（请求头被忽略，见下） |
+| 读 `/v1/models`（按空间收窄后的清单） | `unified-model`（全局计划，不属于任何空间） |
+
+与面板 key 一样，它**不是**第三档权限，而是「被钉死在某个空间上的推理面权限」。同样
+刻意不进 `internal/auth`：解析在 `internal/proxy/handler.go` 的 `authorize`，先照常调
+`auth.Authenticate`，**失败之后**才拿请求头的 key 去查
+`config.WorkspaceForInferenceKey`。因此推理 key 永远走不到 `IsFull()` 那条路。
+
+两把 key 的反查函数（`WorkspaceForAPIKey` / `WorkspaceForInferenceKey`）**刻意分开**，
+不合成一个「任意凭据 → 空间」的查表：两把 key 的权限不同，调用点必须知道自己匹配上的
+是哪一种，合成一个会让「该按哪套权限走」取决于返回值的用法。
+
+### 钉死：请求头被忽略
+
+与面板 key 同理，而且更必要：推理 key 会被写进各个项目的**环境变量**，那是比 URL
+fragment 更宽的攻击面。如果 `X-AMKR-Workspace` 能换空间，一把泄漏的 key 就等于所有
+空间的推理权限，而这个模式存在的全部意义就是防这件事。
+
+### 模型清单：模型维度的隔离
+
+任务名天然按空间隔离（同名任务在各自空间里指向不同模型），但**真实模型名在配置里是
+全局的**。没有 `models` 清单，任何一把推理 key 都能直呼全部模型——这正是「多个项目
+共用一台网关」最需要收窄的一维。
+
+判定发生在**解析之后**：别名先解析成真实模型 id，再拿它比对清单。否则同一个模型写成
+别名就绕过了白名单。
+
+### 只显示一次的 key
+
+与面板 key 相同的策略：明文只出现在 `POST /api/workspaces` 的 201 响应（以及配置文件
+里的 `workspaces.<空间>.inference_key`）。目录接口（`GET /api/workspaces`）不返回它，
+只给一个 `has_inference_key` 布尔，让界面能提示「这个空间发过推理凭据，可以轮换」。
+
+轮换走 `POST /api/workspaces/{workspace}/inference-key`，**只换这一把**：面板 key 换掉
+会让已嵌入的页面立刻失效，两者的轮换节奏不同（推理 key 泄漏面更宽、轮换更频繁），
+合成一个「轮换全部凭据」的端点会逼调用方在只想换一把时承担另一把失效的代价。
+
+### 两把 key 的底线（含跨类型撞车）
+
+`config.Validate` 用**一张占用表**统管两把 key，因此下列情况全部非法：
+
+- 占用保留的访客 key（`amkr-visitor`）；
+- 与 `local_api_key` 相同（那等于把主凭据发出去）；
+- 与**任何**空间的**任何**一把 key 重复——**包括跨类型**：一个空间的面板 key 不得
+  等于另一个空间的推理 key。
+
+最后一条是必须的：两把 key 的判定发生在不同调用点（面板面 vs `/v1` 面），同一个字符串
+两处都命中会让权限边界取决于走到哪条路由。错误文本沿用既有的
+`工作空间 a 与 b 的 api_key 重复` 形状（`api_key` 位置按后出现的那种 key 名填充），
+既有三条文本因此逐字不变。
+
+## 11. 整包迁移：一条独立通道
 
 工作空间有自己的导出/导入（`POST /api/workspaces/export|import`，
 `internal/configops/workspace_bundle.go`），与 `/api/config/export|import` **刻意分开**。
@@ -436,7 +525,7 @@ https://<amkr>/ui/panel.html#k=amkr_ws_…&api=https://<amkr>
 
 导出与导入都只认**完整权限**：内容里有明文面板 key，比配置导出更敏感。
 
-## 11. 改动时的检查清单
+## 12. 改动时的检查清单
 
 - [ ] 新代码是否让「不带 `X-AMKR-Workspace` 头」的行为发生了变化？语料会立刻发现。
 - [ ] 是否给被语料锁定的响应体新增了字段？（`tasks/list` 等）
@@ -445,10 +534,16 @@ https://<amkr>/ui/panel.html#k=amkr_ws_…&api=https://<amkr>
 - [ ] 挂 `/ui/` 的新能力是否真的是「非管理面读数」？管理面的正式资源不该借 `/ui/`
       躲开语料冻结。
 - [ ] 冲突检查是否被意外地收窄到空间内？模型名冲突必须保持**全局**。
-- [ ] 空分组的两处口径是否仍然一致？（`configops.writeWorkspaceTasks` 与
-      `RouterConfig.WorkspaceNames`；带 `api_key` 的空间在**两处**都必须留下）
+- [ ] 空分组的两处口径是否仍然一致？（`configops.writeWorkspaceTasks` 的
+      `hasWorkspaceCredential` 与 `config.parseTasks`；带 `api_key`、`inference_key`
+      或 `models` 的空间在**两处**都必须留下）
 - [ ] 面板 key 是否仍然只从**请求头**解析，且生效时忽略 `X-AMKR-Workspace`？
-- [ ] 新的响应体是否泄漏了面板 key 或隐藏别名？（目录接口不得返回 key）
+- [ ] 推理 key 是否同样钉死空间、忽略请求头，且走的仍是「先完整权限/访客，再作用域」
+      这个顺序？（顺序反了会让一把空间 key 变成管理员凭据）
+- [ ] 模型清单是否在**别名解析之后**判定，且 `/v1/models` 的收窄与 proxy 的判定一致？
+- [ ] 两把 key 的占用表是否仍然**跨类型**统一检查？（面板 key 撞推理 key 必须非法）
+- [ ] 新的响应体是否泄漏了任一 key 或隐藏别名？（目录接口只给 `has_inference_key`
+      布尔，不得返回 key）
 - [ ] `webui/panel.js` 是否又碰了 `localStorage` 或发了 `X-AMKR-Workspace`？
       `webui_panel_probe.mjs` 会拦——它把存储访问做成了毒药记录器。
 - [ ] 是否往指标库里加了**第二个**新对象？`extraMasterEntries` 白名单会拦住——兼容

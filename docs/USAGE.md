@@ -506,7 +506,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - 工作空间**只隔离任务**。模型 ID、别名、隐藏别名与 `unified-model` 仍然全局唯一，任务名也不能与它们撞名 —— 否则路由语义会取决于查表顺序，这是全局唯一的判断。
 - 访客 Key 不能使用任务，带上这个头也一样。
 
-配置文件里，命名工作空间写在 `workspaces` 键下，每个空间一个 `tasks` 段（形状与顶层 `tasks` 相同），可以再带一把 `api_key`：
+配置文件里，命名工作空间写在 `workspaces` 键下，每个空间一个 `tasks` 段（形状与顶层 `tasks` 相同），可以再带凭据与模型授权：
 
 ```json
 {
@@ -522,6 +522,10 @@ curl http://127.0.0.1:8000/v1/chat/completions \
     },
     "teamB-insight": {
       "api_key": "amkr_ws_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "worker": {
+      "inference_key": "amkr_ik_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "models": ["gpt-4o"]
     }
   }
 }
@@ -529,7 +533,14 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 `workspaces` 是**可选**的新增字段，`config_version` 仍是 `4`：没有这个键的既有配置行为完全不变。工作空间随 `/api/config/export`、`/api/config/import` 一起迁移（但那条通道的导出会**剥掉** `api_key`）。
 
-> `teamB-insight` 就是「带 key 的空空间」：它没有 `tasks` 也不消失。手写 `"teamB-insight": {}`（不带 key）照旧会被清掉。`api_key` 顶格写在这一个空间下，与供应商 Key 无关 —— 它只用于[嵌入面板](#93-把工作空间面板嵌进你自己的后台)。
+三个可选字段都让这个空间即使没有任务也保留：
+
+- `api_key`：**面板 key**，用于[嵌入面板](#93-把工作空间面板嵌进你自己的后台)。
+- `inference_key`：**推理 key**，用于调 `/v1`（见 [9.4](#94-用推理-key-把一个项目接进来)）。
+- `models`：允许**直呼**的模型清单。省略 = 不限制，`[]` = 一个都不许直呼（只走任务名），
+  有内容 = 只许这些。任务名不受它限制。
+
+> `teamB-insight` 就是「带 key 的空空间」：它没有 `tasks` 也不消失。手写 `"teamB-insight": {}`（什么都不带）照旧会被清掉。`api_key` 与 `inference_key` 顶格写在这一个空间下，与供应商 Key 无关 —— 它们分别是嵌入面板与调用 `/v1` 的凭据。
 
 #### 看各空间的用量与流向
 
@@ -635,6 +646,40 @@ curl -X POST http://127.0.0.1:8000/api/workspaces/import \
 - 面板和 AMKR **不同源**时，用片段里的 `api` 指定基地址：`#k=amkr_ws_…&api=https://amkr.example.com`。
 - 面板读的是 `GET /ui/workspace-panel.json`（只认面板 key），返回内容里的「未归属」恒为零 —— 没有归属的请求不属于任何空间，面板看不到也不该看到。
 - 本项目没有设置 `X-Frame-Options` 或 CSP `frame-ancestors`，因此面板默认可被任意来源嵌入。这是有意的：嵌入是它的全部用途，安全性由 key 的范围承担，不由来源承担。
+
+### 9.4 用推理 key 把一个项目接进来
+
+把 AMKR 当作**多个项目共用的网关**时，给每个项目一把**推理 key**：它只能调 `/v1`，且**只属于配给它的那个工作空间**。
+
+在 WebUI 的任务路由页点「＋ 新建工作空间…」，弹窗里会同时给出**面板 key 与推理 key**（两者都只显示这一次）；事后想换推理 key，点该空间的「模型授权」→「轮换推理 key」。用接口的话：
+
+```bash
+# 建空间：一次拿到两把 key
+curl -X POST http://127.0.0.1:8000/api/workspaces \
+  -H "Authorization: Bearer $AMKR_LOCAL_KEY" -H "Content-Type: application/json" \
+  -d '{"config_revision": "…", "name": "my-project"}'
+
+# 换一把推理 key（不动面板 key）
+curl -X POST http://127.0.0.1:8000/api/workspaces/my-project/inference-key \
+  -H "Authorization: Bearer $AMKR_LOCAL_KEY" -H "Content-Type: application/json" \
+  -d '{"config_revision": "…"}'
+```
+
+项目侧把它当普通 OpenAI Key 用：
+
+```bash
+export OPENAI_BASE_URL=http://127.0.0.1:8000/v1
+export OPENAI_API_KEY=amkr_ik_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+```
+
+**几条要注意的**
+
+- **推理 key 会钉死在这个空间上。** `X-AMKR-Workspace` 被**忽略**。这比面板 key 更要紧：推理 key 会被写进各个项目的**环境变量**，泄漏面比 URL 片段更宽；如果请求头能换空间，一把泄漏的 key 就等于所有空间的推理权限。
+- **它调不了管理面**（`/api/*` 一律 `401`），包括本空间的任务增删改 —— 那些是运维的事。它也不能用 `unified-model`（全局计划，不属于任何空间）。
+- **默认只能直呼「允许」的模型。** 空间的 `models` 没配就是不限制；配了 `[]` 就一个都不许直呼，只能用**任务名**。任务名不受清单限制 —— 任务自己固定的模型就是该空间被授权用的。想收窄直呼范围，在「模型授权」里勾选（清单按解析后的真实模型判定，写别名不会绕过）。
+- **`/v1/models` 看到的就是它真正能用的那份清单**，可以直接用它做客户端侧的模型下拉：配了 `models` 就是它，没配就是该空间的任务名。
+- **面板 key 不能调 `/v1`，推理 key 也不能读面板。** 两把凭据各管一面，用错会拿到 `401`。
+- 配置导出（`/api/config/export`）会**剥掉**两把 key；工作空间整包迁移（[9.2](#92-迁移工作空间到另一台机器)）则**带上** `api_key`。系统提示：导出文件常被贴进工单与聊天记录，凭据不适合随它走。
 
 ---
 

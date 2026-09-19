@@ -87,6 +87,81 @@
 
 ### 新增
 
+- **工作空间推理 key：让一台 AMKR 作为多个项目共用的网关**。此前工作空间只有一把**面板
+  key**（给嵌入的管理面板用），而它**不能调 `/v1`**——因此「把 AMKR 共用给多个 AI 项目」
+  这件事一直没有凭据可用：shared `local_api_key` 是完整权限，泄漏一把就等于交出整个实例。
+
+  新增 `workspaces.<空间>.inference_key`（`amkr_ik_` + 43 位 base64url，共 50 字符），
+  与面板 key **一起**在 `POST /api/workspaces` 的 201 响应里发放——建空间是唯一能拿到明文
+  key 的时刻，AMKR 没有任何端点会再回一次已有 key。轮换走
+  `POST /api/workspaces/{空间}/inference-key`，**只换这一把**：面板 key 换掉会让已嵌入的
+  页面立刻失效，两者的轮换节奏不同（推理 key 进了各项目的环境变量，泄漏面更宽）。
+
+  它的权限是「被钉死在某个空间上的**推理面**权限」，与面板 key 同构而非第三档全权：
+
+  - **空间由 key 决定，`X-AMKR-Workspace` 被忽略**。这是这个模式存在的全部意义——key 会
+    被配进项目的环境变量，若能用一个请求头换空间，一把泄漏的 key 就等于所有空间的推理权限。
+  - **不能用 `unified-model`**：那是运维为整台实例挑的全局计划，不属于任何工作空间。
+  - **管理面一律 401**，包括本空间的任务 CRUD；`/v1/models` 给的是按空间收窄后的清单。
+  - 解析放在 `internal/proxy/handler.go` 的 `authorize`，先照常走完整权限与访客判定，
+    **失败之后**才查 `WorkspaceForInferenceKey`。顺序反了会让一把空间 key 变成管理员凭据。
+    与面板 key 一样刻意不进 `internal/auth`（那包是被逐字节语料锁定的纯函数）。
+
+- **每个工作空间可配置「允许直呼」的模型清单**（`workspaces.<空间>.models`）。任务名天然
+  按空间隔离，但**真实模型名在配置里是全局的**——没有这份清单，任何一把推理 key 都能直呼
+  全部模型，而「共用网关」在模型维度的隔离正缺这一环。
+
+  三态：省略 = 不限制（既有配置行为一字不变）；`[]` = 一个都不许直呼（只走任务名）；
+  有内容 = 只许这些。**空数组与省略必须可区分**，因此解析后用 `Models != nil` 判断而不是
+  `len(...) == 0`——后者会把运维写下的禁令当成放开。判定发生在**别名解析之后**（拿真实
+  模型 id 比对），否则同一个模型写成别名就绕过了白名单。
+
+  管理接口为 `PUT /api/workspaces/{空间}/models`（`models` 必填但可为 `null`，`null` 表示
+  清除限制；必填是为了不让漏传字段被当成放宽授权），WebUI 的任务页新增「模型授权」入口。
+
+- **`caller_type` 增加 `workspace` 档**。指标库原本只有 `local` / `visitor`，工作空间推理
+  key 的流量会被 `store.Record` 的白名单**静默改写成 `local`**——那是权限最高的一档，看板上
+  混淆两者会让人误判谁在用实例。同步改了 `schema.go` 的回填合法值表（那条 UPDATE 只在
+  `caller_type` 列不存在时执行，因此不会碰到新写入的行；但漏一档会让一次老库升级把这种行
+  改写成 `local`，指标永久失真）、`server/query.go` 的字面量过滤与 WebUI 标签。
+
+  界面标签由三元表达式改成查表：原先写的是 `=== "visitor" ? "访客" : "本机"`，多一档之后
+  工作空间流量会被显示成「本机」。兜底回显原始值，将来再加档时宁可看到生词。
+
+- **工作空间目录新增 `models` 与 `has_inference_key` 两个字段**（不含任何 key 本身）。
+  `models` 只在配置里显式写了清单时才出现（区分「不限制」与「空清单」）；
+  `has_inference_key` 是布尔，让界面能提示「发过推理凭据，可以轮换」，而目录接口**仍然
+  一个 key 都不返回**——它会被列表页反复轮询。
+
+  另新增 `POST /api/workspaces/{空间}/inference-key` 与
+  `PUT /api/workspaces/{空间}/models` 两条路由，已同步 `workspacePatterns()` 与
+  `internal/api/server.go` 的 `patterns`（错方法的 405 判定），并保持与冻结的 47 条
+  Python 路由清单**不重叠**。
+
+  两条 key 的占用表现在**跨类型统一检查**：一个空间的面板 key 不得等于另一个空间的推理
+  key。两把 key 的判定发生在不同调用点（面板面 vs `/v1` 面），同一个字符串两处都命中会让
+  权限边界取决于走到哪条路由。既有三条错误文本（`工作空间 a 的 api_key 不能…` /
+  `工作空间 a 与 b 的 api_key 重复`）逐字不变。
+
+  空分组的保留判据相应放宽为「有凭据**或**有 `models`」：最常见的形态正是「一个已经有任务
+  的空间被加上模型限制」，此时它两把 key 都没有，若按「没有凭据就丢掉」处理，限制会在热
+  重载后静默消失。`config.parseTasks` 与 `configops.hasWorkspaceCredential` 两处必须一致。
+
+  验证：`internal/config/model_test.go`（`TestWorkspaceInferenceKeyValidation` 含跨类型撞车
+  六例、`TestWorkspaceForInferenceKey`、`TestWorkspaceAllowedModels`、
+  `TestWorkspaceModelsParseErrors`、`TestWorkspaceModelsKeepsGroupWithoutCredentials`）、
+  `internal/proxy/workspace_test.go`（`TestScopedKeyPinsWorkspaceIgnoringHeader` 为核心，
+  另有别名绕过、`unified-model`、拒绝后无回落、空 key 不命中、无清单不限制等）、
+  `internal/api/workspaces_api_test.go`（两个新端点、面板 key 不能自行扩权、轮换不动面板 key）、
+  `internal/server/handlers_test.go`（`TestModelsNarrowedForScopedInferenceKey`）、
+  `internal/metrics/workspace_test.go`（`TestRecordKeepsWorkspaceCallerType` 与未知值仍收敛）。
+
+  `caller_type` 的第三档让 `internal/server/testdata/server_corpus.json` 里两条 422 用例的
+  Pydantic `literal_error` 文本必然不同。语料**没有被改动**——它是真实 Python 应用产出的
+  冻结证据，逐字节对拍的价值全建立在「没被手工改过」之上。改的是回放侧：新增
+  `amendCallerTypeLiteralBody` 只替换取值集合那一段，其余字节仍逐一比对；语料里找不到旧
+  文本时**直接失败**，提示对拍前提已变。
+
 - **任务可以取中文显示名（`display_name`）**。任务路由页的任务卡片与编辑页现在用人取的
   名字（如「长文摘要」）作标题，任务名（`TASK_000001`）退到旁边的徽标与详情里——这个页面上
   人认的是业务名，而调用方仍然只能传任务名，因此它必须一直可见。显示名可选、纯展示、不参与

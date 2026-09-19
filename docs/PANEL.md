@@ -20,7 +20,12 @@
 | 读写**本空间**的任务（增/删/改/查） | 看或改别的空间的任务 |
 | 读本空间的用量与请求流向 | 看供应商、Key、模型、设置等任何全局配置 |
 | | 用 `/v1/*` 代理面（面板 key 不是推理凭据） |
-| | 导出/导入配置、迁移工作空间 |
+| | 导出/导入配置、迁移工作空间、给自己扩权 |
+
+> **面板 key 与推理 key 是两把不同的凭据。** 面板 key（`amkr_ws_…`）只用于本页描述的
+> 面板场景；要让**项目代码**调 `/v1` 推理，用同一空间另一把**推理 key**（`amkr_ik_…`，
+> 同一次创建响应里一起给出）。两者互不通用，用错会拿到 `401`。想让某个项目只能直呼
+> 少数模型，在 WebUI 的任务路由页点该空间的「模型授权」配置。
 
 ## 2. 三步接入
 
@@ -35,10 +40,12 @@ curl -X POST http://127.0.0.1:8000/api/workspaces \
   -d '{"config_revision": "<当前版本号>", "name": "myapp-prod", "api_key": "你自己定的key"}'
 ```
 
-`api_key` 可以省略，服务端会生成一个（`amkr_ws_` + 43 位随机字符）。响应 `201`：
+`api_key` 可以省略，服务端会生成一个（`amkr_ws_` + 43 位随机字符）；`inference_key`
+**总是**由服务端生成（`amkr_ik_` + 43 位随机字符）。响应 `201`：
 
 ```json
-{"name": "myapp-prod", "task_count": 0, "api_key": "…", "config_revision": "…"}
+{"name": "myapp-prod", "task_count": 0, "api_key": "amkr_ws_…",
+ "inference_key": "amkr_ik_…", "config_revision": "…"}
 ```
 
 `config_revision` 从任意读接口拿（如 `GET /api/workspaces` 的响应里就有）。它是乐观锁：
@@ -46,12 +53,16 @@ curl -X POST http://127.0.0.1:8000/api/workspaces \
 
 **方式 B —— 在 AMKR 的 WebUI 里手工创建**
 
-任务路由页点「＋ 新建工作空间…」，建好后会弹出 key 并给出可复制的嵌入片段。适合人工
-搭一次环境。
+任务路由页点「＋ 新建工作空间…」，建好后会弹出**两把** key 并给出可复制的嵌入片段。
+适合人工搭一次环境。
 
-> **key 明文只出现这一次。** 之后任何接口都不再返回它——工作空间目录
-> （`GET /api/workspaces`）刻意不含它，配置导出也会剥掉它。请在这一步存进你的密钥管理。
-> 唯一的补救是直接读 AMKR 的配置文件（`workspaces.<空间>.api_key`）或重建空间。
+> **两把 key 的明文都只出现这一次。** 之后任何接口都不再返回它们——工作空间目录
+> （`GET /api/workspaces`）刻意不含它们（只给一个 `has_inference_key` 布尔），配置导出
+> 也会剥掉它们。请在这一步存进你的密钥管理。
+>
+> 补救手段不同：推理 key 可以**轮换**（`POST /api/workspaces/{空间}/inference-key`，
+> 只换这一把），面板 key 只能直接读 AMKR 的配置文件（`workspaces.<空间>.api_key`）或
+> 重建空间。
 
 ### 第二步：塞进 iframe
 
