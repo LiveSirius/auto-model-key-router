@@ -177,6 +177,11 @@ type WorkspaceImportResult struct {
 	Replaced []string
 	// Renamed 是改过名的空间（原名已在目标实例上存在且选择保留）：`原名 -> 新名`。
 	Renamed map[string]string
+	// Rekeyed 是**换了 key** 的空间：`最终空间名 -> 新 key`。
+	//
+	// 只在加前缀克隆时可能出现：那个空间在原实例上仍然存在并占着原 key，克隆体不可能
+	// 也用它。调用方必须把新 key 交给嵌入方，否则克隆出来的空间没有可用的面板。
+	Rekeyed map[string]string
 	// RemovedTasks 是导入后因引用不到模型而被清掉的任务（`空间/任务名`）。
 	RemovedTasks []string
 }
@@ -197,7 +202,7 @@ func ImportWorkspaces(
 	bundle *WorkspaceBundle,
 	prefix string,
 ) (WorkspaceImportResult, error) {
-	result := WorkspaceImportResult{Renamed: map[string]string{}}
+	result := WorkspaceImportResult{Renamed: map[string]string{}, Rekeyed: map[string]string{}}
 	if bundle == nil {
 		return result, opErr(422, "工作空间迁移包为空")
 	}
@@ -215,29 +220,28 @@ func ImportWorkspaces(
 			continue
 		}
 		clone := source.Clone()
-		// 目标空间的 key 必须与既有空间**互不重复**，否则 config.Validate 会拒，
-		// 而错误信息（"两个空间用了同一个 key"）离用户的操作很远。这里先把冲突的
-		// key 换掉，让导入能成功。
-		key := strings.TrimSpace(clone.Lookup("api_key").StringValue())
-		if key != "" {
-			replacement, err := uniqueWorkspaceKey(data, key)
-			if err != nil {
-				return result, err
-			}
-			if replacement != key {
-				clone.SetKey("api_key", canonical.NewString(replacement))
-			}
-		}
 		target := name
+		cloned := false
 		if workspaceExists(data, target) {
 			if trimmedPrefix == "" {
 				result.Replaced = append(result.Replaced, target)
 			} else {
 				target = availableWorkspaceName(data, trimmedPrefix+name)
 				result.Renamed[name] = target
+				// 克隆体与原空间**并存**，因此原 key 必然还在被原空间占着，克隆体
+				// 不可能也用它。这里换一把新的并如实回报——不换的话加前缀克隆对
+				// 「克隆一个本地已存在的空间」这个主要用法永远失败。
+				cloned = true
 			}
 		} else {
 			result.Added = append(result.Added, target)
+		}
+		changed, err := resolveImportKey(data, target, clone, cloned)
+		if err != nil {
+			return result, err
+		}
+		if changed {
+			result.Rekeyed[target] = strings.TrimSpace(clone.Lookup("api_key").StringValue())
 		}
 		workspaces := lookup(data, "workspaces")
 		if !workspaces.IsObject() {
@@ -258,38 +262,60 @@ func ImportWorkspaces(
 	return result, nil
 }
 
-// uniqueWorkspaceKey 返回一个当前配置里没有被任何工作空间占用的 key。
+// resolveImportKey 决定待导入空间的 key 能不能原样落地，返回是否换了 key。
 //
-// 完全相同的 key 会撞 config.Validate 的重复检查，而那条错误的措辞是"两个空间用了
-// 同一个 api_key"，对一个正在导入的人毫无指向性。冲突时生成一个新的：导入方拿到的
-// key 与包里不同，这一点由调用方在响应里告知（旧 key 在目标实例上会指向别人的空间，
-// 保留它反而是安全问题）。
-func uniqueWorkspaceKey(data *canonical.Value, key string) (string, error) {
-	used := map[string]bool{}
-	if local := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); local != "" {
-		used[local] = true
+// 分两种情况，差别在于**冲突是不是克隆造成的**：
+//
+//   - cloned 为真（加前缀克隆）：原 key 必定被原空间占着（它还在），换一把新的。这不是
+//     意外，是克隆的必然结果，因此由 Rekeyed 明确回报给调用方——嵌入方需要新 key。
+//   - 否则：key 撞上目标实例上**别处**的凭据是**错误**，报出而不是悄悄改写。改写看似
+//     "让导入成功"，实际藏起了用户必须知道的事：那把 key 通常已经嵌在别人的页面里，
+//     换掉之后旧 key 会指向别人**别的**空间，而响应里没有任何字段能说明这件事。
+//
+// 保留 key（`amkr-visitor`）与本地主凭据（`local_api_key`）在任何情况下都是错误：它们
+// 是配置层明令禁止的入站凭据，静默改写等于把坏包藏起来。措辞与 config.Validate 一致
+// （那边是最终防线，这里是为了在**写盘前**给出同一个结论）。
+//
+// `target` 是本次要写入的位置：prefix 为空时它是被覆盖的那个空间（连同旧 key 一起消失），
+// 因此它与自己重复不算冲突。
+func resolveImportKey(data *canonical.Value, target string, incoming *canonical.Value, cloned bool) (bool, error) {
+	key := strings.TrimSpace(incoming.Lookup("api_key").StringValue())
+	if key == "" {
+		return false, nil
 	}
-	for _, pair := range objectItems(lookup(data, "workspaces")) {
-		if pair.Value.IsObject() {
-			used[strings.TrimSpace(pair.Value.Lookup("api_key").StringValue())] = true
+	if key == config.VISITOR_API_KEY {
+		return false, opErrf(422, "工作空间 %s 的 api_key 不能使用保留的访客 key: %s", target, config.VISITOR_API_KEY)
+	}
+	if local := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); local != "" && key == local {
+		return false, opErrf(422, "工作空间 %s 的 api_key 不能与 local_api_key 相同", target)
+	}
+	if owner := keyOwnerOutside(data, key, target); owner != "" {
+		if !cloned {
+			return false, opErrf(422, "工作空间 %s 的 api_key 与 %s 重复", target, owner)
 		}
-	}
-	// 默认空间没有 key 槽位，但它也不占用任何 key。
-	if !used[key] {
-		return key, nil
-	}
-	for attempt := 0; attempt < 8; attempt++ {
-		candidate, err := config.GenerateWorkspaceKey()
+		// 克隆：生成一把新的。本次导入中更早写入的空间已经落在 data 里，因此同一个
+		// 扫描就能覆盖它们，无需另记一份。
+		generated, err := config.GenerateWorkspaceKey()
 		if err != nil {
-			return "", err
+			return false, err
 		}
-		if !used[candidate] {
-			return candidate, nil
+		incoming.SetKey("api_key", canonical.NewString(generated))
+		return true, nil
+	}
+	return false, nil
+}
+
+// keyOwnerOutside 返回占用 key 的那个空间名（`except` 自身除外），没有则空串。
+func keyOwnerOutside(data *canonical.Value, key, except string) string {
+	for _, pair := range objectItems(lookup(data, "workspaces")) {
+		if pair.Key == except || !pair.Value.IsObject() {
+			continue
+		}
+		if existing := strings.TrimSpace(pair.Value.Lookup("api_key").StringValue()); existing == key {
+			return pair.Key
 		}
 	}
-	// 生成器给出的 key 是 32 字节随机数，撞八次等于不可能；到这里说明随机源坏了，
-	// 与其带一个冲突的 key 继续（配置会被 config.Validate 拒），不如明确失败。
-	return "", opErr(500, "无法生成不重复的工作空间 key")
+	return ""
 }
 
 // availableWorkspaceName 在 base 已被占用时依次尝试 `base-2`、`base-3`……。

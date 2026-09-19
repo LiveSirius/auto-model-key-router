@@ -98,11 +98,18 @@ func (s *Server) handleImportWorkspaces(w http.ResponseWriter, r *http.Request) 
 		for from, to := range result.Renamed {
 			renamed.SetKey(from, canonical.NewString(to))
 		}
+		// 只有加前缀克隆才会换 key（原空间还在，占着原 key）。返回新 key 是必须的：
+		// 嵌入方手里那把对应的是**原**空间，克隆出来的空间没有可用的面板。
+		rekeyed := canonical.NewObject()
+		for name, key := range result.Rekeyed {
+			rekeyed.SetKey(name, canonical.NewString(key))
+		}
 		return withRevision(data, objectOf(
 			canonical.ObjectPair{Key: "imported", Value: canonical.NewBool(true)},
 			canonical.ObjectPair{Key: "added", Value: stringArray(result.Added)},
 			canonical.ObjectPair{Key: "replaced", Value: stringArray(result.Replaced)},
 			canonical.ObjectPair{Key: "renamed", Value: renamed},
+			canonical.ObjectPair{Key: "rekeyed", Value: rekeyed},
 			canonical.ObjectPair{Key: "removed_tasks", Value: stringArray(result.RemovedTasks)},
 		))
 	})
