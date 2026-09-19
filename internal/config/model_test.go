@@ -449,3 +449,97 @@ func TestTaskNameConflictsWithModelGlobally(t *testing.T) {
 		t.Fatalf("错误文本不一致: %v", err)
 	}
 }
+
+// TestTaskModelIsOptional 固化：任务可以先不指定模型。
+//
+// 缺失、null、空白串三种写法都表示「尚未指定」——它们在校验层是等价的，若只放行
+// 其中一种，另外两种就会报出「引用了未配置的模型」这种驴唇不对马嘴的错。
+func TestTaskModelIsOptional(t *testing.T) {
+	base := `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},"tasks":%s}`
+	cases := map[string]string{
+		"缺失":   `{"t":{"params":{"temperature":0.5}}}`,
+		"null": `{"t":{"model":null}}`,
+		"空白串":  `{"t":{"model":"   "}}`,
+	}
+	for name, tasks := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := FromDict(mustParse(t, strings.Replace(base, "%s", tasks, 1)))
+			if err != nil {
+				t.Fatalf("未指定模型的任务应当合法: %v", err)
+			}
+			if len(cfg.Tasks) != 1 {
+				t.Fatalf("任务数应为 1，实际 %d", len(cfg.Tasks))
+			}
+			if cfg.Tasks[0].Model != "" {
+				t.Errorf("未指定模型时应归一成空串，实际 %q", cfg.Tasks[0].Model)
+			}
+		})
+	}
+}
+
+// TestTaskModelTypoStillFails 固化放宽的边界：**填了但填错**仍然是错误。
+//
+// 放宽「可以没有模型」与「可以写错模型名」只差一步，混起来就会让错字静默退化成一个
+// 空任务——用户在界面上看到任务存在，调用时才发现它没有模型。
+func TestTaskModelTypoStillFails(t *testing.T) {
+	_, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"t":{"model":"model-typo"}}}`))
+	if err == nil {
+		t.Fatal("写错模型名时应当报错")
+	}
+	var configErr *ConfigError
+	if !errors.As(err, &configErr) || configErr.Message != "tasks.t.model 引用了未配置的模型: model-typo" {
+		t.Fatalf("错误文本不一致: %v", err)
+	}
+}
+
+// TestTaskDisplayNameIsParsed 固化显示名的解析与归一。
+//
+// 显示名是给**人**看的，因此两端空白要清掉（否则界面上会显示成「 长文摘要 」）；
+// 没配就是空串，与「没取名字」这个状态一致。
+func TestTaskDisplayNameIsParsed(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"named":{"model":"model-a","display_name":"  长文摘要  "},"plain":{"model":"model-a"}}}`))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	named, found := cfg.TaskFor("named")
+	if !found || named.DisplayName != "长文摘要" {
+		t.Errorf("显示名应为去空白的 长文摘要，实际 %+v（found=%v）", named, found)
+	}
+	plain, found := cfg.TaskFor("plain")
+	if !found {
+		t.Fatal("plain 任务应存在")
+	}
+	if plain.DisplayName != "" {
+		t.Errorf("未配置显示名时应为空串，实际 %q", plain.DisplayName)
+	}
+}
+
+// TestTaskPlanWithEmptyModelIsEmpty 固化：空模型的任务产出空计划。
+//
+// proxy 正是靠 Primary.Model == "" 判定「尚未指定模型」并给出明确错误。若这里悄悄
+// 填进别的模型名，那条判定就永远不会触发，回落会变成静默行为。
+func TestTaskPlanWithEmptyModelIsEmpty(t *testing.T) {
+	cfg, err := FromDict(mustParse(t, `{"config_version":4,"local_api_key":"k",
+		"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+		"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+		"tasks":{"placeholder":{}}}`))
+	if err != nil {
+		t.Fatalf("解析失败: %v", err)
+	}
+	task, found := cfg.TaskFor("placeholder")
+	if !found {
+		t.Fatal("placeholder 任务应存在")
+	}
+	plan := task.Plan()
+	if plan.Primary.Model != "" || plan.Fallback != nil {
+		t.Errorf("未指定模型的任务不应产生任何目标，实际 %+v", plan)
+	}
+}

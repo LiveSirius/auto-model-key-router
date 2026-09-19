@@ -91,16 +91,28 @@ func NormalizeWorkspace(workspace string) string {
 // TaskConfig 是任务名路由：model 传任务名时改用这里的模型与固定参数。
 type TaskConfig struct {
 	Name string
+	// DisplayName 是给**人**看的中文显示名（WebUI 列表与编辑页用）。
+	//
+	// 它只影响展示，不参与路由：调用方仍然传 Name。留空表示没有取名，界面回落到
+	// Name。放在配置里而不是浏览器本地，是为了让别名随导出/导入一起走——它描述的
+	// 是「这个任务是什么」，属于配置本身，不是某台机器的视图偏好。
+	DisplayName string
 	// Workspace 是任务所属的工作空间；顶层 tasks 的任务归属 DefaultWorkspace。
 	//
 	// 任务名只在工作空间内唯一，因此运行时的查表键是 (Workspace, Name) 两元组。
-	Workspace     string
+	Workspace string
+	// Model 是首选模型 ID；**空串表示尚未指定模型**，这样的任务可以正常存在与
+	// 编辑，但被请求时明确报 404（见 proxy 的「尚未指定模型」分支），而不是静默
+	// 落到别的模型上。
 	Model         string
 	FallbackModel string
 	Params        *canonical.Value
 }
 
 // Plan 把任务转成路由计划。
+//
+// Model 为空时 Primary.Model 也是空串：调用方据此判定「任务还没指定模型」并给出
+// 明确错误，而不是把它当成一个真实的模型名去查表。
 func (t TaskConfig) Plan() RoutePlan {
 	plan := RoutePlan{Primary: RouteTarget{Model: t.Model}}
 	if t.FallbackModel != "" {
@@ -641,15 +653,29 @@ func parseTaskGroup(
 			return modelID, nil
 		}
 
-		modelID, err := resolve(task.Lookup("model"), prefix+"."+taskName+".model")
-		if err != nil {
-			return nil, err
+		// model 可省略：任务可以先建出来占位（例如先把名字与固定参数定下来，
+		// 模型稍后再选）。缺失、null 与空白串都表示「尚未指定」，请求它时明确报错
+		// 而不是静默落到别的模型上（见 proxy 的「尚未指定模型」分支）。
+		//
+		// 填了却引用了未配置的模型仍然报错——那是写错了，不是还没填；否则错字会
+		// 静默退化成一个空任务。
+		modelID := ""
+		if rawModel, present := task.LookupOK("model"); present && !rawModel.IsNull() {
+			if strings.TrimSpace(rawModel.StringValue()) != "" {
+				resolvedModel, resolveErr := resolve(rawModel, prefix+"."+taskName+".model")
+				if resolveErr != nil {
+					return nil, resolveErr
+				}
+				modelID = resolvedModel
+			}
 		}
 		fallbackModel := ""
 		if rawFallback, present := task.LookupOK("fallback_model"); present && !rawFallback.IsNull() {
-			if fallbackModel, err = resolve(rawFallback, prefix+"."+taskName+".fallback_model"); err != nil {
-				return nil, err
+			resolvedFallback, resolveErr := resolve(rawFallback, prefix+"."+taskName+".fallback_model")
+			if resolveErr != nil {
+				return nil, resolveErr
 			}
+			fallbackModel = resolvedFallback
 		}
 		params, err := NormalizeTaskParams(task.Lookup("params"), taskName)
 		if err != nil {
@@ -657,6 +683,7 @@ func parseTaskGroup(
 		}
 		tasks = append(tasks, TaskConfig{
 			Name:          taskName,
+			DisplayName:   strings.TrimSpace(task.Lookup("display_name").StringValue()),
 			Workspace:     workspace,
 			Model:         modelID,
 			FallbackModel: fallbackModel,
@@ -794,8 +821,13 @@ func (c *RouterConfig) Validate() error {
 			return errf("任务名不能使用保留名称: %s", UNIFIED_MODEL_ID)
 		}
 		taskNames[key] = true
-		if _, found := modelsByID[task.Model]; !found {
-			return errf("任务 %s 引用了未配置的模型: %s", task.Name, task.Model)
+		// 空 model 是「尚未指定模型」这个合法状态，不是引用错误：任务可以先建出来
+		// 占位，请求它时由 proxy 明确报 404。只有非空才需要校验存在性——写了却
+		// 写错必须是错误，否则错字会静默退化成一个空任务。
+		if task.Model != "" {
+			if _, found := modelsByID[task.Model]; !found {
+				return errf("任务 %s 引用了未配置的模型: %s", task.Name, task.Model)
+			}
 		}
 		if task.FallbackModel != "" {
 			if _, found := modelsByID[task.FallbackModel]; !found {
