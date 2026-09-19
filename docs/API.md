@@ -151,9 +151,9 @@ Python 侧没有对应实现，给它们手写 `/api` 语料等于伪造兼容�
 ```
 
 - 传给上游的 `model` 会是任务的 `model`；若该模型重试后仍返回可重试状态码，会再尝试任务的 `fallback_model`，此时响应带 `X-AMKR-Fallback: true`。
-- 任务 `params` 里固定了的采样参数（`temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`）会覆盖请求体中的同名参数。
-- 请求里**显式传了**这些参数会直接被拒绝（`400`），而不是被静默覆盖 —— 静默覆盖会让调用方以为自己的值生效了。`reasoning_effort` 是例外：它同样被任务覆盖，但不拒绝调用方传入（Claude Code / Codex 这类客户端框架会自动带上它）。
-- 不在任务 `params` 里的参数（如 `max_tokens`）照常透传。
+- 任务 `params` 里固定了的采样参数（`temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`max_tokens`）会覆盖请求体中的同名参数。
+- 请求里**显式传了**这些参数会直接被拒绝（`400`），而不是被静默覆盖 —— 静默覆盖会让调用方以为自己的值生效了。`reasoning_effort` 也一样会被拒绝：任务路由是给别的 AI 服务用的，不是给 Agent 用的，调用方显式传了任务已固定的参数就该收到明确的 `400`。
+- 不在任务 `params` 里的参数照常透传。`max_tokens` 与 Anthropic 的 `stop` 一样有跨方言同义字段：任务固定了 `max_tokens` 时，Responses 方言的 `max_output_tokens` 同样视为冲突（`400`），不会绕过后被静默丢掉。
 - 任务不接受调用方指定 Key（`TASK_000001[main]` 返回 `400`），Key 仍由目标模型自身的路由模式决定。
 - 访客 Key 不能访问任务名。
 
@@ -651,7 +651,7 @@ provider 对象不再含顶层 `capabilities`；探测缓存按 Key 存于 `keys
 | 键 | 类型 | 约束 |
 | --- | --- | --- |
 | `temperature`、`top_p`、`frequency_penalty`、`presence_penalty` | number | 任意数值 |
-| `top_k`、`seed` | integer | 必须是整数，`1.5` 这类值返回 `422` |
+| `top_k`、`seed`、`max_tokens` | integer | 必须是整数，`1.5` 这类值返回 `422` |
 | `stop` | string[] | 非空字符串数组；传字符串返回 `422`（配置文件路径会包成单元素数组，管理 API 不会） |
 | `reasoning_effort` | string | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；传 `""`、`default`、`downstream` 视为不固定 |
 

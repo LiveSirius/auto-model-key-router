@@ -2,6 +2,23 @@
 
 ## [Unreleased]
 
+### 重大变更
+
+- **任务路由不再对 `reasoning_effort` 网开一面**：调用方显式传了任务已固定的
+  `reasoning_effort` 现在会和其他采样参数一样收到 `400`，而不是被静默覆盖。
+
+  参照实现（`proxy_support.py:147`）刻意把它排除在冲突检查之外，理由是「客户端框架常自动
+  带上，且与模型级设置一致」。Go 侧不再沿用：**任务路由是给别的 AI 服务用的，不是给 Agent
+  用的**，调用方显式传了一个由任务固定的参数，就该收到明确的拒绝，而不是一个「我传的值没
+  生效」的静默结果——后者只在排查时才会暴露，而且看起来像上游的问题。
+
+  这是一处**有意的兼容性分叉**，已在 `internal/proxysupport/support_test.go` 的
+  `TestTaskParamConflictsRejectsCallerReasoningEffort` 与 `internal/proxy/proxy_test.go` 的
+  `TestTaskFixedReasoningEffortRejectsCaller` 里显式记录。对拍语料不受影响：现有语料里没有
+  任何一条任务用例由调用方传 `reasoning_effort`（`internal/upstream/testdata/` 里那条
+  `test_task_allows_caller_reasoning_effort_but_still_overrides_it` 是 Python 侧录的，Go 不做
+  回放），因此这是一处纯语义增补，不是语料回归。
+
 ### 修复
 
 - **图表每次重绘都会"往中间挤一下再复原"**。图表的首帧是在节点还**没挂进文档**时画的
@@ -53,6 +70,21 @@
   拒绝、非 GET 405、参数校验先于鉴权、`all_history` 的 `window.from` 为 null）、
   `webui_chart_probe.mjs` 新增 11 条桑基断言（层数、厚度与请求数成正比、流带不溢出节点、
   同节点出边不重叠、退化输入不产生 NaN），全套 162 条通过。
+
+- **任务路由可以固定 `max_tokens`**（输出上限）。白名单、管理 API 的 JSON schema 与 WebUI
+  的任务编辑器同步支持；和 `top_k`、`seed` 一样按**整数**校验，落盘渲染成 `32` 而不是
+  `32.0`。
+
+  跨方言同义字段一并处理：固定 `max_tokens` 后，Responses 方言的 `max_output_tokens` 也算
+  冲突（`400`）。这条不能省——请求体的参数归一化（`max_output_tokens` → `max_tokens`）发生在
+  冲突检查**之后**，漏掉别名会让调用方用 Responses 方言传的上限被静默丢掉。这与既有的
+  `stop` / `stop_sequences` 是同一套规则。
+
+  任务参数白名单出现在 6 处冻结语料的报错文本里（`taskparams.jsonl` ×3、`model.jsonl`、
+  `management_api_corpus.json`、`configops_corpus.json` ×2），按新顺序
+  `…, seed, stop, max_tokens, reasoning_effort` 逐字更新，其中管理 API 语料的
+  `content_length` 由 183 改为 195。生成器已随 Python 退役，这批语料是手工改的。
+
 - **供应商页的 Key 行只列出该 Key 正在服务的模型**。Key 名称下方原来显示的是探测结果
   （上游 `/v1/models` 广告出来的全部模型），动辄几百个，既读不完，也不代表这个 Key 真的
   对外提供它们——每个模型要显式绑定到 Key 才生效。现在这行改为从模型 `targets[]` 反查
