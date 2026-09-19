@@ -159,6 +159,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 - 请求里**显式传了**这些参数会直接被拒绝（`400`），而不是被静默覆盖 —— 静默覆盖会让调用方以为自己的值生效了。`reasoning_effort` 也一样会被拒绝：任务路由是给别的 AI 服务用的，不是给 Agent 用的，调用方显式传了任务已固定的参数就该收到明确的 `400`。
 - 不在任务 `params` 里的参数照常透传。`max_tokens` 与 Anthropic 的 `stop` 一样有跨方言同义字段：任务固定了 `max_tokens` 时，Responses 方言的 `max_output_tokens` 同样视为冲突（`400`），不会绕过后被静默丢掉。
 - 任务不接受调用方指定 Key（`TASK_000001[main]` 返回 `400`），Key 仍由目标模型自身的路由模式决定。
+- 任务可以**尚未指定模型**（创建时不传 `model`，先把名字与固定参数定下来）：此时请求它会得到 `404` 与「任务 TASK_000001 尚未指定模型…」，而**不是**回落到别的模型。见「任务路由接口」里的 TaskCreate。
 - 访客 Key 不能访问任务名。
 
 #### 工作空间
@@ -647,10 +648,19 @@ provider 对象不再含顶层 `capabilities`；探测缓存按 Key 存于 `keys
 | 字段 | 类型 | 必填 | 默认值/约束 |
 | --- | --- | --- | --- |
 | `name` | string | 是 | 非空；即客户端传的 `model`。不能与已有任务名、任何模型 ID、`aliases`、`hidden_aliases` 或 `unified-model` 重复 |
-| `model` | string | 是 | 首选模型，可写模型 ID 或别名；写回时规范化为模型 ID |
-| `fallback_model` | string/null | 否 | `null`；备选模型，与首选引用同一模型时忽略 |
+| `model` | string/null | 否 | 首选模型，可写模型 ID 或别名；写回时规范化为模型 ID。**省略或传 `null` 表示尚未指定模型**，任务先作为占位存在（见下） |
+| `display_name` | string/null | 否 | 给**人**看的中文显示名，只用于 WebUI 辨认任务；不影响调用，两端空白会被去掉 |
+| `fallback_model` | string/null | 否 | `null`；备选模型，与首选引用同一模型时忽略。**没有首选时不能填备选**，否则 `422` |
 | `params` | object | 否 | `{}`；固定采样参数，见下节。留空表示全部透传 |
 | `config_revision` | string | 是 | 并发校验版本号 |
+
+`model` 是否必填是本项目相对参照实现的一处**有意放宽**（见 CHANGELOG）：任务可以先建出来占位（例如先把名字与固定参数定下来，模型稍后再选）。这种任务被请求时会得到一个明确的 `404`：
+
+```json
+{"detail": "任务 TASK_000001 尚未指定模型；请先在 AMKR 的任务路由中为该任务选择模型"}
+```
+
+刻意**不做任何回落**——既不会退到 `unified_model.default`，也不会退到第一个已配置的模型。静默回落会让一个忘记选模型的任务照常服务，调用方既看不到问题、也无从知道自己实际用的是另一个模型。注意「填了但填错」仍是错误：`model` 引用了未配置的模型照旧报错，否则错字会静默退化成一个空任务。
 
 `params` 只接受白名单内的键，写错键名返回 `422`（不会静默忽略）：
 
@@ -663,18 +673,21 @@ provider 对象不再含顶层 `capabilities`；探测缓存按 Key 存于 `keys
 
 #### TaskUpdate
 
-字段与 TaskCreate 的模型字段相同（`model`、`fallback_model`、`params`），全部可省略，但请求中至少需要出现一个，否则返回 `422`。`fallback_model: null` 清除备选，`params: {}` 清空全部固定参数。`name` 不可改 —— 它是调用方使用的 `model` 名，改名等于换了个任务。
+字段与 TaskCreate 的模型字段相同（`model`、`display_name`、`fallback_model`、`params`），全部可省略，但请求中至少需要出现一个，否则返回 `422`。`model: null` 把任务退回「尚未指定模型」的占位状态（备选会一并清掉），`display_name: null` 清除显示名，`fallback_model: null` 清除备选，`params: {}` 清空全部固定参数。`name` 不可改 —— 它是调用方使用的 `model` 名，改名等于换了个任务。
 
 #### TaskResponse
 
 ```json
 {
   "name": "TASK_000001",
+  "display_name": "长文摘要",
   "model": "gpt-4o-mini",
   "fallback_model": "claude-sonnet",
   "params": {"temperature": 0.2, "reasoning_effort": "high"}
 }
 ```
+
+`display_name` **只在任务取了名时才出现**：没有显示名的任务响应与新增该字段之前逐字节相同，既有调用方看不到任何变化。未指定模型的任务回 `"model": ""`。
 
 ### 模型接口
 
@@ -761,7 +774,7 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 这五个端点都认 `X-AMKR-Workspace` 头，语义与代理面完全一致：缺省即默认工作空间（顶层 `tasks`），带 `X-AMKR-Workspace: teamA` 即读写 `workspaces.teamA.tasks`。任务名只在工作空间内唯一，因此**同一空间内**重名报 `409`、跨空间同名合法；`GET/PUT/DELETE /api/tasks/{task_name}` 取的是该空间里的那个任务，别的空间的同名任务不会被误改。工作空间名不需要事先声明：在它下面建第一个任务即存在，删掉最后一个任务即消失。
 
-响应体没有变化：`TaskResponse` 不含 `workspace` 字段（`tasks/list` 的字节被对拍语料锁定），当前空间由请求头决定。
+响应体没有 `workspace` 字段（`tasks/list` 的字节被对拍语料锁定），当前空间由请求头决定。`display_name` 是唯一新增的字段，且只在任务取了名时才出现——没有显示名的任务响应与新增该字段之前逐字节相同。
 
 #### `GET /api/tasks`
 
@@ -770,6 +783,8 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 #### `POST /api/tasks`
 
 请求体为 TaskCreate，成功返回 `201` 与 TaskResponse（含 `config_revision`）。该空间已有同名任务时返回 `409`（`{"detail": "任务已存在: <name>"}`）。
+
+`model` 可省略：不传即创建「尚未指定模型」的占位任务，之后再 `PUT` 补上即可（见 TaskCreate 一节）。
 
 #### `GET/PUT/DELETE /api/tasks/{task_name}`
 
@@ -905,10 +920,10 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 | `200/201` | 管理接口读写成功（创建类返回 `201`，同步探测 `POST /api/providers/{id}/probe` 与 `POST /api/providers/{id}/keys/{key_name}/probe` 返回 `200`） |
 | `202` | 异步探测任务已接受（`/api/probes/keys`） |
 | `204` | 删除成功 |
-| `400` | 缺少 `model`、更新体为空或配置校验失败；请求任务名时显式传了该任务已固定的采样参数，或指定了 Key（`TASK_XXXXXX[key]`） |
+| `400` | 请求体中缺少 `model`、更新体为空或配置校验失败；请求任务名时显式传了该任务已固定的采样参数，或指定了 Key（`TASK_XXXXXX[key]`） |
 | `401` | 本地 API key 验证失败 |
 | `403` | visitor 无权访问模型或 Key（含任务名） |
-| `404` | 模型、Key、供应商或探测不存在；任务指向的模型没有启用的 Key |
+| `404` | 模型、Key、供应商或探测不存在；任务指向的模型没有启用的 Key；任务尚未指定模型 |
 | `409` | 名称冲突、删除最后一个 Key、无法持久化嵌入式配置 |
 | `422` | 管理 API 请求字段类型错误、缺少必填字段或包含未知字段；供应商暂无 Key 时探测 |
 | `500` | 配置保存失败 |

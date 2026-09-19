@@ -4,6 +4,35 @@
 
 ### 重大变更
 
+- **创建任务不再必填 `model`，但请求一个没指定模型的任务会明确报错**。任务可以先建出来
+  占位——例如先把名字、显示名与固定采样参数定下来，模型稍后再选——调用被拒时给出
+  `404`「任务 TASK_000001 尚未指定模型；请先在 AMKR 的任务路由中为该任务选择模型」。
+
+  刻意**不做任何回落**：既不会退到 `unified_model.default`，也不会退到第一个已配置的模型。
+  静默回落会让一个忘记选模型的任务照常服务，调用方既看不到问题，也无从知道自己实际用的是
+  另一个模型——那是最难排查的一类问题，而占位任务本就允许存在，所以在请求时挑明才诚实。
+
+  边界要分清：**「填了但填错」仍然是错误**。`model` 引用了未配置的模型照旧报「引用了未配置
+  的模型」，否则一个错字会静默退化成一个空任务——用户在界面上看到任务存在，调用时才发现
+  它没有模型。同理，**有备选却没有首选**是非法组合（备选是首选用不了时的退路，没有首选就
+  无处可退）：`config.Validate` 不查这一条，因为它的错误顺序与文案是对外契约、不能插入新
+  分支，因此闸门放在 `configops.CreateTask`/`UpdateTask`（`422`）与 `RepairTasks`（清掉备选）
+  里。
+
+  这是一处**有意的契约放宽**，已在 `internal/config/model_test.go`
+  （`TestTaskModelIsOptional`、`TestTaskModelTypoStillFails`）、
+  `internal/configops/workspace_test.go`（`TestCreateTaskWithoutModel`、
+  `TestCreateTaskFallbackWithoutModelRejected`、`TestRepairTasksKeepsTaskWithoutModel`、
+  `TestRepairTasksDropsFallbackWithoutModel`）、`internal/api/workspace_test.go`
+  （`TestCreateTaskWithoutModelIsAllowed`）与 `internal/proxy/workspace_test.go`
+  （`TestTaskWithoutModelIsRejectedExplicitly`）里显式记录。
+
+- **手写改动了对拍语料 `tasks/create-missing-all` 一条**。生成脚本已随 Python 退役移除，
+  因此这条语料是**手工**改的：`model` 移出必填后，空请求体的 `422` 不再列出 `model`
+  （`content_length` 249 → 173，`body_text` 去掉最后一个 `missing` 项）。其余 46 条路由语料
+  一个字节都没动——`display_name` 只在任务真的取了名时才出现（见下），既有任务响应因此
+  逐字节不变。
+
 - **任务路由不再对 `reasoning_effort` 网开一面**：调用方显式传了任务已固定的
   `reasoning_effort` 现在会和其他采样参数一样收到 `400`，而不是被静默覆盖。
 
@@ -57,6 +86,34 @@
   即通过——搬迁不增删图表，只有把两张图并成一张时才需要动这条断言。
 
 ### 新增
+
+- **任务可以取中文显示名（`display_name`）**。任务路由页的任务卡片与编辑页现在用人取的
+  名字（如「长文摘要」）作标题，任务名（`TASK_000001`）退到旁边的徽标与详情里——这个页面上
+  人认的是业务名，而调用方仍然只能传任务名，因此它必须一直可见。显示名可选、纯展示、不参与
+  路由；两端空白在解析时会被去掉。
+
+  存放位置选的是**配置字段**而不是浏览器本地：显示名描述的是「这个任务是什么」，属于配置
+  本身，因此随导出/导入一起走，换台机器或分享给同事都不会丢。代价是它出现在 `TaskResponse`
+  里，而这几个响应体由对拍语料逐字节锁定。
+
+  兼容性用**条件包含**解决：`display_name` 只在任务真的取了名时才写进响应，没取名的任务响应
+  因此与新增该字段之前逐字节相同。这不是取巧——`tasks/list` 那条语料里的任务本就没有显示名，
+  它原封不动地通过了（`internal/api/testdata/management_api_corpus.json` 47 条路由里只有
+  `tasks/create-missing-all` 因 `model` 放宽而变动，见「重大变更」）。同样的取舍也写进了
+  `internal/config/doc.go` 的兼容性清单：被锁定的响应体不允许新增「当前空间」那种请求上下文
+  字段，而显示名属于任务本身。
+
+  管理 API 侧：`TaskCreate`/`TaskUpdate` 接受 `display_name`（传 `null` 清除），
+  `TaskUpdate` 的「至少需要提供一个要更新的字段」判定把它与 `model`、`fallback_model`、
+  `params` 同等看待——否则界面上只改中文名会被 `422` 顶回来。任务对象的键序刻意把
+  `display_name` 放在最后，既有任务的落盘字节因此一个都不变。
+
+  验证：`internal/api/workspace_test.go` 的 `TestUpdateTaskDisplayNameCountsAsUpdate` 与
+  `TestTaskResponseOmitsDisplayNameWhenUnset`（后者逐字节断言未取名任务的响应前缀）、
+  `internal/configops/workspace_test.go` 的 `TestUpdateTaskDisplayName`、
+  `internal/config/model_test.go` 的 `TestTaskDisplayNameIsParsed`；WebUI 侧由
+  `webui/probes/webui_auth_probe.mjs` 的任务场景覆盖（首选下拉新增的「尚未指定」选项使该
+  探针的 `primarySelectListsAllModels` 断言由 2 项改为 3 项，已同步）。
 
 - **工作空间的用量统计与请求流向图**。WebUI 新增「工作空间」页：各空间的用量读数、
   请求排行与空间明细表，以及一张表达请求流向的**桑基图**（工作空间 → 请求模型 → 实际

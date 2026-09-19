@@ -92,6 +92,7 @@
   },
   "tasks": {
     "TASK_000001": {
+      "display_name": "长文摘要",
       "model": "gpt-4o-mini",
       "fallback_model": null,
       "params": {
