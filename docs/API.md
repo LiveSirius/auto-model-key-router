@@ -882,7 +882,7 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 把一份工作空间整包并入当前配置。请求体为 `{"config_revision": "...", "bundle": {...}, "prefix": "..."}`（`prefix` 可选），成功返回 `200`：
 
 ```json
-{"imported": true, "added": ["teamA"], "replaced": [], "renamed": {}, "removed_tasks": [], "config_revision": "…"}
+{"imported": true, "added": ["teamA"], "replaced": [], "renamed": {}, "rekeyed": {}, "removed_tasks": [], "config_revision": "…"}
 ```
 
 冲突策略由 `prefix` 决定：
@@ -896,12 +896,20 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 | `added` | 新建的空间 |
 | `replaced` | 被覆盖的已存在空间（**旧面板 key 失效**，必须告知用户） |
 | `renamed` | 改过名的空间（`原名 -> 新名`） |
+| `rekeyed` | **换了 key** 的空间（`空间名 -> 新 key`），只在加前缀克隆时出现 |
 | `removed_tasks` | 因引用不到目标实例上的模型而被清掉的任务（`空间/任务名`） |
+
+关于 `rekeyed`：加前缀克隆时，原空间**仍然存在**并占着原 key，克隆体不可能也用它，因此
+必然换一把新 key。响应把它回报出来是必须的——嵌入方手里那把对应的是原空间，克隆出来的
+空间没有可用的面板。
 
 - `422`：包里没有 `spaces`、空间内容不是对象、含 `default`、或看起来是配置导出的整包
   （带 `providers` / `models`）——这种情况明确报错，而不是静默丢掉那两段。
-- 包里某个 `api_key` 与目标实例上的空间撞车时会**换一个新 key**：不换会撞配置层的重复
-  校验，而那条错误的措辞对正在导入的人毫无指向性。
+- `422`：包里某个 `api_key` 撞上了目标实例上**别处**的凭据（另一个空间或
+  `local_api_key`），或用了保留的 `amkr-visitor`。这里**报错**而不是悄悄换一个新 key：
+  换掉会藏起一件用户必须知道的事——那把 key 通常已经嵌在别人的页面里，换掉之后旧 key
+  会指向别人**别的**空间，而响应里没有任何字段能说明这件事。错误信息会指出与哪个空间撞了。
+  （唯一的例外就是 `rekeyed`：克隆造成的冲突是必然的，因此换 key 并明确回报。）
 - 导入前会备份当前配置（与配置导入一致）。
 - 这条通道只认**完整权限**：内容里有明文面板 key，比配置导出更敏感。
 
