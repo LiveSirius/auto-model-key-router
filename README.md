@@ -392,10 +392,11 @@ node webui/probes/webui_panel_probe.mjs  # 可嵌入面板（凭据来源与三�
 - [CLI 参考](docs/CLI.md)：命令行参数与示例。
 - [HTTP API 参考](docs/API.md)：代理、健康检查、统计和管理接口。
 - [工作空间设计说明](docs/WORKSPACE.md)：任务集合隔离的取舍、边界与兼容性契约。
+- [嵌入工作空间面板](docs/PANEL.md)：把只看得到自己空间的用量与任务面板嵌进你的后台。
 - [更新日志](CHANGELOG.md)：版本变更记录。
 - [配置示例](router-config.example.json)：可复制修改的完整 JSON 示例。
 
-> `docs/` 下的 `USAGE.md` / `CLI.md` / `API.md` / `WORKSPACE.md` 描述当前 Go 实现：安装方式为预编译二进制 + 一行脚本，界面为 WebUI，命令行参数以 `amkr --help` 与实际行为为准。
+> `docs/` 下的 `USAGE.md` / `CLI.md` / `API.md` / `WORKSPACE.md` / `PANEL.md` 描述当前 Go 实现：安装方式为预编译二进制 + 一行脚本，界面为 WebUI，命令行参数以 `amkr --help` 与实际行为为准。
 
 ## 安全提示
 

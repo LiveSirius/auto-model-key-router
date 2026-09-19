@@ -185,6 +185,10 @@
   `unattributed` 为 0、非 GET 405、`hours` 校验）、`webui_panel_probe.mjs`（5 个场景）、
   `webui_auth_probe.mjs`（显式建空间流程）。
 
+  接入方文档见新增的 [`docs/PANEL.md`](docs/PANEL.md)：取 key、iframe 嵌入、权限边界、
+  凭据为什么走 fragment、跨源限制（本项目**不发** CORS 头，因此 `api=` 覆盖只在同源可用）、
+  自定义 UI 要调哪些接口、key 的生命周期与排查表。
+
 - **工作空间的整包迁移（带面板 key），与配置迁移相互独立**。新增
   `POST /api/workspaces/export` 与 `POST /api/workspaces/import`，把一个或多个工作空间连
   任务带 `api_key` 一起搬走。与 `/api/config/export|import` **刻意分成两条通道**，因为语义

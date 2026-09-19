@@ -1074,7 +1074,7 @@ http://127.0.0.1:8000/ui/
 
 ### `GET /ui/workspace-panel.json`
 
-供**嵌入第三方后台的独立面板页**（`/ui/panel.html`，见 [`USAGE.md` 9.3](USAGE.md#93-把工作空间面板嵌进你自己的后台)）读取本空间的用量与流向。
+供**嵌入第三方后台的独立面板页**（`/ui/panel.html`，见 [`USAGE.md` 9.3](USAGE.md#93-把工作空间面板嵌进你自己的后台) 与接入方指南 [`PANEL.md`](PANEL.md)）读取本空间的用量与流向。
 
 **鉴权方式与其它端点不同**：它认的是**工作空间的面板 key**（配置里的
 `workspaces.<空间>.api_key`），本地管理 key 与访客 key 一律 `401`。生效时空间由 key
