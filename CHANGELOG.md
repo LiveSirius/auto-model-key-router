@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [5.2.0] - 2026-09-19
 
 ### 重大变更
 
@@ -328,6 +328,29 @@
   `--show-logs`、`--restart-service-after-update`），对应条目的动作由 `update-dropped`
   改回 `update`；`TestDroppedFlagsAreNotDefined` 同步收窄。这批语料是手工改的——生成器
   已随 Python 退役删除，与 `d459ea3` 那次同样的处理方式。
+
+### 工程
+
+- **发布流程开始产出容器镜像**。此前 `release.yml` 只交叉编译二进制，GHCR 上的
+  `ghcr.io/sparrived/auto-model-key-router` 是 Python 时代的遗留包（且为私有），于是
+  「用镜像部署」只能靠本机 `docker build` 再手工推送——没人做，部署机上就一直跑着旧版本。
+  新增独立的 `image` 作业（`needs: verify`，与二进制发布并行）：tag 触发时构建并推送
+  `:<版本号>` 与 `:latest`，手动触发只构建不推送（用于演练 Dockerfile）。
+
+  - `Dockerfile` 新增 `ARG VERSION`，经 `-ldflags "-X main.version=..."` 注入。容器里没有
+    仓库可查，`amkr --version` 只能靠这个值；不给参数则退回仓库默认值，与本地
+    `go build` 一致。
+  - 只构建 `linux/amd64`：加 arm64 会让**构建阶段**跑在 QEMU 模拟里（Go 能交叉编译，
+    但镜像内的 `go build` 要在模拟器里执行），每次发布多等数分钟。有 arm 部署需求再加。
+  - 尝试用 `GITHUB_TOKEN` 把包设为 public（`continue-on-error`）：包默认私有会让部署机
+    匿名 `docker pull` 被拒；该 API 属用户级、可能要 PAT，因此失败只留提示不拖垮发布。
+  - `verify` 与 `ci.yml` 都补上了 `webui_panel_probe.mjs`——它此前只写进了 README 的
+    本地检查清单，CI 里是缺的，等于面板的三条安全规则（凭据只从 fragment 取、不碰
+    localStorage、不发 `X-AMKR-Workspace`）没有门禁。
+
+  验证：两个工作流经 `yaml.safe_load` 解析（`release.yml` 的 jobs 为
+  `verify/image/release`）；`permissions` 增列 `packages: write`；`--version` 实测
+  `-X main.version=5.2.0` 得 `5.2.0`、不传 `-X` 得仓库默认值。
 
 ## [5.1.1] - 2026-09-18
 

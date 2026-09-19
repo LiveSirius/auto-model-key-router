@@ -16,9 +16,16 @@ RUN go mod download
 # 再复制源码。**webui/ 必须一起复制**：//go:embed webui 在编译期就要求该目录存在。
 COPY . .
 
+# VERSION 由镜像构建方注入（release.yml 传 tag，不带前缀 v）。不给就用仓库里的默认值，
+# 这样 `docker build .` 与本地 `go build` 得到同样的版本号，而**镜像内**的版本号才是
+# 发布版的真实版本——容器里没有仓库可以查，`amkr --version` 只能靠这个。
+ARG VERSION=
+
 # CGO_ENABLED=0：SQLite 用的是纯 Go 的 modernc.org/sqlite，不需要 cgo，
 # 关掉它才能得到静态链接的二进制、也才能在 slim 运行镜像里跑。
-RUN CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o /out/amkr ./cmd/amkr
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w ${VERSION:+-X main.version=${VERSION}}" \
+      -o /out/amkr ./cmd/amkr
 
 FROM debian:bookworm-slim
 

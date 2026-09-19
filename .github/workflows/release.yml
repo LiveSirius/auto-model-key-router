@@ -15,6 +15,8 @@ on:
 
 permissions:
   contents: write
+  # 镜像推到 GHCR 需要 packages: write。与 contents 分列，避免给整个工作流放权。
+  packages: write
 
 jobs:
   # ---- 门禁：tag 上的代码必须先是绿的 ----
@@ -62,6 +64,89 @@ jobs:
           node webui/probes/webui_pricing_probe.mjs
           node webui/probes/webui_providers_probe.mjs
           node webui/probes/webui_routing_probe.mjs
+          node webui/probes/webui_panel_probe.mjs
+
+  # ---- 容器镜像 ----
+  #
+  # 与二进制发布**并行**（都只依赖上面那个 verify 作业），因为两者互不依赖：二进制给
+  # 直接安装的用户，镜像给 compose / k8s 部署。分成独立作业还有个好处——镜像构建失败
+  # 不会连坐已经能下载的二进制 Release。
+  #
+  # 为什么需要它：此前 release.yml 只出二进制，GHCR 上的
+  # `ghcr.io/sparrived/auto-model-key-router` 是 Python 时代的遗留包（还是私有的），
+  # 于是"用镜像部署"只能靠本机 docker build 再手工传上去，没人做就一直是旧版本。
+  # 现在 tag 一打，镜像与二进制出自同一提交，`docker pull` 拿到的版本可追溯。
+  image:
+    name: 构建并推送容器镜像（GHCR）
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 解析版本号
+        id: version
+        # 与二进制作业同一套规则，但多一个 tag 输出：镜像 tag 不允许 `+`
+        # （`0.0.0-dev+abc1234` 是非法 tag），所以手动触发时用固定的 `dev`。
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            echo "tag=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+            echo "is_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev+${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+            echo "tag=dev" >> "$GITHUB_OUTPUT"
+            echo "is_release=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: 登录 GHCR
+        if: steps.version.outputs.is_release == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          # 用仓库自带的 GITHUB_TOKEN，不必在 secrets 里存 PAT。
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 构建（正式版同时推送）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # 只出 linux/amd64：部署目标是 x86_64，而加 arm64 会让**构建阶段**跑在
+          # QEMU 模拟里（Go 能交叉编译，但镜像里的 go build 得在模拟器里执行），
+          # 每次发布都多等几分钟。有 arm 部署需求时再加 platforms，不提前付这份钱。
+          platforms: linux/amd64
+          # 手动触发只构建不推送，用来演练 Dockerfile 是否还能 build（与二进制
+          # 作业「不建 Release」的思路一致）。
+          push: ${{ steps.version.outputs.is_release == 'true' }}
+          # VERSION 进 Dockerfile 的 ldflags：容器里没有仓库可查，`amkr --version`
+          # 只能靠构建时注入的这个值。
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+          tags: |
+            ghcr.io/sparrived/auto-model-key-router:${{ steps.version.outputs.tag }}
+            ghcr.io/sparrived/auto-model-key-router:latest
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+
+      # 包默认私有，匿名 `docker pull` 会被拒（实测 denied）。部署机要能直接拉就得
+      # 把包设为公开。
+      #
+      # 用 GITHUB_TOKEN 改不了**用户级**包的可见性（那是用户 API，要 PAT），所以
+      # 这一步是尽力而为：失败只留一行提示，不拖垮发布——镜像已经推上去了，手动去
+      # Package settings 点一下 public 即可。
+      - name: 尝试把包设为公开
+        if: steps.version.outputs.is_release == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PATCH "/user/packages/container/auto-model-key-router" \
+            -f visibility=public \
+            && echo "包已设为公开" \
+            || echo "::warning::未能自动设为公开，请手动改为 public，否则部署机无法匿名拉取"
 
   # ---- 构建与发布 ----
   release:

@@ -85,6 +85,12 @@ jobs:
         # 且切换模型/展开编辑器时右侧详情要跟着换。
         run: node webui/probes/webui_routing_probe.mjs
 
+      - name: 可嵌入面板探针
+        # 锁住面板的三条安全规则：凭据只从 URL fragment 取、绝不碰 localStorage
+        # （与管理面同源，共享存储会互相覆盖凭据）、绝不发 X-AMKR-Workspace
+        # （空间由 key 钉死）。面板会被嵌进第三方后台，这三条是它的全部安全边界。
+        run: node webui/probes/webui_panel_probe.mjs
+
   go:
     name: Go 静态检查与测试
     runs-on: ubuntu-latest
