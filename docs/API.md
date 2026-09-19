@@ -62,8 +62,9 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `GET/PUT/DELETE` | `/api/routes/{route_id}` | 仅本地 | 查询、更新或删除模型路由 |
 | `GET/POST` | `/api/tasks` | 仅本地 | 查询或创建任务路由（`TASK_XXXXXX` → 模型 + 固定参数）；可用 `X-AMKR-Workspace` 头指定工作空间 |
 | `GET/PUT/DELETE` | `/api/tasks/{task_name}` | 仅本地 | 查询、更新或删除任务路由；可用 `X-AMKR-Workspace` 头指定工作空间 |
-| `GET` | `/api/workspaces` | 仅本地 | 列出**有任务**的工作空间及各自任务数 |
-| `PUT/DELETE` | `/api/workspaces/{workspace}` | 仅本地 | 重命名或删除工作空间（组内任务一并搬走/删除）；默认空间 `default` 不可改删 |
+| `GET/POST` | `/api/workspaces` | 仅本地 | 列出工作空间及各自任务数；`POST` 显式创建（可指定面板 `api_key`，不传则生成，**仅本次响应返回**） |
+| `PUT/DELETE` | `/api/workspaces/{workspace}` | 仅本地 | 重命名或删除工作空间（组内任务与 `api_key` 一并搬走/删除）；默认空间 `default` 不可改删 |
+| `POST` | `/api/workspaces/export`、`/api/workspaces/import` | 仅本地 | 导出或导入工作空间**整包**（**带** `api_key`，不含 providers/models），与配置导入导出相互独立 |
 | `GET/PUT` | `/api/settings` | 仅本地 | 查询或更新监听、超时和重试设置 |
 | `POST` | `/api/settings/local-api-key` | 仅本地 | 重置本地鉴权 Key；新 Key 仅在本次响应返回 |
 | `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 GitHub Releases 版本检查 |
@@ -89,9 +90,9 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 管理面的 47 条与运维面的 7 条路由列在 `routePatterns()` / `opsRoutePatterns()` 里，响应
 由逐字节语料锁定——那是**已发布接口**的回归凭证，不能随意增减。新增能力因此分两类：
 
-- **管理面的正式资源**（工作空间自身的读/改/删）注册在 `/api` 之下，但列在**另一份**
-  清单（`workspacePatterns()`）里。它们没有历史版本可对照，塞进那 47 条会让「这 47 条
-  逐字节等于已发布行为」这句话失去意义。两批注册在同一棵 mux 上，因此错方法的
+- **管理面的正式资源**（工作空间自身的读/改/删与整包迁移）注册在 `/api` 之下，但列在
+  **另一份**清单（`workspacePatterns()`）里。它们没有历史版本可对照，塞进那 47 条会让
+  「这 47 条逐字节等于已发布行为」这句话失去意义。两批注册在同一棵 mux 上，因此错方法的
   `405` / `Allow` 判定要同时看两份清单。
 - **本项目自有的读数**（价格目录 `/ui/pricing.json`、自更新入口、工作空间用量
   `/ui/workspace-usage.json`）挂在 `/ui/` 前缀下：它们与被锁定的 `/api` 面在语义上不
@@ -790,35 +791,124 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 查询、更新或删除单个任务。`PUT` 请求体为 TaskUpdate + `config_revision`，成功返回 `200` 与更新后的 TaskResponse；`GET` 返回 TaskResponse；`DELETE` 请求体只需 `config_revision`，成功返回 `204`。该空间里任务不存在时返回 `404`（`{"detail": "任务不存在: <name>"}`）——**不会**回落到别的空间的同名任务。
 
-任务随 `/api/config/export`、`/api/config/import` 一同迁移（命名工作空间也在其中）；导入时引用不到模型的任务会被跳过（与「该模型从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有备选没了则退化为单模型任务。
+任务随 `/api/config/export`、`/api/config/import` 一同迁移（命名工作空间也在其中，但那条通道的导出会**剥掉** `api_key`）；导入时引用不到模型的任务会被跳过（与「该模型从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有备选没了则退化为单模型任务。
+
+工作空间**自己**的整包迁移是另一组端点（`/api/workspaces/export|import`），那条通道**带** `api_key` 且不含 providers/models，见下。
 
 #### `GET /api/workspaces`
 
-列出**有任务**的工作空间及各自任务数，供 WebUI 填充切换下拉：
+列出工作空间及各自任务数，供 WebUI 填充切换下拉：
 
 ```json
 {"workspaces": [{"name": "default", "task_count": 2}, {"name": "teamA", "task_count": 1}]}
 ```
 
-默认工作空间 `default` 固定排在首位。没有任何任务的工作空间不会出现——空间由「在它里面建任务」隐式产生，空分组既不可观测也没有意义（删空的工作空间也会从配置里消失）。
+默认工作空间 `default` 固定排在首位。没有任务的工作空间通常不会出现——空间由「在它里面
+建任务」隐式产生（删空的也会从配置里消失）；**例外**是带面板 `api_key` 的空间，即使没有
+任务也会列出，因为 key 本身是任务之外的可观测内容（见下）。
 
 这个目录是必要的：`GET /api/tasks` 是**按空间过滤**的，因此从它推不出「还有哪些空间存在」。
 
+**响应里没有 `api_key`**：目录会被列表页反复轮询，把凭据挂在上面等于每次刷新都重新分发
+一遍。key 明文只出现在 `POST /api/workspaces` 的 201 响应与配置文件里。
+
+#### `POST /api/workspaces`
+
+显式创建一个工作空间，供应用侧「先建空间拿到面板 key、之后才陆续填任务」。
+
+请求体为 WorkspaceCreate（`config_revision` 与 `name` 必填，`api_key` 可选），成功返回
+`201`：
+
+```json
+{"name": "teamA", "task_count": 0, "api_key": "amkr_ws_…", "config_revision": "…"}
+```
+
+- `api_key` 不传就由服务端生成：`amkr_ws_` + 43 位 base64url（共 50 字符）。传了就用
+  调用方给的（应用侧通常已有既定凭据）。
+- **这个 key 只在这条响应里返回**，之后任何接口都不再给出明文（配置导出也会剥掉它，
+  见下）。嵌入片段请在这一步保存。
+- `409`：名字已被占用（`{"detail": "工作空间已存在: <name>"}`），或名字是 `default`
+  （`{"detail": "工作空间名重复: default"}`）。
+- `422`：名字为空，或 key 撞上访客 key `amkr-visitor` / 本地 `local_api_key` / 别的
+  空间的 key。
+
 #### `PUT /api/workspaces/{workspace}`
 
-把工作空间改名为请求体里的 `name`，组内任务整体跟着搬到新键下。请求体为 `{"config_revision": "...", "name": "..."}`，成功返回 `200` 与 `{"name": "<新名>", "task_count": <任务数>, "config_revision": "..."}`。
+把工作空间改名为请求体里的 `name`，组内任务与 `api_key`（若有）整体跟着搬到新键下。请求体为 `{"config_revision": "...", "name": "..."}`，成功返回 `200` 与 `{"name": "<新名>", "task_count": <任务数>, "config_revision": "..."}`。
 
 - `400`：目标是默认工作空间（`default` 不可改名）。
-- `404`：源空间没有任务（空间由任务反推，空的不存在）。
+- `404`：源空间既没有任务也没有 `api_key`（空间由这两者之一反推，都没有就是不存在）。
 - `409`：目标名已被占用，或目标名就是 `default`。**不会合并**两个空间——合并会瞬间造出重名任务，而任务名在同一空间内唯一是配置层的硬校验。
 
 #### `DELETE /api/workspaces/{workspace}`
 
-删除工作空间**连同其中的全部任务**。请求体只需 `config_revision`（可省略），成功返回 `204`。`400` 删除默认空间，`404` 空间不存在。
+删除工作空间**连同其中的全部任务**（带 `api_key` 的空间也一并删掉，**该 key 立即失效**）。请求体只需 `config_revision`（可省略），成功返回 `204`。`400` 删除默认空间，`404` 空间不存在。
 
-#### 没有 `POST /api/workspaces`
+#### `POST /api/workspaces/export`
 
-空分组不进配置（见上），空间由「在里面建第一个任务」隐式产生——建任务就是建空间。多一条 `POST` 只会造出配置层随后要清掉的空壳。
+导出工作空间**整包**，供搬到另一个实例。请求体可省略（导出全部命名工作空间），或给出要导出的名字：
+
+```json
+{"workspaces": ["teamA"]}
+```
+
+成功返回 `200`：
+
+```json
+{
+  "bundle": {
+    "version": 1,
+    "workspaces": ["teamA"],
+    "spaces": {"teamA": {"api_key": "amkr_ws_…", "tasks": {"summarize": {"model": "gpt-4o-mini"}}}}
+  },
+  "config_revision": "…"
+}
+```
+
+与 `/api/config/export` 的三条关键差别：
+
+| | `/api/config/export` | `/api/workspaces/export` |
+| --- | --- | --- |
+| `api_key` | **剥掉** | **带上**（有意的凭据搬迁） |
+| `providers` / `models` | 核心内容 | **不含**（搬的是命名空间，不是模型库） |
+| 范围 | 整台实例 | 指定或全部命名工作空间 |
+
+默认工作空间**不在**包里：它没有名字也没有 key，搬过去等于覆盖对方的默认空间。因此
+`{"workspaces": ["default"]}` 返回 `400`，不存在的名字返回 `404`（不静默跳过——那会让
+人以为搬走了、实际漏了）。
+
+#### `POST /api/workspaces/import`
+
+把一份工作空间整包并入当前配置。请求体为 `{"config_revision": "...", "bundle": {...}, "prefix": "..."}`（`prefix` 可选），成功返回 `200`：
+
+```json
+{"imported": true, "added": ["teamA"], "replaced": [], "renamed": {}, "removed_tasks": [], "config_revision": "…"}
+```
+
+冲突策略由 `prefix` 决定：
+
+- **留空** = 同名空间被整包覆盖（含 `api_key`，旧 key 立即失效）。恢复备份的语义。
+- **非空**（如 `teamA-`）= 同名空间改名为 `前缀+原名`，一个都不覆盖，新名冲突时再退让为
+  `…-2`、`…-3`。
+
+| 字段 | 说明 |
+| --- | --- |
+| `added` | 新建的空间 |
+| `replaced` | 被覆盖的已存在空间（**旧面板 key 失效**，必须告知用户） |
+| `renamed` | 改过名的空间（`原名 -> 新名`） |
+| `removed_tasks` | 因引用不到目标实例上的模型而被清掉的任务（`空间/任务名`） |
+
+- `422`：包里没有 `spaces`、空间内容不是对象、含 `default`、或看起来是配置导出的整包
+  （带 `providers` / `models`）——这种情况明确报错，而不是静默丢掉那两段。
+- 包里某个 `api_key` 与目标实例上的空间撞车时会**换一个新 key**：不换会撞配置层的重复
+  校验，而那条错误的措辞对正在导入的人毫无指向性。
+- 导入前会备份当前配置（与配置导入一致）。
+- 这条通道只认**完整权限**：内容里有明文面板 key，比配置导出更敏感。
+
+> 任务随 `/api/config/export`、`/api/config/import` 一同迁移（命名工作空间也在其中，
+> 但那条通道的导出会**剥掉** `api_key`）；导入时引用不到模型的任务会被跳过（与「该模型
+> 从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有
+> 备选没了则退化为单模型任务。
 
 ### 供应商接口与能力探测
 
@@ -923,9 +1013,9 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 | `400` | 请求体中缺少 `model`、更新体为空或配置校验失败；请求任务名时显式传了该任务已固定的采样参数，或指定了 Key（`TASK_XXXXXX[key]`） |
 | `401` | 本地 API key 验证失败 |
 | `403` | visitor 无权访问模型或 Key（含任务名） |
-| `404` | 模型、Key、供应商或探测不存在；任务指向的模型没有启用的 Key；任务尚未指定模型 |
+| `404` | 模型、Key、供应商或探测不存在；任务指向的模型没有启用的 Key；任务尚未指定模型；工作空间不存在（迁移导出按名取空间时） |
 | `409` | 名称冲突、删除最后一个 Key、无法持久化嵌入式配置 |
-| `422` | 管理 API 请求字段类型错误、缺少必填字段或包含未知字段；供应商暂无 Key 时探测 |
+| `422` | 管理 API 请求字段类型错误、缺少必填字段或包含未知字段；供应商暂无 Key 时探测；工作空间迁移包畸形、含 `default` 或看起来是配置导出的整包 |
 | `500` | 配置保存失败 |
 | `502` | 上游连接或响应转换失败 |
 | `503` | 没有可用 Key |
@@ -970,9 +1060,50 @@ http://127.0.0.1:8000/ui/
 
 `/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
 
-### `GET /api/workspaces`、`PUT|DELETE /api/workspaces/{workspace}`
+### `GET /api/workspaces`、`POST /api/workspaces`、`PUT|DELETE /api/workspaces/{workspace}`、`POST /api/workspaces/export|import`
 
-工作空间自身的读/改/删。这些是管理面的正式资源，因此挂在 `/api` 之下（详见「任务路由接口」一节），而不是像价格目录那样挂 `/ui/`。
+工作空间自身的读/改/删与整包迁移。这些是管理面的正式资源，因此挂在 `/api` 之下（详见「任务路由接口」一节），而不是像价格目录那样挂 `/ui/`。全部只认完整权限。
+
+### `GET /ui/workspace-panel.json`
+
+供**嵌入第三方后台的独立面板页**（`/ui/panel.html`，见 [`USAGE.md` 9.3](USAGE.md#93-把工作空间面板嵌进你自己的后台)）读取本空间的用量与流向。
+
+**鉴权方式与其它端点不同**：它认的是**工作空间的面板 key**（配置里的
+`workspaces.<空间>.api_key`），本地管理 key 与访客 key 一律 `401`。生效时空间由 key
+**钉死**，请求头 `X-AMKR-Workspace` 被忽略。
+
+| 参数 | 类型 | 默认 | 约束 | 说明 |
+| --- | --- | --- | --- | --- |
+| `hours` | number | `24` | `> 0` 且 `<= 8760` | 统计窗口 |
+| `all_history` | boolean | `false` | — | 为真时忽略 `hours`，统计全部历史 |
+
+参数校验同样**先于**鉴权（`hours=0` 不带凭据返回 `422` 而不是 `401`）。
+
+响应与 `/ui/workspace-usage.json` 同源（同一个 `metrics.WorkspaceUsage`），另有两个差别：
+
+```json
+{
+  "count_semantics": "upstream_attempt",
+  "workspace": "teamA",
+  "window": {"from": "…", "to": "…", "hours": 24},
+  "workspaces": [{"name": "teamA", "stats": {"…": "…"}}],
+  "unattributed": {"requests": 0, "total_tokens": 0},
+  "models": ["gpt-4o-mini", "fast", "claude-sonnet-4"],
+  "layers": ["workspace", "requested_model_id", "model_id", "provider_id", "upstream_model_id"],
+  "links": [{"source_layer": 0, "target_layer": 1, "source": "teamA", "target": "TASK_000001", "requests": 12, "total_tokens": 3400}]
+}
+```
+
+- `workspace` 是这把 key 钉死的空间名，面板据此标注自己看的是谁。
+- `unattributed` **恒为零**：没有归属的请求不属于任何一个空间，给面板看既没有意义也
+  泄漏了别的空间的规模。
+- `models` 是**模型 ID 与可见别名**的字符串数组（按配置顺序），供面板的任务表单选择；
+  不含隐藏别名（`upstream_model`）——那是「能直接调用但不该被展示」的名字，面板不该
+  知道上游叫什么。
+
+> 面板页与后台 WebUI **同源**，因此它的凭据走 URL fragment（`#k=…`）而**绝不**碰
+> `localStorage`（那里存着后台的管理 key），也**绝不**发送 `X-AMKR-Workspace`。
+> 三条都由 `webui/probes/webui_panel_probe.mjs` 断言。
 
 ### `GET /ui/workspace-usage.json`
 

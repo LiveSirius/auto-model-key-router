@@ -1,7 +1,8 @@
 # 工作空间
 
 任务集合的隔离单位。本文说明**为什么这样设计**、边界在哪，以及改动时要守住哪些
-不变量。使用方式见 [`USAGE.md` 9.1](USAGE.md#91-工作空间把任务集合分开)，接口细节
+不变量。使用方式见 [`USAGE.md` 9.1](USAGE.md#91-工作空间把任务集合分开)（面板的嵌入
+方式见 [`USAGE.md` 9.3](USAGE.md#93-把工作空间面板嵌进你自己的后台)），接口细节
 见 [`API.md` 的「工作空间」](API.md#工作空间)。
 
 ## 1. 解决什么问题
@@ -56,11 +57,10 @@
 记录下来用于统计与图表，却不用来拒绝任何请求。两者的区别很关键——把统计误当成配额
 会得出「工作空间 A 用超了会影响 B」这种并不存在的结论。
 
-## 4. 空工作空间不存在
+## 4. 空工作空间：无 key 的消失，带 key 的留下
 
-工作空间由「在它里面建任务」**隐式产生**：
+工作空间通常由「在它里面建任务」**隐式产生**：
 
-- 没有独立的「创建工作空间」接口。
 - 删掉某个空间的最后一个任务，这个空间就消失了（`configops.writeWorkspaceTasks`
   删空即删分组）。
 - 配置里手写的空分组也会被清掉（`config.RepairTasks` 同样会清理）。
@@ -71,30 +71,50 @@
 （按名字取不到任何东西）也没有意义。允许它存在会立刻带来三处口径分叉——配置里能写、
 删空后留不留、界面上列不列——而每一处都要单独决定。由任务反推后只剩一个口径。
 
-**反过来说**，界面上的「新建工作空间」不能是一个独立按钮：新空间必须先被选中、再在
-里面建第一个任务才真正落地。这就是 WebUI 把它挂在下拉项里、并在空态明说「建了第一个
-任务才会写进配置」的原因。
+### 例外：带面板 key 的工作空间
 
-> 手写的配置是唯一能短暂出现空分组的地方（例如 `"teamB": {}`），它会被解析接受、
+一个工作空间可以带一把**面板 key**（`workspaces.<空间>.api_key`，见第 10 节）。这种
+空间即使**一个任务都没有**也会保留，并有独立的创建入口（`POST /api/workspaces`）。
+
+这不是放松上面那条规则，而是它多了一份**任务之外的可观测内容**：key 本身。带 key 的
+空间正是「应用先建空间拿到 key、之后才陆续填任务」这个时序的产物——如果它因为没有任务
+就被清掉，那个应用手里的 key 会在下一次配置写回时无声失效。
+
+口径仍然只有一条：
+
+```go
+// writeWorkspaceTasks：只在 api_key 为空时才删空分组
+if entryIsObject && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != "" {
+    // 保留这个空壳
+}
+```
+
+`WorkspaceNames()` 相应地把带 key 的空间一并列出（排在任务反推出的空间之后）。
+
+**反过来说**，界面上的「新建工作空间」走的是显式入口（`POST /api/workspaces`），因为
+它的产物（那把 key）必须能立刻交付给用户。不建 key 的空壳依然不存在——手写
+`"teamB": {}` 照旧会被清掉。
+
+> 手写的配置是唯一能短暂出现无 key 空分组的地方（例如 `"teamB": {}`），它会被解析接受、
 > 但不会出现在工作空间清单里，并在下一次写回时消失。
 
 ### 改与删
 
-「空分组不存在」这条决定了两个既有动作的形状（`internal/configops/tasks.go`）：
+两个既有动作的形状（`internal/configops/tasks.go`）：
 
-- **改名**（`RenameWorkspace`）就是**把整组任务搬到新键下**：旧键清空后由
+- **改名**（`RenameWorkspace`）就是**把整组内容搬到新键下**：旧键清空后由
   `writeWorkspaceTasks` 自动抹掉，因此不需要（也不能）单独「新建一个空间再搬」。
   先写新键再清旧键，顺序不能反——两条路径共用同一批任务对象，先清旧键会把要搬的
-  内容一起丢掉。
-- **删除**（`DeleteWorkspace`）就是**清空该组的任务**，分组随后自动消失。它因此
-  没有独立的删除逻辑，也不会留下空壳。
+  内容一起丢掉。`api_key` 随整组一起搬走（它是这个空间的一部分，不是任务的属性）。
+- **删除**（`DeleteWorkspace`）就是**清空该组的内容**，分组随后消失。它因此没有独立
+  的删除逻辑，也不会留下空壳。
 
-两条动作的拒绝路径都由「默认空间不可动」与「空间由任务反推」推出：
+两条动作的拒绝路径都由「默认空间不可动」与「空间由任务反推（或带 key 而存在）」推出：
 
 | 情形 | 结果 | 理由 |
 | --- | --- | --- |
-| 改名/删除默认空间 | `400` | 默认空间是不带 `X-AMKR-Workspace` 头的调用方命中的那个，动它会让所有缺省调用方落空 |
-| 改名/删除不存在的空间 | `404` | 空间由任务反推，没有任务就是不存在，没有可改可删的东西 |
+| 改名/删除默认空间 | `400` | 默认空间是不带 `X-AMKR-Workspace` 头的调用方命中的那个，动它会让所有缺省调用方落空；它也没有可以放 key 的槽位 |
+| 改名/删除不存在的空间 | `404` | 空间由任务反推（带 key 的空间也由此判定），两者都没有就是不存在，没有可改可删的东西 |
 | 改成另一个已存在的空间名 | `409` | **不合并**：两个空间各有一批任务时，合并会瞬间造出重名任务，而任务名在同一空间内唯一是配置层的硬校验 |
 | 改成默认空间名 | `409` | 同「与既有空间重名」，默认空间只是那个必然存在的特例 |
 
@@ -124,12 +144,12 @@
    **没有、也不允许**新增 `workspace` 字段——当前空间由请求头决定，不体现在响应里。
 3. **新增的 `/api` 路由与冻结清单分开维护。** 管理面 47 条与运维面 7 条路由的响应被
    逐字节语料锁定（`routePatterns()` / `opsRoutePatterns()`），那些语料是本项目**已
-   发布接口**的回归凭证。工作空间自身的操作（`GET /api/workspaces`、
-   `PUT|DELETE /api/workspaces/{workspace}`）是管理面的正式资源，因此注册在
-   `/api` 之下，但列在**另一份**清单（`workspacePatterns()`）里：它们没有历史版本
-   可对照，塞进那 47 条会让「这 47 条逐字节等于已发布行为」这句话失去意义。两批都
-   注册在同一棵 mux 上，因此错方法的 `405` / `Allow` 判定必须同时看两份清单
-   （`internal/api/server.go` 的 `patterns`）。
+   发布接口**的回归凭证。工作空间自身的操作（`GET|POST /api/workspaces`、
+   `PUT|DELETE /api/workspaces/{workspace}`、`POST /api/workspaces/export|import`）
+   是管理面的正式资源，因此注册在 `/api` 之下，但列在**另一份**清单
+   （`workspacePatterns()`）里：它们没有历史版本可对照，塞进那 47 条会让「这 47 条
+   逐字节等于已发布行为」这句话失去意义。两批都注册在同一棵 mux 上，因此错方法的
+   `405` / `Allow` 判定必须同时看两份清单（`internal/api/server.go` 的 `patterns`）。
 
    反过来说，**其余新增能力**（价格目录 `/ui/pricing.json`、自更新入口、工作空间用量
    `/ui/workspace-usage.json`）仍然挂 `/ui/`：那些是本项目自有的读数，与被锁定的
@@ -153,10 +173,13 @@
   "config_version": 4,
   "tasks": {"summarize": {"model": "gpt-4o-mini"}},
   "workspaces": {
-    "teamA": {"tasks": {"summarize": {"model": "claude-sonnet-4"}}}
+    "teamA": {"tasks": {"summarize": {"model": "claude-sonnet-4"}}},
+    "panel": {"api_key": "amkr_ws_…"}
   }
 }
 ```
+
+`api_key` 可选；带上它，这个空间就有了嵌入方面板凭据，且即使没有任务也保留（第 4 节）。
 
 解析后是**扁平**的一份 `[]TaskConfig`，每项带自己的 `Workspace`（顶层 `tasks` 的
 任务归属 `default`）。扁平化让运行时查表退化成一次线性扫描或一次二元组查表，不必在
@@ -167,19 +190,25 @@
 | 关注点 | 位置 |
 | --- | --- |
 | 常量与归一化（`DefaultWorkspace` / `WorkspaceHeader` / `NormalizeWorkspace`） | `internal/config/model.go` |
-| 解析 `workspaces`、按 `(空间, 任务名)` 校验唯一性 | `internal/config/model.go` 的 `parseTasks` / `Validate` |
-| 任务 CRUD（`*TaskIn` 系列）、`RepairTasks`、导入导出 | `internal/configops/tasks.go`、`transfer.go` |
+| 解析 `workspaces`、按 `(空间, 任务名)` 校验唯一性、面板 key 的三条底线 | `internal/config/model.go` 的 `parseTasks` / `Validate` |
+| key 的生成（`GenerateWorkspaceKey`）与反查（`WorkspaceForAPIKey`） | `internal/config/persist.go`、`internal/config/model.go` |
+| 任务 CRUD（`*TaskIn` 系列）、`RepairTasks`、`CreateWorkspace`、导入导出 | `internal/configops/tasks.go`、`transfer.go` |
+| 工作空间**整包**迁移（带 key，与配置迁移隔离） | `internal/configops/workspace_bundle.go` |
 | 运行时查表（`taskPlans` / `taskParams` 的键是 `[2]string`） | `internal/keypool/pool.go` |
 | 读头、选空间（`RequestContext.Workspace`） | `internal/proxy/handler.go` |
 | 阻止该头外泄 | `internal/proxysupport/support.go` |
 | 管理端点感知空间（`X-AMKR-Workspace` 头） | `internal/api/handlers_meta.go` |
 | 空间自身的读/改/删（`/api/workspaces*`、`workspacePatterns()`） | `internal/api/handlers_workspaces.go`、`internal/api/router.go` |
+| 空间迁移端点（`/api/workspaces/export|import`） | `internal/api/handlers_workspace_migration.go` |
+| 面板 key 的解析（钉死空间、忽略请求头） | `internal/api/server.go` 的 `authorizedTaskConfig` |
 | 归属落库（`RecordParams.Workspace`、`request_workspace` 旁挂表） | `internal/metrics/store.go`、`internal/metrics/schema.go` |
 | 归属贯穿（`MetricRecord.Workspace` ← `RequestContext.Workspace`） | `internal/proxy/retry.go`、`internal/server/metricsadapter.go` |
 | 空间用量与流向查询（`WorkspaceUsage`） | `internal/metrics/workspace.go` |
 | 读数端点（`/ui/workspace-usage.json`） | `internal/server/workspace_usage.go` |
+| 嵌入方面板读数（`/ui/workspace-panel.json`） | `internal/server/workspace_panel.go` |
 | 流向图基元与页面 | `webui/charts.js`、`webui/chart-math.js`、`webui/pages/workspaces.js` |
 | 界面切换与改名/删除 | `webui/pages/tasks.js`、`webui/api.js` |
+| 可嵌入的独立面板页 | `webui/panel.html`、`webui/panel.js`、`webui/panel-api.js` |
 
 `WorkspaceNames()` 由任务反推，默认空间固定排首位——界面上的下拉顺序因此与配置文件
 里的书写顺序无关，且默认空间永远可直接选中。
@@ -266,7 +295,127 @@ scale），不能让每层各自缩放到满高。后者会让同一节点的入
   oracle，因此不混进被逐字节语料锁定的 `/metrics` 系列（理由与 `/ui/` 的选择一致，
   见第 6 节）。
 
-## 9. 改动时的检查清单
+## 9. 面板 key 与可嵌入面板
+
+一个工作空间可以带一把 **面板 key**：应用侧创建空间时提供（`POST /api/workspaces` 的
+`api_key`），在 WebUI 里创建则由服务端生成（`amkr_ws_` + 43 位 base64url，共 50 字符）
+并**只在那一次响应里**返回。
+
+它的用途是让应用把一个**只看得到自己那个空间**的控制面板嵌进自己的后台：面板能读自己
+空间的用量与流向，并对自己的任务做增删改，别的什么都不能做。
+
+### 权限范围
+
+| 能做 | 不能做 |
+| --- | --- |
+| 读写**本空间**的任务（`/api/tasks*`） | 别的空间的任务（请求头被忽略，见下） |
+| 读本空间的用量与流向（`/ui/workspace-panel.json`） | 供应商、模型、设置等全局配置（一律 `401`） |
+| 创建/改名/删除工作空间 | `/v1/*` 代理面（面板 key 不是推理凭据） |
+| | 配置导出/导入、工作空间整包迁移（要完整权限） |
+
+面板 key **不是**第三档权限，而是「被钉死在某个空间上的任务面权限」。实现上它刻意不
+进 `internal/auth`：那个包是被逐字节语料锁定的纯函数，加一条分支会把它作为兼容性凭证
+的价值弄糊。解析发生在调用点——`internal/api/server.go` 的 `authorizedTaskConfig` 先
+照常调 `auth.Authenticate`，**失败之后**才拿请求头里的 key 去查
+`config.WorkspaceForAPIKey`。因此面板 key 永远走不到 `IsFull()` 那条路。
+
+### 钉死：请求头被忽略
+
+面板 key 生效时，调用方传来的 `X-AMKR-Workspace` **被忽略**，空间由 key 决定。
+
+这是这个模式要防的核心事情：如果请求头能换空间，一把泄漏的面板 key 就等于所有空间的任务
+面权限，而这把 key 会出现在被嵌入页面的 URL 里——正是最可能泄漏的位置。同理，面板 key
+不能钉在 `default` 上：配置里没有 `workspaces.default` 这个槽位，也不该为它开一个。
+
+### 凭据怎么进浏览器
+
+面板是 `webui/panel.html`（独立精简页），凭据走 **URL fragment**：
+
+```
+https://<amkr>/ui/panel.html#k=amkr_ws_…&api=https://<amkr>
+```
+
+三条硬规则，都由 `webui/probes/webui_panel_probe.mjs` 断言：
+
+1. **绝不读写 `localStorage`**。面板与后台 WebUI **同源**，而 WebUI 把本地管理 key 存在
+   `amkr.apiKey` 里；面板一旦碰存储，一个嵌进第三方后台的页面就能读到完整管理凭据。
+2. **绝不发送 `X-AMKR-Workspace`**。见上——那把 key 已经决定了空间。
+3. **只从 fragment 取凭据**。fragment 不会进 `Referer`，也不进服务端访问日志；换成
+   query string 就会两头都留下明文 key。`?api=` 允许指定 AMKR 基地址（面板与 AMKR
+   不同源时用），它只影响请求发往哪里。
+
+### 只显示一次的 key
+
+面板 key 明文只出现在两处：`POST /api/workspaces` 的 201 响应，以及配置文件里的
+`workspaces.<空间>.api_key`。工作空间目录（`GET /api/workspaces`）**刻意不返回它**——
+那个接口会被列表页轮询，把凭据挂在上面等于每次刷新都重新分发一遍。
+
+因此 WebUI 在建完空间后会立刻弹出「复制 key」与「复制嵌入片段」，并明说这个 key 只显示
+这一次。同样的理由让配置导出剥掉 key（见第 10 节）。
+
+### 面板与完整权限页的分工
+
+面板页面调的是 `/ui/workspace-panel.json`（Go 侧新增，在 `workspacePatterns()` 之外
+另挂 `/ui/`），只认面板 key；后台 WebUI 的「工作空间」页调的是
+`/ui/workspace-usage.json`，只认完整权限。两者读数形状同源（同一个
+`metrics.WorkspaceUsage`），但**面板永远看不到 `unattributed`**——那是全实例的缺口读数，
+不属于任何一个空间，给面板看既没有意义也泄漏了别的空间的规模。
+
+面板不返回 `models` 之外的全局信息：它给出模型 ID 与**可见**别名供任务表单选择，隐藏
+别名（`upstream_model`）不在其中，因为面板不该知道上游叫什么。
+
+> 关于 iframe：本项目**没有**设置 `X-Frame-Options` 或 CSP `frame-ancestors`，因此
+> 面板默认可被任意来源 iframe 嵌入。这是**有意的**——嵌入是它的全部用途，加白名单就得
+> 让用户先把第三方后台的域名配进来，而那与「面板凭据是拉取式」的模型重复。安全性由
+> key 的范围（钉死单空间、不能用代理面）承担，不由来源承担。
+
+## 10. 整包迁移：一条独立通道
+
+工作空间有自己的导出/导入（`POST /api/workspaces/export|import`，
+`internal/configops/workspace_bundle.go`），与 `/api/config/export|import` **刻意分开**。
+
+两条通道的语义恰好相反，这是分开的理由：
+
+| | `/api/config/export|import` | `/api/workspaces/export|import` |
+| --- | --- | --- |
+| `api_key` | **剥掉**（导出文件会被贴进工单与聊天记录） | **带上**（这是有意的凭据搬迁） |
+| `providers` / `models` | 核心内容 | **不带**（搬的是命名空间，不是模型库） |
+| 内容 | 整台实例 | 指定或全部命名工作空间 |
+| 合并规则 | 按 `base_url` / key secret 去重、按模型 ID 合并 | 同空间整包覆盖，或加前缀改名 |
+
+因为不带模型库，包里的任务引用的模型在目标实例上可能不存在。这类任务由 `RepairTasks`
+的既有规则清掉并**如实回报**（响应里的 `removed_tasks`），而不是带进来一批请求时必然
+`404` 的僵尸任务——这也是「不搬模型」这个选择必须付的代价，付得明白比藏起来好。
+
+冲突策略由 `prefix` 决定：
+
+- **留空** = 同空间整包覆盖。恢复备份的语义：用户要的就是把那个空间变回包里的样子。
+- **非空**（如 `teamA-`）= 同名空间改名为 `前缀+原名`，一个都不覆盖。搬别人的空间到
+  自己实例上时用。
+
+响应把 `added` 与 `replaced` **分开报**：覆盖会换掉目标实例上那个空间的面板 key，旧 key
+立刻失效。调用方必须能把这件事告诉用户，否则嵌入方的面板会毫无征兆地开始 `401`。导入前
+先备份配置（与配置导入一致）。
+
+包格式：
+
+```json
+{
+  "version": 1,
+  "workspaces": ["teamA"],
+  "spaces": {"teamA": {"api_key": "amkr_ws_…", "tasks": {"summarize": {"model": "gpt-4o-mini"}}}}
+}
+```
+
+`spaces` 而不是套一层 `config`：`providers` / `models` 是**合法的空间名**，套包装层会让
+「空间叫 providers」与「包里混进了配置导出的段」变成同一种输入，只能二选一地误判。分开
+之后两者一眼可辨（有专门用例钉住）。包格式自带 `version`，**不**经过
+`config.MigrateConfigData`——工作空间是 v4 才有的概念，没有更旧的形状要迁移，而让迁移
+函数遍历一张以空间名为键的表，等于把 `unified_model` 这种空间名当成配置段去改写。
+
+导出与导入都只认**完整权限**：内容里有明文面板 key，比配置导出更敏感。
+
+## 11. 改动时的检查清单
 
 - [ ] 新代码是否让「不带 `X-AMKR-Workspace` 头」的行为发生了变化？语料会立刻发现。
 - [ ] 是否给被语料锁定的响应体新增了字段？（`tasks/list` 等）
@@ -276,9 +425,14 @@ scale），不能让每层各自缩放到满高。后者会让同一节点的入
       躲开语料冻结。
 - [ ] 冲突检查是否被意外地收窄到空间内？模型名冲突必须保持**全局**。
 - [ ] 空分组的两处口径是否仍然一致？（`configops.writeWorkspaceTasks` 与
-      `RouterConfig.WorkspaceNames`）
+      `RouterConfig.WorkspaceNames`；带 `api_key` 的空间在**两处**都必须留下）
+- [ ] 面板 key 是否仍然只从**请求头**解析，且生效时忽略 `X-AMKR-Workspace`？
+- [ ] 新的响应体是否泄漏了面板 key 或隐藏别名？（目录接口不得返回 key）
+- [ ] `webui/panel.js` 是否又碰了 `localStorage` 或发了 `X-AMKR-Workspace`？
+      `webui_panel_probe.mjs` 会拦——它把存储访问做成了毒药记录器。
 - [ ] 是否往指标库里加了**第二个**新对象？`extraMasterEntries` 白名单会拦住——兼容
       分歧必须逐条列出来，不能无声增长。
 - [ ] 归属是否仍只在写入时确定？（查询期反推不成立，见第 8 节）
-- [ ] `go test ./...`、`node webui/probes/webui_auth_probe.mjs` 与
+- [ ] `go test ./...`、`node webui/probes/webui_auth_probe.mjs`、
+      `node webui/probes/webui_panel_probe.mjs` 与
       `node webui/probes/webui_chart_probe.mjs` 是否全绿？

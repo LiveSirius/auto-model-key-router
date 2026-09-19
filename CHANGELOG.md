@@ -145,6 +145,74 @@
   `webui_chart_probe.mjs` 新增 11 条桑基断言（层数、厚度与请求数成正比、流带不溢出节点、
   同节点出边不重叠、退化输入不产生 NaN），全套 162 条通过。
 
+- **工作空间可以带面板 key，并提供一个可被其它应用嵌入的控制面板**。应用侧可以在创建
+  工作空间时提供自己的 `api_key`（`POST /api/workspaces`）；在 WebUI 里创建则由服务端
+  生成（`amkr_ws_` + 43 位 base64url）。这把 key 让应用把一个**只看得到自己那个空间**的
+  面板（`/ui/panel.html`）嵌进自己的后台，读自己空间的用量与流向、并管自己的任务。
+
+  权限刻意**不是**第三档角色，而是「被钉死在某个空间上的任务面权限」。实现上它不进
+  `internal/auth`（那个包是被逐字节语料锁定的纯函数，加分支会把它作为兼容性凭证的价值弄
+  糊）：`authorizedTaskConfig` 先照常调 `auth.Authenticate`，**失败之后**才用请求头里的
+  key 查 `config.WorkspaceForAPIKey`，因此面板 key 永远走不到 `IsFull()`。
+
+  生效时 `X-AMKR-Workspace` **被忽略**——空间由 key 决定。这是该模式要防的核心事情：面板
+  key 会出现在被嵌入页面的 URL 里，正是最可能泄漏的位置，若请求头能换空间，一把泄漏的 key
+  就等于所有空间的任务面权限。同理它不能钉在 `default` 上（配置里没有那个槽位）。
+
+  配套三条安全规则，由 `webui/probes/webui_panel_probe.mjs` 断言（它把 `localStorage`
+  做成了**毒药记录器**）：面板与后台 WebUI **同源**，因此它**绝不读写 `localStorage`**
+  （那里存着后台的管理 key）、**绝不发送 `X-AMKR-Workspace`**、**只从 URL fragment 取凭据**
+  （fragment 不进 `Referer` 也不进访问日志；换成 query string 会两头都留下明文 key）。
+
+  新增 `GET /ui/workspace-panel.json`（只认面板 key，完整权限与访客一律 401），响应在
+  `/ui/workspace-usage.json` 基础上多一个 `workspace` 字段（key 钉死的空间名）与 `models`
+  数组（模型 ID + **可见**别名，供任务表单选模型；隐藏别名刻意不含），且 `unattributed`
+  **恒为零**——没有归属的请求不属于任何空间，给面板看既无意义也泄漏别的空间的规模。
+
+  面板 key 明文**只出现在** `POST /api/workspaces` 的 201 响应与配置文件里：目录接口
+  （`GET /api/workspaces`）刻意不返回它（那个接口会被列表页轮询），配置导出也照旧**剥掉**
+  它。WebUI 因此在校验空间建好后立刻弹出「复制 key / 复制嵌入片段」并说明只显示这一次。
+
+  顺带放宽一条既有不变量：**带 `api_key` 的工作空间即使没有任务也保留**（无 key 的空分组
+  照旧被清掉）。带 key 的空间正是「应用先建空间拿 key、之后才陆续填任务」这个时序的产物，
+  若因没有任务被清掉，应用手里的 key 会在下一次配置写回时无声失效。两个口径
+  （`writeWorkspaceTasks` 与 `WorkspaceNames`）同步改成「看 key」。
+
+  验证：`internal/api/workspaces_api_test.go`（建空间返回 key / 接受调用方 key / 拒绝非法
+  输入且配置不变 / **面板 key 钉死空间**——伪造 `X-AMKR-Workspace` 后任务仍落在 key 对应的
+  空间、被挡住的全局面逐一 401、建空间与代理面不可用 / 删空间后 key 失效）、
+  `internal/server/workspace_panel_test.go`（按 key 收窄、别的凭据被拒、空空间仍响应且
+  `unattributed` 为 0、非 GET 405、`hours` 校验）、`webui_panel_probe.mjs`（5 个场景）、
+  `webui_auth_probe.mjs`（显式建空间流程）。
+
+- **工作空间的整包迁移（带面板 key），与配置迁移相互独立**。新增
+  `POST /api/workspaces/export` 与 `POST /api/workspaces/import`，把一个或多个工作空间连
+  任务带 `api_key` 一起搬走。与 `/api/config/export|import` **刻意分成两条通道**，因为语义
+  恰好相反：
+
+  | | `/api/config/*` | `/api/workspaces/*` |
+  | --- | --- | --- |
+  | `api_key` | 剥掉（导出文件会被贴进工单与聊天记录） | **带上**（有意的凭据搬迁） |
+  | `providers` / `models` | 核心内容 | **不含**（搬的是命名空间，不是模型库） |
+  | 合并规则 | 按 `base_url` / key secret 去重、按模型 ID 合并 | 同空间整包覆盖，或加前缀改名 |
+
+  因为不带模型库，包里的任务引用不到目标实例上的模型时由 `RepairTasks` 的既有规则清掉并
+  **如实回报**（`removed_tasks`），而不是带进来一批请求时必然 404 的僵尸任务。
+
+  冲突策略由 `prefix` 决定：留空 = 同名空间整包覆盖（恢复备份；旧 key 立即失效），非空 =
+  改名为 `前缀+原名`（搬别人的空间、不丢自己已有的）。响应把 `added` 与 `replaced` **分开
+  报**，因为覆盖会让某个面板 key 失效，调用方必须能告知用户，否则嵌入方的面板会毫无征兆地
+  开始 401。导入前先备份配置，且只认完整权限（内容里有明文 key）。
+
+  包格式用独立的 `spaces` 键而不是套一层 `config`：`providers` / `models` 是**合法的空间
+  名**，套包装层会让「空间叫 providers」与「包里混进了配置导出的段」变成同一种输入，只能
+  二选一地误判（有专门用例钉住）。包里某个 key 与目标实例撞车时会换一个新 key：不换会撞
+  配置层的重复校验，而那条错误的措辞对正在导入的人毫无指向性。
+
+  验证：`internal/api/workspace_migration_api_test.go`（导出带 key 且不含 providers/models、
+  按名导出、不存在的空间 404、默认空间 400、同名覆盖与加前缀改名、引用失效任务被清并回报、
+  误导入配置包被拒、以 providers/models 命名的工作空间可用、重复 key 被换、只认完整权限）。
+
 - **任务路由可以固定 `max_tokens`**（输出上限）。白名单、管理 API 的 JSON schema 与 WebUI
   的任务编辑器同步支持；和 `top_k`、`seed` 一样按**整数**校验，落盘渲染成 `32` 而不是
   `32.0`。

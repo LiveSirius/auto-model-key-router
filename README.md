@@ -172,6 +172,17 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 
 该头不会转发给上游，也不会影响既有调用方（不带头就是原来的行为）。详见 [工作空间](docs/USAGE.md#91-工作空间把任务集合分开)。
 
+工作空间还可以带一把**面板 key**，用来把一个只看得到自己那个空间的控制面板嵌进别的应用：
+
+```html
+<iframe src="http://127.0.0.1:8000/ui/panel.html#k=amkr_ws_你的面板key"
+        width="100%" height="720" style="border:0"></iframe>
+```
+
+这把 key 在创建空间时交付（WebUI 里创建会弹出「复制嵌入片段」，应用侧可以在
+`POST /api/workspaces` 里自带）。它只能读写该空间的任务与读数，别的接口一律 `401`，且
+**不能**用于 `/v1/*` 代理面。详见 [嵌入工作空间面板](docs/USAGE.md#93-把工作空间面板嵌进你自己的后台)。
+
 除代理路径外，服务还提供 `GET /health`（无需鉴权）、`GET /v1/models`、`GET /metrics`、`GET /metrics/requests`、`GET /metrics/series`、`GET /ws/events`（事件流，WebSocket），以及 `/api/*` 管理接口（供应商、Key、模型、路由、统一模型、任务、探测、配置导入导出、设置）。完整清单见 [`docs/API.md`](docs/API.md)。
 
 ## WebUI
@@ -330,7 +341,9 @@ amkr --version
 }
 ```
 
-> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model?, display_name?, fallback_model?, params?}`；`model` 可以省略（任务先作为占位存在，调用时明确报「尚未指定模型」而不是回落到别的模型），`display_name` 是给人在 WebUI 上辨认任务用的中文名、不影响调用；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`max_tokens`、`reasoning_effort`，写错键名会在保存时报错。`workspaces` 同样可选，每个键是一个工作空间名，值里的 `tasks` 形状与顶层 `tasks` 完全相同；顶层 `tasks` 就是默认工作空间（不带 `X-AMKR-Workspace` 头时命中的那个），任务名只在同一工作空间内需要唯一。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 WebUI 的供应商页刷新探测（单个 Key 或批量、可限端点范围），或调用管理 API 的 probe 接口。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
+> `local_api_key` 是客户端访问本地 AMKR 的 Key；`providers.*.keys.*.api_key` 是真实供应商 Key；模型通过 `models.*.targets[]` 按 `{provider, key, upstream_model}` 粒度绑定供应商 Key，`upstream_model` 是发给上游的真实模型名（默认同本地模型 ID）。`tasks` 是可选的任务路由表，键即客户端传的 `model` 名（如 `TASK_000001`），值为 `{model?, display_name?, fallback_model?, params?}`；`model` 可以省略（任务先作为占位存在，调用时明确报「尚未指定模型」而不是回落到别的模型），`display_name` 是给人在 WebUI 上辨认任务用的中文名、不影响调用；`params` 支持的键为 `temperature`、`top_p`、`top_k`、`frequency_penalty`、`presence_penalty`、`seed`、`stop`、`max_tokens`、`reasoning_effort`，写错键名会在保存时报错。`workspaces` 同样可选，每个键是一个工作空间名，值为 `{api_key?, tasks?}`，`tasks` 的形状与顶层 `tasks` 完全相同；顶层 `tasks` 就是默认工作空间（不带 `X-AMKR-Workspace` 头时命中的那个），任务名只在同一工作空间内需要唯一。`api_key` 是该工作空间的**面板 key**：应用侧把它嵌进自己的后台就能只看管这一个空间（读写本空间任务 + 读本空间用量），带 key 的空间即使没有任务也会保留。探测缓存按 Key 存放在 `providers.*.keys.<key>.capabilities`（`models` 为该 Key 探测到的可服务模型清单，`route_status` 为各协议路由的可用性，`errors` / `checked_at` 记录探测错误与时间）；同一供应商的不同 Key 可见模型可能不同，因此每个 Key 独立探测、缓存互不复用。添加 Key 时自动探测该新 Key（探测失败仍会保存 Key，可稍后手动刷新），之后可在 WebUI 的供应商页刷新探测（单个 Key 或批量、可限端点范围），或调用管理 API 的 probe 接口。探测缓存是机器本地信息，配置导出/粘贴（transferable_config）不会携带。旧版 v1/v2/v3 配置会在加载时自动迁移为 v4 并写回，无需手工修改；v3 池级探测元数据与旧 v4 供应商级缓存会折进各 Key 的 capabilities。
+
+工作空间有一套**独立的**导出/导入（`POST /api/workspaces/export|import`）：把一个或多个工作空间连任务带面板 key 一起搬到另一个实例。它与配置导出/导入刻意分成两条通道——那条**剥掉** `api_key`、也不含 providers/models 的相反语义，见 [工作空间设计说明](docs/WORKSPACE.md#10-整包迁移一条独立通道)。
 
 流式请求使用分段超时：`stream_first_byte_timeout`（默认 60 秒）覆盖等待上游响应头和第一块响应体的总时间，`stream_idle_timeout`（默认 60 秒）限制首块之后相邻响应块的等待时间，两者都必须大于 0。响应头返回前超时会按现有重试策略切换 Key；下游流建立后超时只结束当前流，不会自动重放请求。普通请求超时与这两个流式超时都可以在 WebUI 的**设置**页统一调整。
 
@@ -360,12 +373,18 @@ go test ./...           # 全部包
 前端资产的检查（可选，只在改动 `webui/` 时需要）：
 
 ```bash
-node scripts/webui_module_check.mjs      # 16 个 ES 模块的加载检查
+node scripts/webui_module_check.mjs      # 24 个 ES 模块的加载检查
 node webui/probes/webui_chart_probe.mjs  # 图表口径
+node webui/probes/webui_chart_sizing_probe.mjs  # 桑基图布局与尺寸
 node webui/probes/webui_tip_probe.mjs
 node webui/probes/webui_routing_probe.mjs  # 模型路由页左侧导航
+node webui/probes/webui_providers_probe.mjs
+node webui/probes/webui_pricing_probe.mjs
 node webui/probes/webui_auth_probe.mjs   # 鉴权与任务路由页；不带参数=跑全部场景
+node webui/probes/webui_panel_probe.mjs  # 可嵌入面板（凭据来源与三条安全规则）
 ```
+
+探针都不带参数时跑全部场景（也可以给一个场景名只跑那一个），退出码非 0 表示有断言失败。
 
 ## 文档
 
