@@ -32,6 +32,12 @@ func (s *Server) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces", s.handleCreateWorkspace)
 	mux.HandleFunc("PUT /api/workspaces/{workspace}", s.handleRenameWorkspace)
 	mux.HandleFunc("DELETE /api/workspaces/{workspace}", s.handleDeleteWorkspace)
+	// 整包迁移（带面板 key，与 /api/config/export 刻意分开，见
+	// handlers_workspace_migration.go）。注册在 /api/workspaces/{workspace} 之后：
+	// 路径段的模式不会匹配到 export/import 这两条更具体的字面量模式，ServeMux 按
+	// 特异性排序，两条都能正常工作。
+	mux.HandleFunc("POST /api/workspaces/export", s.handleExportWorkspaces)
+	mux.HandleFunc("POST /api/workspaces/import", s.handleImportWorkspaces)
 
 	// —— 设置 ——
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
@@ -145,6 +151,9 @@ func routePatterns() []string {
 // 创建入口（空分组本不进配置，见 configops.writeWorkspaceTasks）。POST 建出的空间
 // 带 api_key，任务删光了也留得住；不带 key 的空壳依然不存在。
 //
+// 两条迁移路由也在这一批：它们**带**面板 key（与 /api/config/export 相反），是「把
+// 空间整体搬到另一个实例」的独立通道，见 configops/workspace_bundle.go。
+//
 // 命名空间的面板 key 能调用的路由**不在这里**：它们是 assets 那一批 /ui/ 端点
 // （见 internal/server 的 panel 处理器），刻意不在这份 /api 清单里。
 func workspacePatterns() []string {
@@ -153,5 +162,7 @@ func workspacePatterns() []string {
 		"POST /api/workspaces",
 		"PUT /api/workspaces/{workspace}",
 		"DELETE /api/workspaces/{workspace}",
+		"POST /api/workspaces/export",
+		"POST /api/workspaces/import",
 	}
 }

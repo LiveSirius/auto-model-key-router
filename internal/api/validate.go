@@ -250,6 +250,27 @@ var specWorkspaceCreate = newModelSpec("WorkspaceCreate",
 	nul("api_key", kindStr).minLenOf(1),
 )
 
+// specWorkspaceExport 是工作空间导出请求体（Go 侧新增，无 Python 先例）。
+//
+// 整个 body 可省略（导出全部）；给了就按 workspaces 列出的名字导出。
+var specWorkspaceExport = newModelSpec("WorkspaceExport",
+	nul("config_revision", kindStr).minLenOf(1),
+	def("workspaces", kindStrList),
+)
+
+// specWorkspaceImport 是工作空间导入请求体（Go 侧新增，无 Python 先例）。
+//
+// bundle 用 kindAnyDict：它是配置形状的一段，先原样收下再交给 configops 解析并报
+// 出精确的中文错误——在这一层用嵌套模型校验会把「包是旧版本」这种正常情况判成
+// extra_forbidden。
+//
+// prefix 可选：同名空间改名前缀，留空表示覆盖同名空间。
+var specWorkspaceImport = newModelSpec("WorkspaceImport",
+	req("config_revision", kindStr).minLenOf(1),
+	req("bundle", kindAnyDict),
+	nul("prefix", kindStr).minLenOf(1),
+)
+
 // specProviderCreate 对应 ProviderCreate。
 var specProviderCreate = newModelSpec("ProviderCreate",
 	req("config_revision", kindStr).minLenOf(1),
