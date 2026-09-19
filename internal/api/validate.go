@@ -219,6 +219,15 @@ var specTaskUpdate = newModelSpec("TaskUpdate",
 	nul("params", kindNested).withNested(specTaskParams),
 )
 
+// specWorkspaceRename 是工作空间改名请求体（Go 侧新增，无 Python 先例）。
+//
+// config_revision 必填，与 TaskUpdate 一致：改名会把整组任务搬到新键下，是明确的
+// 读-改-写，必须能防住「基于过期配置提交」。
+var specWorkspaceRename = newModelSpec("WorkspaceRename",
+	req("config_revision", kindStr).minLenOf(1),
+	req("name", kindStr).minLenOf(1),
+)
+
 // specProviderCreate 对应 ProviderCreate。
 var specProviderCreate = newModelSpec("ProviderCreate",
 	req("config_revision", kindStr).minLenOf(1),

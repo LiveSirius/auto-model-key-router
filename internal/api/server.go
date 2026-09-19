@@ -173,15 +173,18 @@ type UpdateCheckResult struct {
 	Error           string
 }
 
-// Handler 返回注册了全部 47 条路由的 http.Handler；OpsEnabled 为真时额外注册 7 条
+// Handler 返回注册了全部管理路由的 http.Handler；OpsEnabled 为真时额外注册 7 条
 // 运维路由（ops_api.py 的 register_ops_api），因此 URL 空间与 Python 完全一致。
+//
+// 管理路由分两批（见 router.go）：参照实现的 47 条（响应字节被语料锁定）与 Go 侧
+// 新增的工作空间 3 条。两批都算「已知路径」，否则错方法会从 405 退化成 404。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.register(mux)
 	// patterns 是兜底 405 判定的依据，因此必须与实际注册的模式集合一致：
 	// OpsEnabled 为 false 时运维面的 URL **一条都不算已知路径**，`PUT /api/logs`
 	// 在参照实现里同样是 404（不是 405）。
-	patterns := routePatterns()
+	patterns := append(routePatterns(), workspacePatterns()...)
 	if s.OpsEnabled {
 		// 与 Python 相同：运维面注册在同一个应用上，复用同一套鉴权与错误形状。
 		// OpsEnabled 为 false 时一条都不注册——参照实现里 /api/logs 等会落进

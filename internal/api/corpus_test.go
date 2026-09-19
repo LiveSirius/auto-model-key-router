@@ -543,7 +543,11 @@ func derefString(value *string) any {
 	return *value
 }
 
-// TestCorpusCoversEveryRoute 断言 47 条路由每条都被至少一条语料用例覆盖。
+// TestCorpusCoversEveryRoute 断言参照实现那 47 条路由每条都被至少一条语料用例覆盖。
+//
+// 只覆盖 routePatterns：Go 侧新增的工作空间路由**没有**可比对的 oracle，因此不进
+// 这份清单（见 router.go 的 workspacePatterns 说明）。它们的形状由
+// workspaces_api_test.go 自己钉。
 func TestCorpusCoversEveryRoute(t *testing.T) {
 	corpus := loadCorpus(t)
 	covered := map[string]bool{}
@@ -564,6 +568,28 @@ func TestCorpusCoversEveryRoute(t *testing.T) {
 	for pattern := range covered {
 		if !containsPattern(patterns, pattern) {
 			t.Errorf("语料声明了不存在的路由: %s", pattern)
+		}
+	}
+}
+
+// TestWorkspacePatternsAreNotCorpusCovers 固化「新增能力不写 /api 语料」这条约定。
+//
+// 47 条冻结清单与 Go 侧新增路由必须互不重叠：一旦有人把工作空间路由塞进
+// routePatterns（或给它们补一条语料），就等于替参照实现背书一条它从未有过的行为。
+func TestWorkspacePatternsAreNotCorpusCovers(t *testing.T) {
+	corpus := loadCorpus(t)
+	covered := map[string]bool{}
+	for _, entry := range corpus.cases {
+		for _, pattern := range entry.Covers {
+			covered[pattern] = true
+		}
+	}
+	for _, pattern := range workspacePatterns() {
+		if containsPattern(routePatterns(), pattern) {
+			t.Errorf("工作空间路由不应出现在冻结的 47 条清单里: %s", pattern)
+		}
+		if covered[pattern] {
+			t.Errorf("工作空间路由没有 Python 先例，不应被语料覆盖: %s", pattern)
 		}
 	}
 }
@@ -590,8 +616,10 @@ func TestEveryRoutePatternIsRegistered(t *testing.T) {
 	replacer := strings.NewReplacer(
 		"{task_name}", "x", "{provider_id}", "x", "{key_name}", "x",
 		"{route_id}", "x", "{model_id}", "x", "{probe_id}", "x",
+		"{workspace}", "x",
 	)
-	for _, pattern := range routePatterns() {
+	// 两批都要逐条实例化：新增能力的路由同样不能在装配后被静默吞掉。
+	for _, pattern := range append(routePatterns(), workspacePatterns()...) {
 		parts := strings.SplitN(pattern, " ", 2)
 		entry := corpusCase{
 			Method:   parts[0],
