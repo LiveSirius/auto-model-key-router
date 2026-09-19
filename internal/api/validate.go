@@ -237,6 +237,19 @@ var specWorkspaceRename = newModelSpec("WorkspaceRename",
 	req("name", kindStr).minLenOf(1),
 )
 
+// specWorkspaceCreate 是新建工作空间请求体（Go 侧新增，无 Python 先例）。
+//
+// api_key 可选：不传由服务端生成（WebUI 的用户没有理由自己想一个），传了就用调用方
+// 给的（应用侧通常已有既定凭据）。
+//
+// config_revision 必填，与 WorkspaceRename 一致：新建会往配置里写一个键，是明确的
+// 读-改-写，必须能防住「基于过期配置提交」。
+var specWorkspaceCreate = newModelSpec("WorkspaceCreate",
+	req("config_revision", kindStr).minLenOf(1),
+	req("name", kindStr).minLenOf(1),
+	nul("api_key", kindStr).minLenOf(1),
+)
+
 // specProviderCreate 对应 ProviderCreate。
 var specProviderCreate = newModelSpec("ProviderCreate",
 	req("config_revision", kindStr).minLenOf(1),

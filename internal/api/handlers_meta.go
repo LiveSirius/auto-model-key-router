@@ -278,7 +278,7 @@ func (s *Server) handleDeleteUnifiedModel(w http.ResponseWriter, r *http.Request
 
 func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 	s.run(w, http.StatusOK, func() (*canonical.Value, error) {
-		cfg, err := s.authorizedConfig(r)
+		cfg, workspace, err := s.authorizedTaskConfig(r)
 		if err != nil {
 			return nil, err
 		}
@@ -286,7 +286,6 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		workspace := taskWorkspace(r)
 		tasks := canonical.NewArray()
 		// 只列本空间的任务。响应体**没有 workspace 字段**：那条 tasks/list 语料逐字节
 		// 锁定了 {tasks:[{name,model,fallback_model,params}], config_revision}，加字段
@@ -323,9 +322,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		}
 		fallbackModel := optString(payload, "fallback_model")
 		params := taskParamsPayload(payload)
-		workspace := taskWorkspace(r)
 
-		cfg, err := s.updateConfig(r, func(data *canonical.Value) error {
+		// 面板 key 的空间由 key 决定，完整权限的由请求头决定——两者都由
+		// updateWorkspaceTaskConfig 解析好交给 mutation，这里不再自己读请求头。
+		cfg, workspace, err := s.updateWorkspaceTaskConfig(r, func(data *canonical.Value, workspace string) error {
 			_, err := configops.CreateTaskIn(data, workspace, name, configops.CreateTaskOptions{
 				Model:         model,
 				DisplayName:   displayName,
@@ -368,7 +368,7 @@ func taskParamsPayload(payload *canonical.Value) *canonical.Value {
 
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	s.run(w, http.StatusOK, func() (*canonical.Value, error) {
-		cfg, err := s.authorizedConfig(r)
+		cfg, workspace, err := s.authorizedTaskConfig(r)
 		if err != nil {
 			return nil, err
 		}
@@ -376,7 +376,7 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		task, err := findConfigTask(cfg, taskWorkspace(r), r.PathValue("task_name"))
+		task, err := findConfigTask(cfg, workspace, r.PathValue("task_name"))
 		if err != nil {
 			return nil, err
 		}
@@ -405,9 +405,8 @@ func (s *Server) handleUpdateTask(w http.ResponseWriter, r *http.Request) {
 		updateFallback := hasKey(payload, "fallback_model")
 		params := taskParamsPayload(payload)
 		updateParams := hasKey(payload, "params")
-		workspace := taskWorkspace(r)
 
-		cfg, err := s.updateConfig(r, func(data *canonical.Value) error {
+		cfg, workspace, err := s.updateWorkspaceTaskConfig(r, func(data *canonical.Value, workspace string) error {
 			_, err := configops.UpdateTaskIn(data, workspace, taskName, configops.UpdateTaskOptions{
 				Model:          model,
 				DisplayName:    displayName,
@@ -446,8 +445,8 @@ func (s *Server) handleDeleteTask(w http.ResponseWriter, r *http.Request) {
 			revision = optString(payload, "config_revision")
 		}
 		taskName := r.PathValue("task_name")
-		_, err = s.updateConfig(r, func(data *canonical.Value) error {
-			return configops.DeleteTaskIn(data, taskWorkspace(r), taskName)
+		_, _, err = s.updateWorkspaceTaskConfig(r, func(data *canonical.Value, workspace string) error {
+			return configops.DeleteTaskIn(data, workspace, taskName)
 		}, revision)
 		return nil, err
 	})

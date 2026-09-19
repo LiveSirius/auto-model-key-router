@@ -14,10 +14,12 @@ import (
 // 这里管的是**空间自身**（空间名是路径参数，因为它是被操作的那个资源），而
 // /api/tasks* 管的是**任务**（用 X-AMKR-Workspace 头选空间）。
 //
-// 三个端点：GET 列目录、PUT 改名、DELETE 删除。**没有 POST**：空分组不进配置
-// （见 configops.writeWorkspaceTasks），空间由「在里面建第一个任务」隐式产生，
-// 因此「新建空工作空间」这个动作在本项目里不存在——建任务就是建空间，多一条 POST
-// 只会造出配置层随后要清掉的空壳。
+// 四个端点：GET 列目录、POST 新建（带面板 key）、PUT 改名、DELETE 删除。
+//
+// POST 是工作空间**自己**的创建入口：空分组本不进配置（见
+// configops.writeWorkspaceTasks），但应用侧需要「先建空间拿 key、之后才填任务」，
+// 因此建出来的空间带一个 api_key，任务删光了也留得住。没有 key 的空壳仍然不存在
+// ——建任务依然是建空间的正常途径，POST 只多给了一条能拿到凭据的路。
 
 // workspaceCatalog 把配置渲染成工作空间目录。
 //
@@ -38,6 +40,9 @@ func workspaceCatalog(cfg *config.RouterConfig) *canonical.Value {
 }
 
 // workspaceEntry 渲染目录里的一项。
+//
+// 刻意**不含**面板 key：目录是给管理面列表用的，把每个空间的凭据随列表一起发出去，
+// 等于让任何一次 GET 都成了取 key 的入口。key 只在新建那一次的响应里明文出现。
 func workspaceEntry(name string, taskCount int) *canonical.Value {
 	return objectOf(
 		canonical.ObjectPair{Key: "name", Value: canonical.NewString(name)},
@@ -80,6 +85,45 @@ func (s *Server) handleListWorkspaces(w http.ResponseWriter, r *http.Request) {
 		}
 		return withRevision(data, objectOf(
 			canonical.ObjectPair{Key: "workspaces", Value: workspaceCatalog(cfg)},
+		))
+	})
+}
+
+// —— POST /api/workspaces ——
+
+// handleCreateWorkspace 显式建出一个命名工作空间并返回它的面板 key。
+//
+// key 在响应里**明文出现一次**，之后目录与任何 GET 都不再回它——配置里存的是明文，
+// 但界面没有「查看已有 key」的入口（要看只能翻配置文件或重新生成）。这样偶然的
+// 列表请求不会把凭据洒得到处都是。
+func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
+	s.run(w, http.StatusCreated, func() (*canonical.Value, error) {
+		payload, _, err := decodePayload(r, specWorkspaceCreate, false)
+		if err != nil {
+			return nil, err
+		}
+		name := *optString(payload, "name")
+		apiKey := ""
+		if given := optString(payload, "api_key"); given != nil {
+			apiKey = *given
+		}
+
+		var created, key string
+		if _, err := s.updateConfig(r, func(data *canonical.Value) error {
+			var err error
+			created, key, err = configops.CreateWorkspace(data, name, apiKey)
+			return err
+		}, optString(payload, "config_revision")); err != nil {
+			return nil, err
+		}
+		data, err := s.managementConfigData()
+		if err != nil {
+			return nil, err
+		}
+		return withRevision(data, objectOf(
+			canonical.ObjectPair{Key: "name", Value: canonical.NewString(created)},
+			canonical.ObjectPair{Key: "task_count", Value: canonical.NewIntValue(0)},
+			canonical.ObjectPair{Key: "api_key", Value: canonical.NewString(key)},
 		))
 	})
 }

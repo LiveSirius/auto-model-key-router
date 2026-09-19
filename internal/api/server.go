@@ -392,6 +392,36 @@ func (s *Server) currentConfig() (*config.RouterConfig, error) {
 	return config.Load(s.ConfigPath)
 }
 
+// authorizedTaskConfig 解析本请求对**任务面**的权限，返回配置与「真正生效的工作空间」。
+//
+// 任务面比其余管理面宽一档：除完整权限外，还接受被钉死在某个工作空间的面板 key。
+// 钉死的含义是**忽略请求头**——空间由 key 决定，绝不能让调用方用 X-AMKR-Workspace
+// 换一个空间，那正是这个模式要防的事。
+//
+// 面板 key 的识别刻意放在这里而不是塞进 auth 包：auth 是逐字节对拍（已退役的
+// Python 参照实现）的纯函数，而工作空间是本项目新增能力，参照实现里没有对应概念。
+// 往 auth 里加分支会让那份对拍证据的含义变模糊；在这里做则只需一次配置查表，且
+// 「工作空间 key 给不了完整权限」是结构性成立的——这条路径**从不构造** ModeFull。
+//
+// 访客 key 依然拒绝：访客是模型级权限（只能用 allow_visitor 的 key），与「管理某个
+// 空间的任务」无关。
+func (s *Server) authorizedTaskConfig(r *http.Request) (*config.RouterConfig, string, error) {
+	s.reload()
+	cfg, err := s.currentConfig()
+	if err != nil {
+		return nil, "", err
+	}
+	if ctx := auth.Authenticate(s.Authorizer, r, cfg.LocalAPIKey); ctx != nil && ctx.IsFull() {
+		return cfg, taskWorkspace(r), nil
+	}
+	// 完整权限没通过，再看是不是某个空间的面板 key。顺序不能反：面板 key 必须先排除
+	// 在完整权限之外（它永远不满足上面的 IsFull），否则一个空间的面板就能改全局配置。
+	if workspace := cfg.WorkspaceForAPIKey(auth.RequestAPIKey(r.Header)); workspace != "" {
+		return cfg, workspace, nil
+	}
+	return nil, "", &httpError{status: http.StatusUnauthorized, detail: "本地 API key 验证失败"}
+}
+
 // authorizedConfig 对应 management_api.py:1117 的 _authorized_config。
 //
 // 全部 47 条路由都要求 full 权限（没有访客可用的管理路由），所以判定就是
@@ -456,6 +486,30 @@ func withRevision(data *canonical.Value, body *canonical.Value) (*canonical.Valu
 	return out, nil
 }
 
+// updateWorkspaceTaskConfig 与 updateConfig 同形，只是鉴权放宽到「完整权限或某个
+// 工作空间的面板 key」，并把真正生效的工作空间一并返回。
+//
+// 返回 workspace 是必要的，不只是顺手：面板 key 的空间由 key 决定、**忽略请求头**，
+// 因此调用方在写完之后要按「实际写到哪个空间」去回读任务；用请求头里那个值会读错
+// 空间（面板 key 配上伪造的 X-AMKR-Workspace 时尤其明显）。
+//
+// 与 updateConfig 的差别**只有鉴权那一步**：revision 比对、迁移副本、原子落盘、
+// 错误映射全部复用同一段实现——两处各写一份是这类代码最容易漂移的地方，而漂移的
+// 后果是「面板改任务丢了防并发保护」这种很难发现的问题。
+func (s *Server) updateWorkspaceTaskConfig(
+	r *http.Request,
+	mutation func(data *canonical.Value, workspace string) error,
+	revision *string,
+) (*config.RouterConfig, string, error) {
+	workspace := ""
+	cfg, err := s.updateConfigCore(r, revision, func() (string, error) {
+		_, resolved, err := s.authorizedTaskConfig(r)
+		workspace = resolved
+		return resolved, err
+	}, mutation)
+	return cfg, workspace, err
+}
+
 // updateConfig 对应 management_api.py:1133 的 _update_config。
 //
 // 顺序是关键，全部照抄参照实现：
@@ -469,10 +523,32 @@ func withRevision(data *canonical.Value, body *canonical.Value) (*canonical.Valu
 //
 // revision 为 nil 表示请求没带版本号（老客户端），跳过比对。
 func (s *Server) updateConfig(r *http.Request, mutation func(data *canonical.Value) error, revision *string) (*config.RouterConfig, error) {
+	return s.updateConfigCore(r, revision, func() (string, error) {
+		if _, err := s.authorizedConfig(r); err != nil {
+			return "", err
+		}
+		return "", nil
+	}, func(data *canonical.Value, _ string) error {
+		return mutation(data)
+	})
+}
+
+// updateConfigCore 是 updateConfig 与 updateWorkspaceTaskConfig 的共同实现。
+//
+// authorize 返回「本次请求真正生效的工作空间」（完整权限时为调用方请求头指定的那个，
+// 面板 key 时为 key 钉死的那个）；它必须**在写锁与任何磁盘改动之前**跑完，否则未通过
+// 鉴权的请求就已经触碰了配置。
+func (s *Server) updateConfigCore(
+	r *http.Request,
+	revision *string,
+	authorize func() (string, error),
+	mutation func(data *canonical.Value, workspace string) error,
+) (*config.RouterConfig, error) {
 	s.writeMu.Lock()
 	defer s.writeMu.Unlock()
 
-	if _, err := s.authorizedConfig(r); err != nil {
+	workspace, err := authorize()
+	if err != nil {
 		return nil, err
 	}
 	if s.ConfigPath == "" {
@@ -499,7 +575,7 @@ func (s *Server) updateConfig(r *http.Request, mutation func(data *canonical.Val
 		if err != nil {
 			return err
 		}
-		if err := mutation(editable); err != nil {
+		if err := mutation(editable, workspace); err != nil {
 			return err
 		}
 		replaceObject(data, editable)

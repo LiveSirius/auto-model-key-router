@@ -29,6 +29,7 @@ func (s *Server) register(mux *http.ServeMux) {
 
 	// —— 工作空间（Go 侧新增，见 handlers_workspaces.go 与 workspacePatterns）——
 	mux.HandleFunc("GET /api/workspaces", s.handleListWorkspaces)
+	mux.HandleFunc("POST /api/workspaces", s.handleCreateWorkspace)
 	mux.HandleFunc("PUT /api/workspaces/{workspace}", s.handleRenameWorkspace)
 	mux.HandleFunc("DELETE /api/workspaces/{workspace}", s.handleDeleteWorkspace)
 
@@ -140,11 +141,16 @@ func routePatterns() []string {
 // 管理面的正式资源，与 /api/tasks 同级；挂在 /ui/ 下会让「管理面必须开 WebUI 才能
 // 用」——那是当初为了绕开语料冻结而付的代价，现在没有理由继续付。
 //
-// 没有 POST：空分组不进配置（见 configops.writeWorkspaceTasks），空间由「在里面建
-// 第一个任务」隐式产生。
+// 有 POST：应用侧需要「先建空间拿 key、之后才填任务」，因此工作空间有了自己的显式
+// 创建入口（空分组本不进配置，见 configops.writeWorkspaceTasks）。POST 建出的空间
+// 带 api_key，任务删光了也留得住；不带 key 的空壳依然不存在。
+//
+// 命名空间的面板 key 能调用的路由**不在这里**：它们是 assets 那一批 /ui/ 端点
+// （见 internal/server 的 panel 处理器），刻意不在这份 /api 清单里。
 func workspacePatterns() []string {
 	return []string{
 		"GET /api/workspaces",
+		"POST /api/workspaces",
 		"PUT /api/workspaces/{workspace}",
 		"DELETE /api/workspaces/{workspace}",
 	}

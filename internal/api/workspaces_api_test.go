@@ -257,17 +257,257 @@ func TestWorkspacesRequireAuthAndRejectMethods(t *testing.T) {
 		}
 	}
 
-	// 错方法：405 + Allow，且 405 判定在鉴权之前。
-	recorder := callTasks(t, server, http.MethodPost, "/api/workspaces", "", `{}`)
+	// 错方法：405 + Allow，且 405 判定在鉴权之前。GET 与 POST 都已注册，因此这里
+	// 拿一个两条都没注册的方法来探（PATCH 落在集合上）。
+	recorder := callTasks(t, server, http.MethodPatch, "/api/workspaces", "", "")
 	if recorder.Code != http.StatusMethodNotAllowed {
-		t.Errorf("POST /api/workspaces 应 405，实际 %d（body=%s）", recorder.Code, recorder.Body.String())
+		t.Errorf("PATCH /api/workspaces 应 405，实际 %d（body=%s）", recorder.Code, recorder.Body.String())
 	}
+	// Allow 只报**第一个**路径匹配的模式（allowedMethod 的既有语义，与参照实现一致：
+	// PUT /api/models 在多方法路径上也只回 "GET"）。GET 注册在 POST 之前，因此这里
+	// 是 "GET"，而不是 "GET, POST"。
 	if got := recorder.Header().Get("Allow"); got != http.MethodGet {
 		t.Errorf("Allow = %q，期望 GET", got)
 	}
 	recorder = opsRequest(t, server, http.MethodPatch, "/api/workspaces/teamA", nil, "none")
 	if recorder.Code != http.StatusMethodNotAllowed {
 		t.Errorf("PATCH /api/workspaces/teamA 应 405（鉴权前判定），实际 %d", recorder.Code)
+	}
+}
+
+// panelCall 用某个空间的面板 key 发一条任务面请求，可带伪造的工作空间头。
+func panelCall(t *testing.T, server *Server, method, path, apiKey, workspace, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	var reader *strings.Reader
+	if body == "" {
+		reader = strings.NewReader("")
+	} else {
+		reader = strings.NewReader(body)
+	}
+	request := httptest.NewRequest(method, path, reader)
+	request.Header.Set("Authorization", "Bearer "+apiKey)
+	if body != "" {
+		request.Header.Set("Content-Type", "application/json")
+	}
+	if workspace != "" {
+		request.Header.Set(config.WorkspaceHeader, workspace)
+	}
+	recorder := httptest.NewRecorder()
+	server.Handler().ServeHTTP(recorder, request)
+	return recorder
+}
+
+// TestCreateWorkspaceReturnsKey 固化显式建空间：拿到 key，且空间立刻可见。
+func TestCreateWorkspaceReturnsKey(t *testing.T) {
+	server, path := workspaceServer(t)
+	revision := currentRevision(t, path)
+
+	recorder := callTasks(t, server, http.MethodPost, "/api/workspaces", "",
+		`{"config_revision":"`+revision+`","name":"panel"}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("建空间状态码 = %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	var created struct {
+		Name      string `json:"name"`
+		TaskCount int    `json:"task_count"`
+		APIKey    string `json:"api_key"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &created); err != nil {
+		t.Fatalf("解析建空间响应失败: %v（body=%s）", err, recorder.Body.String())
+	}
+	if created.Name != "panel" || created.TaskCount != 0 {
+		t.Errorf("响应应为 panel/0，实际 %+v", created)
+	}
+	// key 必须是服务端生成的 amkr_ws_ 前缀（WebUI 没传 api_key）。
+	if !strings.HasPrefix(created.APIKey, "amkr_ws_") || len(created.APIKey) != len("amkr_ws_")+43 {
+		t.Errorf("生成的 key 形状不符: %q", created.APIKey)
+	}
+
+	// 空空间必须留住：任务数为 0 但仍在目录里（这是对「空分组不进配置」的有意放宽）。
+	payload, raw := listWorkspaces(t, server)
+	found := false
+	for _, item := range payload.Workspaces {
+		if item.Name == "panel" {
+			found = true
+			if item.TaskCount != 0 {
+				t.Errorf("panel 的任务数 = %d，期望 0", item.TaskCount)
+			}
+		}
+	}
+	if !found {
+		t.Errorf("新建的空空间应出现在目录里: %s", raw)
+	}
+	// 目录里绝不能回 key（否则任何一次 GET 都成了取凭据的入口）。
+	if strings.Contains(raw, created.APIKey) {
+		t.Errorf("目录响应不应包含 api_key: %s", raw)
+	}
+
+	// 配置里落的是 api_key，且任务确实一个都没有。
+	dumped := canonical.Dumps(readConfigData(t, path))
+	if !strings.Contains(dumped, `"api_key":"`+created.APIKey+`"`) {
+		t.Errorf("key 应写进配置: %s", dumped)
+	}
+}
+
+// TestCreateWorkspaceAcceptsCallerKey 固化应用侧自带 key：原样采用，不改写。
+func TestCreateWorkspaceAcceptsCallerKey(t *testing.T) {
+	server, path := workspaceServer(t)
+	revision := currentRevision(t, path)
+
+	recorder := callTasks(t, server, http.MethodPost, "/api/workspaces", "",
+		`{"config_revision":"`+revision+`","name":"app","api_key":"app-supplied-key"}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("建空间状态码 = %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"api_key":"app-supplied-key"`) {
+		t.Errorf("应采用调用方给的 key: %s", recorder.Body.String())
+	}
+
+	// 该 key 立刻能用：读自己的空间。
+	response := panelCall(t, server, http.MethodGet, "/api/tasks", "app-supplied-key", "", "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("面板 key 读任务状态码 = %d（body=%s）", response.Code, response.Body.String())
+	}
+}
+
+// TestCreateWorkspaceRejectsBadInput 固化建空间的拒绝路径。
+func TestCreateWorkspaceRejectsBadInput(t *testing.T) {
+	server, path := workspaceServer(t)
+
+	cases := []struct {
+		name     string
+		body     string
+		wantCode int
+		wantText string
+	}{
+		{"与默认空间重名", `"name":"default"`, http.StatusConflict, "工作空间名重复: default"},
+		{"已存在", `"name":"teamA"`, http.StatusConflict, "工作空间已存在: teamA"},
+		{"占用访客 key", `"name":"x","api_key":"amkr-visitor"`, http.StatusUnprocessableEntity, "不能使用保留的访客 key"},
+		{"与本地 key 相同", `"name":"x","api_key":"local-key"`, http.StatusUnprocessableEntity, "不能与 local_api_key 相同"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			revision := currentRevision(t, path)
+			recorder := callTasks(t, server, http.MethodPost, "/api/workspaces", "",
+				`{"config_revision":"`+revision+`",`+testCase.body+`}`)
+			if recorder.Code != testCase.wantCode {
+				t.Fatalf("状态码 = %d，期望 %d（body=%s）", recorder.Code, testCase.wantCode, recorder.Body.String())
+			}
+			if !strings.Contains(recorder.Body.String(), testCase.wantText) {
+				t.Errorf("错误文本应含 %q: %s", testCase.wantText, recorder.Body.String())
+			}
+		})
+	}
+	// 全部被拒绝后配置一字未改。
+	assertConfigUnchanged(t, path, workspaceFixture)
+}
+
+// TestWorkspaceKeyIsPinnedToItsWorkspace 固化面板 key 的核心语义：钉死在那个空间。
+//
+// 三条必须同时成立：
+//  1. 能读写自己空间的任务；
+//  2. **伪造的 X-AMKR-Workspace 头无效**——空间由 key 决定，否则这个模式形同虚设；
+//  3. 拿不到别的管理面（配置、供应商、设置），也进不了 /v1 代理。
+func TestWorkspaceKeyIsPinnedToItsWorkspace(t *testing.T) {
+	server, path := workspaceServer(t)
+	revision := currentRevision(t, path)
+	recorder := callTasks(t, server, http.MethodPost, "/api/workspaces", "",
+		`{"config_revision":"`+revision+`","name":"panel","api_key":"panel-key"}`)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("建空间失败: %d（body=%s）", recorder.Code, recorder.Body.String())
+	}
+	const key = "panel-key"
+
+	// 1+2. 建任务时带上伪造的头，任务必须落在 panel 而不是请求头说的 teamA。
+	revision = currentRevision(t, path)
+	created := panelCall(t, server, http.MethodPost, "/api/tasks", key, "teamA",
+		`{"config_revision":"`+revision+`","name":"from-panel","model":"model-b"}`)
+	if created.Code != http.StatusCreated {
+		t.Fatalf("面板建任务状态码 = %d（body=%s）", created.Code, created.Body.String())
+	}
+	cfg, err := config.FromDict(readConfigData(t, path))
+	if err != nil {
+		t.Fatalf("配置应可解析: %v", err)
+	}
+	if _, found := cfg.TaskForWorkspace("panel", "from-panel"); !found {
+		t.Error("任务应落在 panel，而不是请求头伪造的 teamA")
+	}
+	if _, found := cfg.TaskForWorkspace("teamA", "from-panel"); found {
+		t.Error("伪造的 X-AMKR-Workspace 头不该生效")
+	}
+
+	// 读列表：panel 有 1 个任务（自己建的）。
+	listed := panelCall(t, server, http.MethodGet, "/api/tasks", key, "", "")
+	if listed.Code != http.StatusOK {
+		t.Fatalf("面板读列表状态码 = %d", listed.Code)
+	}
+	names := taskNames(t, listed.Body.String())
+	if len(names) != 1 || names[0] != "from-panel" {
+		t.Errorf("面板只应看到自己的任务，实际 %v", names)
+	}
+
+	// 3. 其余管理面一律拒绝。
+	for _, blocked := range []struct{ method, path string }{
+		{http.MethodGet, "/api/workspaces"},
+		{http.MethodGet, "/api/settings"},
+		{http.MethodGet, "/api/providers"},
+		{http.MethodGet, "/api/models"},
+		{http.MethodGet, "/api/unified-model"},
+		{http.MethodPost, "/api/config/export"},
+	} {
+		response := panelCall(t, server, blocked.method, blocked.path, key, "", "")
+		if response.Code != http.StatusUnauthorized {
+			t.Errorf("面板 key %s %s 应 401，实际 %d（body=%s）",
+				blocked.method, blocked.path, response.Code, response.Body.String())
+		}
+	}
+	// /api/workspaces 的写路径同样拒绝（不能自己建/删空间）。
+	revision = currentRevision(t, path)
+	post := panelCall(t, server, http.MethodPost, "/api/workspaces", key, "",
+		`{"config_revision":"`+revision+`","name":"sneaky"}`)
+	if post.Code != http.StatusUnauthorized {
+		t.Errorf("面板 key 建空间应 401，实际 %d", post.Code)
+	}
+
+	// /v1 代理不接受面板 key（面板不是调用方凭据）。
+	proxied := panelCall(t, server, http.MethodPost, "/v1/chat/completions", key, "",
+		`{"model":"from-panel"}`)
+	if proxied.Code == http.StatusOK {
+		t.Errorf("/v1 不应接受面板 key（实际 %d）", proxied.Code)
+	}
+
+	// 别的空间的面板 key 看不到这个空间的任务：再建一个空间交叉验证。
+	revision = currentRevision(t, path)
+	callTasks(t, server, http.MethodPost, "/api/workspaces", "",
+		`{"config_revision":"`+revision+`","name":"other","api_key":"other-key"}`)
+	otherList := panelCall(t, server, http.MethodGet, "/api/tasks", "other-key", "", "")
+	if otherList.Code != http.StatusOK {
+		t.Fatalf("other 面板读列表状态码 = %d", otherList.Code)
+	}
+	if names := taskNames(t, otherList.Body.String()); len(names) != 0 {
+		t.Errorf("other 空间不该看到 panel 的任务，实际 %v", names)
+	}
+}
+
+// TestDeletedWorkspaceKeyStopsWorking 固化：空间删了，key 立刻失效。
+func TestDeletedWorkspaceKeyStopsWorking(t *testing.T) {
+	server, path := workspaceServer(t)
+	revision := currentRevision(t, path)
+	callTasks(t, server, http.MethodPost, "/api/workspaces", "",
+		`{"config_revision":"`+revision+`","name":"panel","api_key":"panel-key"}`)
+
+	if response := panelCall(t, server, http.MethodGet, "/api/tasks", "panel-key", "", ""); response.Code != http.StatusOK {
+		t.Fatalf("删除前面板应可用，实际 %d", response.Code)
+	}
+
+	revision = currentRevision(t, path)
+	deleted := callWorkspace(t, server, http.MethodDelete, "panel",
+		`{"config_revision":"`+revision+`"}`)
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("删空间状态码 = %d（body=%s）", deleted.Code, deleted.Body.String())
+	}
+	if response := panelCall(t, server, http.MethodGet, "/api/tasks", "panel-key", "", ""); response.Code != http.StatusUnauthorized {
+		t.Errorf("删除后 key 应失效（401），实际 %d", response.Code)
 	}
 }
 

@@ -48,8 +48,13 @@ var flowPairs = []struct{ Source, Target string }{
 // WorkspaceUsageParams 是工作空间读数的参数。
 //
 // Hours 为 nil 表示不设时间窗口（对应 /metrics 的 all_history）。
+//
+// Workspace 非空时只统计该工作空间：嵌入方的面板 key 只能看自己那个空间的用量，
+// 否则响应里会把别的空间的流量一并交出去（见 internal/server 的面板端点）。
 type WorkspaceUsageParams struct {
 	Hours *float64
+	// Workspace 限定要统计的工作空间名；空串表示不限定（完整权限的全部空间视图）。
+	Workspace string
 }
 
 // WorkspaceUsage 返回各工作空间的用量统计与流向连边。
@@ -79,15 +84,15 @@ func (s *Store) WorkspaceUsage(params WorkspaceUsageParams) (*canonical.Value, e
 	}
 	untilStr := formatISO(now)
 
-	stats, err := s.workspaceStats(since, &untilStr)
+	stats, err := s.workspaceStats(since, &untilStr, params.Workspace)
 	if err != nil {
 		return nil, err
 	}
-	unattributed, err := s.unattributedStats(since, &untilStr)
+	unattributed, err := s.unattributedStats(since, &untilStr, params.Workspace)
 	if err != nil {
 		return nil, err
 	}
-	links, err := s.workspaceFlowLinks(since, &untilStr)
+	links, err := s.workspaceFlowLinks(since, &untilStr, params.Workspace)
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +128,13 @@ func (s *Store) WorkspaceUsage(params WorkspaceUsageParams) (*canonical.Value, e
 //
 // 列名不加表别名：usageAggregates 里的 success / total_tokens 等只存在于
 // request_metrics，旁挂表只有 request_id 与 workspace，因此不会歧义。
-func (s *Store) workspaceStats(since, until *string) (*statsResult, error) {
+//
+// scope 非空时只统计那个工作空间（面板 key 的场景）；此时结果最多一项。
+func (s *Store) workspaceStats(since, until *string, scope string) (*statsResult, error) {
 	where, parameters := workspaceWindow(since, until)
+	scopeWhere, scopeParameters := workspaceScope(scope)
+	where += scopeWhere
+	parameters = append(parameters, scopeParameters...)
 	rows, err := s.db().Query(
 		"SELECT w.workspace, "+usageAggregates+
 			" FROM request_metrics m JOIN request_workspace w ON w.request_id = m.id"+where+
@@ -187,7 +197,14 @@ func (s *Store) workspaceStats(since, until *string) (*statsResult, error) {
 // 存在的意义是升级后的第一眼：老库的历史行全都进这里，若直接丢掉，界面在升级后
 // 会显示成一片空白，看起来像功能坏了。用 NOT EXISTS 而不是 LEFT JOIN ... IS NULL，
 // 语义更直白且能走 request_id 主键索引。
-func (s *Store) unattributedStats(since, until *string) (*UsageStats, error) {
+//
+// scope 非空时（面板 key 的场景）直接返回零值：无归属的行本来就不属于任何空间，
+// 把全实例的未归属流量告诉一个只有单个空间权限的嵌入方，等于泄露出「别人还有多少
+// 流量没记上」这种全局信息。
+func (s *Store) unattributedStats(since, until *string, scope string) (*UsageStats, error) {
+	if scope != "" {
+		return &UsageStats{StatusCodes: map[string]int64{}}, nil
+	}
 	where, parameters := workspaceWindow(since, until)
 	rows, err := s.db().Query(
 		"SELECT "+usageAggregates+
@@ -239,8 +256,11 @@ func (s *Store) unattributedStats(since, until *string) (*UsageStats, error) {
 // 统一规则：**两端都非空才成边**。某一端为空（provider_id / upstream_model_id 可空）
 // 的请求因此在图上留出一段缺口——这是刻意的，缺口就是「未归属的流量」。若给空值
 // 补一个占位节点，它会与真实取值混在一起，看图的人分不出哪条是数据、哪条是兜底。
-func (s *Store) workspaceFlowLinks(since, until *string) (*canonical.Value, error) {
+func (s *Store) workspaceFlowLinks(since, until *string, scope string) (*canonical.Value, error) {
 	where, parameters := workspaceWindow(since, until)
+	scopeWhere, scopeParameters := workspaceScope(scope)
+	where += scopeWhere
+	parameters = append(parameters, scopeParameters...)
 	links := canonical.NewArray()
 	for index, pair := range flowPairs {
 		rows, err := s.db().Query(
@@ -295,4 +315,15 @@ func workspaceWindow(since, until *string) (string, []any) {
 		parameters = append(parameters, *until)
 	}
 	return where, parameters
+}
+
+// workspaceScope 拼出「只看某个工作空间」的条件与参数。
+//
+// 单独一个 helper 而不是塞进 workspaceWindow：unattributed 那份查询**没有** w 别名
+// （它查的正是没有归属的行），把 w.workspace 条件混进去会直接是 SQL 错误。
+func workspaceScope(workspace string) (string, []any) {
+	if workspace == "" {
+		return "", nil
+	}
+	return " AND w.workspace = ?", []any{workspace}
 }

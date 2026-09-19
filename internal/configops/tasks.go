@@ -412,6 +412,64 @@ func DeleteWorkspace(data *canonical.Value, workspace string) error {
 	return nil
 }
 
+// CreateWorkspace 显式建出一个命名工作空间，并给它一个面板 key。
+//
+// 这是「空分组不进配置」的**唯一例外入口**：写任务时删空即删分组（见
+// writeWorkspaceTasks），但这里建出来的空间带着 api_key，因此任务删光了也留得住。
+//
+// apiKey 为空表示由服务端生成一个（WebUI 走这条）；应用侧传入自己的 key 时原样采用
+// ——调用方可能已经有既定的凭据命名规范，替它改名只会让对接方多一层映射。
+//
+// 返回真正落盘的空间名与 key。key 的合法性在这一层判（而不是只靠 config.Validate）：
+// _update_config 不跑 FromDict，非法配置会被直接写盘，下一次热重载才炸——那时调用方
+// 已经拿到 200 了。
+func CreateWorkspace(data *canonical.Value, name, apiKey string) (string, string, error) {
+	target, err := nonEmptyString(name, "工作空间名")
+	if err != nil {
+		return "", "", err
+	}
+	target = normalizeWorkspace(target)
+	if target == config.DefaultWorkspace {
+		return "", "", opErrf(409, "工作空间名重复: %s", config.DefaultWorkspace)
+	}
+	if workspaceExists(data, target) {
+		return "", "", opErrf(409, "工作空间已存在: %s", target)
+	}
+
+	key := strings.TrimSpace(apiKey)
+	if key == "" {
+		if key, err = config.GenerateWorkspaceKey(); err != nil {
+			return "", "", err
+		}
+	}
+	// 与 config.Validate 同一组底线，理由见那里的说明。这里判是为了让请求当场拿到
+	// 4xx，而不是写进一个下次重载才失败的配置。
+	if key == config.VISITOR_API_KEY {
+		return "", "", opErrf(422, "工作空间 %s 的 api_key 不能使用保留的访客 key: %s", target, config.VISITOR_API_KEY)
+	}
+	if localKey := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); localKey != "" && key == localKey {
+		return "", "", opErrf(422, "工作空间 %s 的 api_key 不能与 local_api_key 相同", target)
+	}
+	for _, workspace := range objectItems(lookup(data, "workspaces")) {
+		if existing := strings.TrimSpace(lookup(workspace.Value, "api_key").StringValue()); existing != "" && existing == key {
+			return "", "", opErrf(422, "工作空间 %s 与 %s 的 api_key 重复", workspace.Key, target)
+		}
+	}
+
+	workspaces := lookup(data, "workspaces")
+	if !workspaces.IsObject() {
+		workspaces = canonical.NewObject()
+	}
+	entry := lookup(workspaces, target)
+	if !entry.IsObject() {
+		entry = canonical.NewObject()
+	}
+	entry.SetKey("api_key", canonical.NewString(key))
+	workspaces.SetKey(target, entry)
+	data.SetKey("workspaces", workspaces)
+	return target, key, nil
+}
+
 // requireNamedWorkspace 归一化并确认这是一个**命名**工作空间。
 //
 // 默认工作空间刻意排除在外：它是不带 X-AMKR-Workspace 头时命中的那个空间，永远
