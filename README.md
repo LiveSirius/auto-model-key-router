@@ -54,12 +54,24 @@ irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scr
 
 ### Docker
 
+每个正式版本都会构建并推送镜像到 GHCR（包已公开，可匿名拉取；`:<版本号>` 与 `:latest` 都有）：
+
+```bash
+docker run -d --name amkr -p 8000:8000 -v amkr-data:/data \
+  ghcr.io/sparrived/auto-model-key-router:5.2.0
+```
+
 也可以自己从仓库构建镜像：
 
 ```bash
 docker build -t amkr .
 docker run -d --name amkr -p 8000:8000 -v amkr-data:/data amkr
 ```
+
+> 自建镜像时想打进正确版本号就传 `--build-arg VERSION=`。注意**不带 `v` 前缀**，与发布流程
+> 一致（它取的是 `refs/tags/v*` 去掉 `v` 的部分），所以要对 `git describe --tags --abbrev=0`
+> 的输出再 `sed 's/^v//'`。不传的话 `amkr --version` 显示源码里的默认值（`Dockerfile` 里那句
+> 注释写了原因）。
 
 镜像里配置、指标库与日志都落在 `/data`（`XDG_CACHE_HOME`），挂一个卷即可整体持久化。容器内以 `--host 0.0.0.0` 启动（配置默认监听 `127.0.0.1`，不改的话端口映射进不来），并且用 `--serve-foreground` 前台运行，因此不会尝试打开浏览器。
 

@@ -352,6 +352,12 @@
   `verify/image/release`）；`permissions` 增列 `packages: write`；`--version` 实测
   `-X main.version=5.2.0` 得 `5.2.0`、不传 `-X` 得仓库默认值。
 
+  发布后实测：`docker logout ghcr.io` 后匿名 `docker pull` 成功（`:5.2.0` 与 `:latest`
+  摘要一致，`sha256:f24e7bdb…`），即设为 public 那步确实生效；容器内 `amkr --version`
+  返回 `5.2.0`，版本注入确认可用。`README.md` 的 Docker 一节此前只写了「自己构建」，
+  没提这个已公开的镜像，一并补上，并说明自建时 `--build-arg VERSION` 不要带 `v` 前缀
+  （与发布流程取 `refs/tags/v*` 去前缀的规则保持一致）。
+
 ## [5.1.1] - 2026-09-18
 
 ### 修复
