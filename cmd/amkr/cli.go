@@ -41,10 +41,10 @@ package main
 //     「显式路径 > $AMKR_CONFIG > 默认路径」（与任务要求的 CLI > 环境变量 > 配置文件
 //     一致）。见 TestConfigPathPrecedenceDivergesFromPython。
 //  2. **默认（无参数）动作**。参照实现进入 dashboard.py 的 run_terminal_ui；该模块已
-//     按决策 7 砍掉，Go 侧的默认动作由 defaultCommand 一个常量决定——见那里的说明
+//     随 Python 版退役，Go 侧的默认动作由 defaultCommand 一个常量决定——见那里的说明
 //     （这是一个**待产品确认**的开放决策）。
-//  3. **没有 --print-config**。参照实现用 --show-config；Go 保持同名，只把 dashboard
-//     的富文本渲染换成等价纯文本。
+//  3. **没有 --print-config**。参照实现用 --show-config；Go 保持同名，行为也一致，
+//     只是不再经过 dashboard 的富文本渲染。
 //  4. **错误文案**。argparse 的用法/错误文本与 Go 的 flag 包不同，语料只对拍**退出码**
 //     （两边都是 2）。
 
@@ -252,8 +252,8 @@ func parseOptions(argv []string, errOut io.Writer) (*options, error) {
 	})
 	flags.BoolVar(&opts.updateHelperStop, "update-helper-stop", false,
 		"自更新收尾助手（内部参数）：旧服务需要助手主动停掉")
-	flags.BoolVar(&opts.serve, "serve", false, "跳过 Terminal UI，后台启动服务")
-	flags.Var(triFlag{target: &opts.webui, value: true}, "webui", "启用随包发布的 WebUI")
+	flags.BoolVar(&opts.serve, "serve", false, "后台启动服务，不占用当前终端")
+	flags.Var(triFlag{target: &opts.webui, value: true}, "webui", "启用内置 WebUI")
 	flags.Var(triFlag{target: &opts.webui, value: false}, "no-webui", "关闭 WebUI")
 	flags.Var(triFlag{target: &opts.ops, value: false}, "no-ops", "关闭运维接口")
 	flags.BoolVar(&opts.serveForeground, "serve-foreground", false, "前台启动服务（内部参数）")
