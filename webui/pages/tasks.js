@@ -146,18 +146,30 @@ function taskEditor(task) {
     placeholder: "TASK_000001",
     disabled: !isNew || state.saving,
   });
-  let model = task?.model || state.models[0]?.id || "";
+  // 显示名是可选的、纯展示用的中文名；留空时界面回落到任务名。
+  const displayInput = input({
+    value: task?.display_name || "",
+    placeholder: "例如：长文摘要",
+    disabled: state.saving,
+  });
+  // 既有任务没有模型时**不能**回落到第一个模型：那会在用户没碰下拉的情况下把
+  // 一个占位任务悄悄绑上某个模型。只有新建任务才预选第一个模型。
+  let model = task ? task.model || "" : state.models[0]?.id || "";
   let fallback = task?.fallback_model || "";
 
-  // 备选下拉要排掉首选（两者不能相同）。刷新它**不能靠重绘整页**：重绘会连下面
-  // 那些手填的参数输入框一起重建，用户刚敲的数字就没了，所以只就地换它的选项。
-  // 首选下拉始终列出全部模型，无需刷新。
-  const modelOptions = () => state.models.map((item) => ({ value: item.id, label: item.id }));
+  // 首选可以为空（尚未指定模型）。空值必须是一个真实选项：没有它，用户就没法把
+  // 既有任务改回占位状态，新建时也被迫先挑一个模型。
+  const UNSET = { value: "", label: "（尚未指定）" };
+  const modelOptions = () => [UNSET].concat(state.models.map((item) => ({ value: item.id, label: item.id })));
   const fallbackOptions = (value) => [{ value: "", label: "不启用备选" }].concat(
-    modelOptions().filter((option) => option.value !== value),
+    modelOptions().filter((option) => option.value !== value && option.value !== ""),
   );
 
-  const fallbackSelect = select(fallbackOptions(model), { value: fallback, disabled: state.saving });
+  const fallbackSelect = select(fallbackOptions(model), {
+    value: fallback,
+    // 未指定首选时备选无处可退（服务端也会拒绝），因此直接锁掉。
+    disabled: state.saving || !model,
+  });
   const primarySelect = select(modelOptions(), {
     value: model,
     disabled: state.saving,
@@ -165,6 +177,8 @@ function taskEditor(task) {
       model = event.target.value;
       // 首选换成了当前的备选时清掉备选，避免两者相同。
       if (fallback === model) fallback = "";
+      // 首选清空后备选失去意义，一并清掉并锁住下拉。
+      if (!model) { fallback = ""; fallbackSelect.disabled = true; } else { fallbackSelect.disabled = state.saving; }
       mount(fallbackSelect, ...fallbackOptions(model).map((option) =>
         h("option", { value: option.value, selected: option.value === fallback }, option.label)));
     },
@@ -191,7 +205,7 @@ function taskEditor(task) {
   const errorHost = h("div");
   // 保存期间要锁住的控件：请求发出后用户再改也不会被带上，与其让人以为改了，
   // 不如先禁用。任务名不在其中——编辑既有任务时它本来就一直是只读的。
-  const lockable = [primarySelect, fallbackSelect, effortSelect, stopInput, ...Object.values(numberInputs)];
+  const lockable = [displayInput, primarySelect, fallbackSelect, effortSelect, stopInput, ...Object.values(numberInputs)];
 
   // 只读取用户填过的参数；留空 = 不写进配置，调用方可以自己传。
   const collectParams = () => {
@@ -228,8 +242,9 @@ function taskEditor(task) {
       }
       const name = isNew ? nameInput.value.trim() : task.name;
       if (!name) { render(errorHost, notice("请填写任务名。", "error")); return; }
-      if (!model) { render(errorHost, notice("请选择首选模型。", "error")); return; }
       if (fallback && fallback === model) { render(errorHost, notice("备选模型不能与首选模型相同。", "error")); return; }
+      if (fallback && !model) { render(errorHost, notice("未指定首选模型时不能设置备选模型。", "error")); return; }
+      const displayName = displayInput.value.trim();
 
       render(errorHost);
       state.saving = true;
@@ -239,10 +254,18 @@ function taskEditor(task) {
       for (const node of lockable) node.disabled = true;
       mount(saveButton, "保存中…");
       try {
+        // 清空的字段要发 null（而不是省略）：服务端把「键存在 + null」当作清空，
+        // 省略则是不改。任务名不在其中——它不是可更新的字段。
+        const payload = {
+          model: model || null,
+          display_name: displayName || null,
+          fallback_model: fallback || null,
+          params,
+        };
         if (isNew) {
-          await api.createTask(state.revision, state.workspace, { name, model, fallback_model: fallback || null, params });
+          await api.createTask(state.revision, state.workspace, { name, ...payload });
         } else {
-          await api.updateTask(state.revision, state.workspace, name, { model, fallback_model: fallback || null, params });
+          await api.updateTask(state.revision, state.workspace, name, payload);
         }
         await load();
         state.editing = null;
@@ -266,11 +289,14 @@ function taskEditor(task) {
   return h("div.stack", {},
     h("div.form-grid", {},
       h("label.field", h("span", "任务名"), nameInput),
+      h("label.field", h("span", "显示名称（可选）"), displayInput),
       h("label.field", h("span", "首选模型"), primarySelect),
       h("label.field", h("span", "备选模型"), fallbackSelect),
       h("label.field", h("span", "推理强度"), effortSelect),
     ),
-    h("p.muted", "任务名就是调用方传的 model。任务名不能与模型 ID、别名或隐藏别名撞名。"),
+    h("p.muted", "任务名就是调用方传的 model；显示名称只用于在这个页面上辨认任务，不影响调用。" +
+      "任务名不能与模型 ID、别名或隐藏别名撞名。"),
+    h("p.muted", "首选模型可以先留空：任务会先作为占位存在，此时调用它会被明确拒绝并提示尚未指定模型，而不是落到别的模型上。"),
     h("h4", "固定采样参数"),
     h("p.muted", "填了的参数由任务说了算：调用方再传同名参数（含 reasoning_effort）会被直接拒绝。留空的参数照常透传，不在这个列表里的参数也始终透传。"),
     h("div.form-grid", {}, NUMERIC_PARAMS.map((param) => h("label.field", h("span", param.label), numberInputs[param.key]))),
@@ -473,14 +499,19 @@ function draw() {
       buttonNode("新建任务", {
         small: true,
         variant: "secondary",
-        disabled: state.saving || !state.models.length,
+        disabled: state.saving,
         onClick: () => { state.editing = "__new__"; draw(); },
       }),
     ),
   ];
   if (state.error) children.push(notice(`无法读取或写入任务路由: ${state.error}`, "error"));
-  if (!state.models.length) {
-    children.push(empty("尚未配置可用模型。", { hint: "请先在供应商页添加 Key 并绑定服务模型，再建立任务路由。" }));
+  // 没有模型不再挡住这个页面：任务可以先建成「尚未指定模型」的占位。只有当确实
+  // 既没有模型也没有任务时，才把「先去配模型」当成唯一可做的事提示出来。
+  if (!state.models.length && !state.tasks.length) {
+    children.push(empty("尚未配置可用模型。", {
+      hint: "请先在供应商页添加 Key 并绑定服务模型；也可以先建一个尚未指定模型的任务占位。",
+      action: buttonNode("新建任务", { variant: "secondary", onClick: () => { state.editing = "__new__"; draw(); } }),
+    }));
     render(host, children);
     return;
   }
@@ -511,12 +542,16 @@ function draw() {
 
   for (const task of state.tasks) {
     if (state.editing === task.name) {
-      children.push(card(cardHead(`编辑 · ${task.name}`), taskEditor(task)));
+      children.push(card(cardHead(`编辑 · ${task.display_name || task.name}`), taskEditor(task)));
       continue;
     }
+    // 卡片标题用人取的显示名，任务名退到副标题/详情里：这个页面上人认的是「长文摘要」，
+    // 而不是 TASK_000001。调用方仍然只能传任务名，因此它必须一直可见。
     children.push(card(
-      cardHead(task.name,
-        badge(task.fallback_model ? `备选 ${task.fallback_model}` : "无备选", "muted"),
+      cardHead(
+        task.display_name || task.name,
+        task.display_name ? badge(task.name, "muted") : null,
+        task.model ? null : badge("尚未指定模型", "warn"),
         buttonNode("编辑", { small: true, variant: "text", disabled: state.saving, onClick: () => { state.editing = task.name; draw(); } }),
         buttonNode("删除", {
           small: true,
@@ -540,7 +575,8 @@ function draw() {
         }),
       ),
       kv([
-        ["首选模型", task.model],
+        ["显示名称", task.display_name || "未设置"],
+        ["首选模型", task.model || "尚未指定"],
         ["备选模型", task.fallback_model || "未配置"],
         ["固定参数", summary(task)],
       ]),

@@ -606,7 +606,11 @@ if (scenario === "stale_key_prompts_login") {
   const selects = findAll(root, (n) => n.tagName === "select"
     && !String(n.className || "").split(/\s+/).includes("workspace-select"));
   const primarySelect = selects[0];
-  checks.primarySelectListsAllModels = primarySelect?.children.length === 2;
+  // 3 = 两个模型 + 「（尚未指定）」：首选可以为空（任务先占位），那个空选项必须存在，
+  // 否则用户没法把已有任务改回未指定状态。
+  // option 的 value 是**属性**（dom.js 对 value 走 el.value 赋值），因此读 .value。
+  checks.primarySelectListsAllModels = primarySelect?.children.length === 3
+    && primarySelect.children.some((option) => option.value === "");
   if (primarySelect) {
     primarySelect.value = "model-b";
     for (const handler of primarySelect.listeners.change || []) await handler({ target: primarySelect });
