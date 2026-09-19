@@ -94,6 +94,38 @@ func TestResolveRouteInIsWorkspaceScoped(t *testing.T) {
 	}
 }
 
+// TestTaskWithoutModelIsStillATask 固化：未指定模型的任务仍然进任务表。
+//
+// proxy 判定「这是不是一个任务」靠的是 TaskPlanIn 是否命中，判定「有没有指定模型」
+// 靠的是 plan.Primary.Model 是否为空。若这里把空模型的任务当成「没有这个任务」跳过，
+// 请求它就会掉进普通模型名解析，最终报出「模型 TASK_XXX 未配置」——把用户引到模型
+// 设置页去，而真正该改的是那个任务。
+func TestTaskWithoutModelIsStillATask(t *testing.T) {
+	pool := New(mustConfig(t, `{
+		"config_version": 4,
+		"local_api_key": "k",
+		"providers": {"p": {"base_url": "https://a.test", "keys": {"k": {"api_key": "sk"}}}},
+		"models": {"model-a": {"targets": [{"provider": "p", "key": "k"}]}},
+		"tasks": {"placeholder": {"params": {"temperature": 0.3}}}
+	}`), nil, nil)
+
+	plan, found := pool.TaskPlan("placeholder")
+	if !found {
+		t.Fatal("未指定模型的任务仍应是一个任务")
+	}
+	// 空模型就是「尚未指定」，不能被填成别的名字——proxy 的明确报错全靠这个空值。
+	if plan.Primary.Model != "" {
+		t.Errorf("未指定模型时首选应为空串，实际 %q", plan.Primary.Model)
+	}
+	if plan.Fallback != nil {
+		t.Errorf("未指定模型时不应有备选，实际 %+v", plan.Fallback)
+	}
+	// 固定参数照常可读：占位任务的价值就在于先把参数定下来。
+	if params := pool.TaskParams("placeholder"); params.Obj.Len() != 1 {
+		t.Errorf("占位任务的固定参数应保留，实际 %s", mustDump(t, params))
+	}
+}
+
 // TestLegacyTaskAccessorsUseDefaultWorkspace 固化既有 API 只作用于默认空间。
 func TestLegacyTaskAccessorsUseDefaultWorkspace(t *testing.T) {
 	pool := New(mustConfig(t, workspaceJSON), nil, nil)

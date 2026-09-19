@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Sparrived/auto-model-key-router/internal/config"
@@ -177,6 +178,38 @@ func TestEmptyWorkspaceHeaderUsesDefault(t *testing.T) {
 	}
 	if key := env.transport.calls[0].headers["authorization"]; key != "Bearer sk-ka" {
 		t.Fatalf("空工作空间头应落到默认空间（model-a / ka），实际 %q", key)
+	}
+}
+
+// TestTaskWithoutModelIsRejectedExplicitly 固化「尚未指定模型」的任务行为（Go 侧分叉）。
+//
+// 参照实现里任务必须写 model，因此这条路径在 Python 侧不存在，没有对拍语料可依。
+// 刻意选的是**明确报错**而不是「回落到 unified_model.default」或「回落到第一个已配置
+// 模型」：静默回落会让一个忘记选模型的任务照常服务，用户既看不到问题、也无从知道
+// 自己调用的其实是另一个模型；而占位任务本就允许存在，所以必须在请求时把它挑明。
+func TestTaskWithoutModelIsRejectedExplicitly(t *testing.T) {
+	cfg := workspaceConfig()
+	cfg.Tasks = append(cfg.Tasks, config.TaskConfig{Name: "placeholder"})
+	env := newTestEnv(t, cfg, Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+
+	recorder := env.request(http.MethodPost, "chat/completions",
+		`{"model":"placeholder","messages":[{"role":"user","content":"hi"}]}`, nil)
+
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("尚未指定模型的任务应 404，实得 %d（%s）", recorder.Code, recorder.Body.String())
+	}
+	// 文案要点名是哪个任务没选模型：只说「模型未配置」会把人引到模型设置页去，
+	// 而真正该改的是这个任务。
+	body := recorder.Body.String()
+	for _, want := range []string{"placeholder", "尚未指定模型", "任务路由"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("404 文案应包含 %q，实得 %s", want, body)
+		}
+	}
+	// 关键：绝不能触达上游。一旦回落成某个真实模型，这里就会有调用。
+	if len(env.transport.calls) != 0 {
+		t.Fatalf("尚未指定模型的任务不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
 	}
 }
 

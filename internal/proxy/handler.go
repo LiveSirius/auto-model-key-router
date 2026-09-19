@@ -201,10 +201,19 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 	var taskParams *canonical.Value
 	var taskName *string
 	if !visitorOnly {
-		if _, isTask := pool.TaskPlanIn(workspace, requestedModelName); isTask {
+		if plan, isTask := pool.TaskPlanIn(workspace, requestedModelName); isTask {
 			if requestedKey != nil {
 				writeJSON(w, http.StatusBadRequest, jsonErrorResponse(
 					"任务 "+requestedModelName+" 的参数由 AMKR 固定，不能指定 Key"))
+				return nil
+			}
+			// 尚未指定模型的任务（允许先建出来占位）在这里就止住：继续往下走只会
+			// 拿到一个空模型名，最终报出「模型  未配置」这种既看不出是任务、也指不
+			// 出哪个任务的错。明确说清是哪个任务没选模型，用户才知道去哪里修。
+			if plan.Primary.Model == "" {
+				h.logModelNotConfigured(path, requestedModelName, "", workspace, "task_model_unset")
+				writeJSON(w, http.StatusNotFound, jsonErrorResponse(
+					"任务 "+requestedModelName+" 尚未指定模型；请先在 AMKR 的任务路由中为该任务选择模型"))
 				return nil
 			}
 			taskParams = pool.TaskParamsIn(workspace, requestedModelName)
