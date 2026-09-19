@@ -84,6 +84,7 @@ var appSurfacePatterns = []string{
 var pathParamReplacer = strings.NewReplacer(
 	"{task_name}", "x", "{provider_id}", "x", "{key_name}", "x",
 	"{route_id}", "x", "{model_id}", "x", "{probe_id}", "x",
+	"{workspace}", "x",
 	"{agent}", "x", "{action}", "status_amkr", "{path}", "does-not-exist",
 )
 
@@ -114,6 +115,21 @@ func TestManagementRoutesNotShadowed(t *testing.T) {
 		options.CheckUpdate = stubCheckUpdate
 	})
 	for _, pattern := range managementRoutePatterns {
+		assertNotFallback404(t, app, pattern)
+	}
+}
+
+// TestWorkspaceRoutesNotShadowed 逐条实例化 Go 侧新增的工作空间路由。
+//
+// 它们不写 /api 语料（没有 Python 先例），但同样注册在管理 API 的那棵 mux 上，
+// 因此同样有被 app 面兜底吞掉的风险——这条测试把「可达」钉住。
+func TestWorkspaceRoutesNotShadowed(t *testing.T) {
+	app := newTestApp(t, t.TempDir(), nil)
+	for _, pattern := range []string{
+		"GET /api/workspaces",
+		"PUT /api/workspaces/{workspace}",
+		"DELETE /api/workspaces/{workspace}",
+	} {
 		assertNotFallback404(t, app, pattern)
 	}
 }
