@@ -305,14 +305,28 @@ func resolveImportKey(data *canonical.Value, target string, incoming *canonical.
 	return false, nil
 }
 
-// keyOwnerOutside 返回占用 key 的那个空间名（`except` 自身除外），没有则空串。
+// keyOwnerOutside 返回占用该**面板** key 的那个空间名（`except` 自身除外），没有则空串。
 func keyOwnerOutside(data *canonical.Value, key, except string) string {
+	return secretOwnerOutside(data, key, except)
+}
+
+// secretOwnerOutside 返回占用该凭据的空间名（`except` 自身除外），没有则空串。
+//
+// 面板 key 与推理 key **一起扫**：两者都不允许在实例内重复出现，且跨类型重复同样
+// 有害（同一个字符串会在面板面与 /v1 面各命中一个空间）。判定与 config.Validate
+// 的占用表一致。
+func secretOwnerOutside(data *canonical.Value, secret, except string) string {
+	if secret == "" {
+		return ""
+	}
 	for _, pair := range objectItems(lookup(data, "workspaces")) {
 		if pair.Key == except || !pair.Value.IsObject() {
 			continue
 		}
-		if existing := strings.TrimSpace(pair.Value.Lookup("api_key").StringValue()); existing == key {
-			return pair.Key
+		for _, field := range []string{"api_key", "inference_key"} {
+			if existing := strings.TrimSpace(pair.Value.Lookup(field).StringValue()); existing == secret {
+				return pair.Key
+			}
 		}
 	}
 	return ""

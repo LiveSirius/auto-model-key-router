@@ -322,6 +322,38 @@ func TestTransferableConfigOmitsMachineSettings(t *testing.T) {
 	}
 }
 
+// TestTransferableConfigStripsWorkspaceCredentials 固化：配置导出摘掉**两把**空间凭据。
+//
+// 这条通道的导出文件会被贴进工单、聊天记录与文档，因此工作空间随它迁移，但凭据不能
+// 跟着走。新增 inference_key 时最容易漏掉它——只摘 api_key 会让「导出不含凭据」这个
+// 承诺在加字段后悄悄失效，而 inference_key 比 api_key 更敏感：面板 key 只开一个空间的
+// 面板，推理 key 能直接消耗上游额度。
+//
+// 想搬凭据请走工作空间自己的整包迁移（那条通道**有意**带上 api_key）。
+func TestTransferableConfigStripsWorkspaceCredentials(t *testing.T) {
+	data := mustParse(t, `{"config_version":4,"local_api_key":"sk-local",`+
+		`"providers":{"p":{"base_url":"https://a.example","keys":{"k":{"api_key":"1"}}}},`+
+		`"models":{"m":{"targets":[{"provider":"p","key":"k"}]}},`+
+		`"workspaces":{"teamA":{"api_key":"amkr_ws_secret","inference_key":"amkr_ik_secret",`+
+		`"models":["m"],"tasks":{"t":{"model":"m"}}}}}`)
+	exported, err := TransferableConfig(data, false)
+	if err != nil {
+		t.Fatalf("导出失败: %v", err)
+	}
+	text := canonical.DumpsOrdered(exported)
+	for _, forbidden := range []string{"amkr_ws_secret", "amkr_ik_secret"} {
+		if strings.Contains(text, forbidden) {
+			t.Errorf("导出内容不应包含凭据 %q: %s", forbidden, text)
+		}
+	}
+	// 但空间本身与它的 models 授权要留下：它们不是凭据，丢掉会让导入方少一个空间。
+	for _, wanted := range []string{"teamA", `"models"`} {
+		if !strings.Contains(text, wanted) {
+			t.Errorf("导出应保留 %q: %s", wanted, text)
+		}
+	}
+}
+
 // TestProviderRoutesKeepInputOrder 固化 routes 的键顺序。
 //
 // config.NormalizeUpstreamRoutes 返回 Go map（顺序丢失），而 provider["routes"]

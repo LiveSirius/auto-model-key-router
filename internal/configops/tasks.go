@@ -41,13 +41,15 @@ func WorkspaceTasks(data *canonical.Value, workspace string) *canonical.Value {
 // 与 WorkspaceTasks 互为逆操作。默认工作空间直接落在 data["tasks"]；命名工作空间
 // 逐层建出 `workspaces` 与 `workspaces.<名字>`。
 //
-// 传入空任务映射时，**没有 api_key** 的工作空间会被整个删掉：工作空间只是「一组
+// 传入空任务映射时，**没有凭据**的工作空间会被整个删掉：工作空间只是「一组
 // 任务」的分组，组里没有成员时它既不可观测也没有意义。这样 `workspaces` 段始终只
 // 包含非空分组，管理面也就无须发明一套「新建/删除空工作空间」的接口。
 //
-// 带 api_key 的工作空间是**例外**，要留住：它是应用侧先建空间拿 key、之后才慢慢填
-// 任务的落脚点，任务删光了不代表这个空间该消失——那样面板会指向一个不存在的空间，
-// 而嵌入方手上的 key 却还在。默认工作空间无条件留住（它恒在清单里）。
+// 带 api_key 或 inference_key 的工作空间是**例外**，要留住：它是应用侧先建空间拿
+// key、之后才慢慢填任务的落脚点，任务删光了不代表这个空间该消失——那样面板会指向
+// 一个不存在的空间，而嵌入方手上的 key 却还在。两种 key 都算凭据，缺一不可：只认
+// api_key 的话，一个「只发了推理 key、还没填任务」的空间会被下一次写任务顺手删掉，
+// 而那个项目的凭据已经配在环境变量里了。默认工作空间无条件留住（它恒在清单里）。
 func writeWorkspaceTasks(data *canonical.Value, workspace string, tasks *canonical.Value) {
 	if workspace == "" || workspace == config.DefaultWorkspace {
 		if !tasks.IsObject() || tasks.Obj.Len() == 0 {
@@ -61,8 +63,8 @@ func writeWorkspaceTasks(data *canonical.Value, workspace string, tasks *canonic
 	entry := lookup(workspaces, workspace)
 	entryIsObject := entry.IsObject()
 	if !tasks.IsObject() || tasks.Obj.Len() == 0 {
-		if entryIsObject && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != "" {
-			// 有 key：只清任务，留壳（壳里的 api_key 原样保留）。
+		if entryIsObject && hasWorkspaceCredential(entry) {
+			// 有凭据：只清任务，留壳（壳里的 key 与 models 原样保留）。
 			entry.DeleteKey("tasks")
 			workspaces.SetKey(workspace, entry)
 			data.SetKey("workspaces", workspaces)
@@ -412,48 +414,52 @@ func DeleteWorkspace(data *canonical.Value, workspace string) error {
 	return nil
 }
 
-// CreateWorkspace 显式建出一个命名工作空间，并给它一个面板 key。
+// CreateWorkspace 显式建出一个命名工作空间，并给它两把凭据。
 //
 // 这是「空分组不进配置」的**唯一例外入口**：写任务时删空即删分组（见
-// writeWorkspaceTasks），但这里建出来的空间带着 api_key，因此任务删光了也留得住。
+// writeWorkspaceTasks），但这里建出来的空间带着密钥，因此任务删光了也留得住。
 //
-// apiKey 为空表示由服务端生成一个（WebUI 走这条）；应用侧传入自己的 key 时原样采用
+// 两把 key 的分工见 config.WorkspaceConfig：api_key 给嵌入方面板（会进浏览器 URL），
+// inference_key 给项目做 /v1 调用（进环境变量）。这里**一次都发出去**，是因为建空间
+// 是唯一能拿到明文 key 的时刻——AMKR 没有任何端点会再回一次已有 key。若只给面板 key，
+// 应用侧就还得再找一条路要推理 key，那才是真的别扭。
+//
+// apiKey 为空表示由服务端生成（WebUI 走这条）；应用侧传入自己的 key 时原样采用
 // ——调用方可能已经有既定的凭据命名规范，替它改名只会让对接方多一层映射。
 //
-// 返回真正落盘的空间名与 key。key 的合法性在这一层判（而不是只靠 config.Validate）：
+// 返回真正落盘的空间名与两把 key。key 的合法性在这一层判（而不是只靠 config.Validate）：
 // _update_config 不跑 FromDict，非法配置会被直接写盘，下一次热重载才炸——那时调用方
-// 已经拿到 200 了。
-func CreateWorkspace(data *canonical.Value, name, apiKey string) (string, string, error) {
+// 已经拿到 201 了。
+func CreateWorkspace(data *canonical.Value, name, apiKey string) (CreatedWorkspace, error) {
 	target, err := nonEmptyString(name, "工作空间名")
 	if err != nil {
-		return "", "", err
+		return CreatedWorkspace{}, err
 	}
 	target = normalizeWorkspace(target)
 	if target == config.DefaultWorkspace {
-		return "", "", opErrf(409, "工作空间名重复: %s", config.DefaultWorkspace)
+		return CreatedWorkspace{}, opErrf(409, "工作空间名重复: %s", config.DefaultWorkspace)
 	}
 	if workspaceExists(data, target) {
-		return "", "", opErrf(409, "工作空间已存在: %s", target)
+		return CreatedWorkspace{}, opErrf(409, "工作空间已存在: %s", target)
 	}
 
-	key := strings.TrimSpace(apiKey)
-	if key == "" {
-		if key, err = config.GenerateWorkspaceKey(); err != nil {
-			return "", "", err
+	panelKey := strings.TrimSpace(apiKey)
+	if panelKey == "" {
+		if panelKey, err = config.GenerateWorkspaceKey(); err != nil {
+			return CreatedWorkspace{}, err
 		}
 	}
 	// 与 config.Validate 同一组底线，理由见那里的说明。这里判是为了让请求当场拿到
 	// 4xx，而不是写进一个下次重载才失败的配置。
-	if key == config.VISITOR_API_KEY {
-		return "", "", opErrf(422, "工作空间 %s 的 api_key 不能使用保留的访客 key: %s", target, config.VISITOR_API_KEY)
+	if err := checkWorkspaceSecret(data, target, "api_key", panelKey); err != nil {
+		return CreatedWorkspace{}, err
 	}
-	if localKey := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); localKey != "" && key == localKey {
-		return "", "", opErrf(422, "工作空间 %s 的 api_key 不能与 local_api_key 相同", target)
+	inferenceKey, err := config.GenerateInferenceKey()
+	if err != nil {
+		return CreatedWorkspace{}, err
 	}
-	for _, workspace := range objectItems(lookup(data, "workspaces")) {
-		if existing := strings.TrimSpace(lookup(workspace.Value, "api_key").StringValue()); existing != "" && existing == key {
-			return "", "", opErrf(422, "工作空间 %s 与 %s 的 api_key 重复", workspace.Key, target)
-		}
+	if err := checkWorkspaceSecret(data, target, "inference_key", inferenceKey); err != nil {
+		return CreatedWorkspace{}, err
 	}
 
 	workspaces := lookup(data, "workspaces")
@@ -464,10 +470,132 @@ func CreateWorkspace(data *canonical.Value, name, apiKey string) (string, string
 	if !entry.IsObject() {
 		entry = canonical.NewObject()
 	}
-	entry.SetKey("api_key", canonical.NewString(key))
+	entry.SetKey("api_key", canonical.NewString(panelKey))
+	entry.SetKey("inference_key", canonical.NewString(inferenceKey))
 	workspaces.SetKey(target, entry)
 	data.SetKey("workspaces", workspaces)
-	return target, key, nil
+	return CreatedWorkspace{Name: target, APIKey: panelKey, InferenceKey: inferenceKey}, nil
+}
+
+// CreatedWorkspace 是建空间的结果：真正落盘的空间名与两把明文 key。
+type CreatedWorkspace struct {
+	Name         string
+	APIKey       string
+	InferenceKey string
+}
+
+// RotateInferenceKey 给工作空间换一把推理 key，返回新的明文。
+//
+// 只动 inference_key：面板 key 换掉会让已嵌入的页面立刻失效，两者的轮换理由不同
+// （见 api 层 handleRotateInferenceKey 的说明）。旧 key 随字段覆盖立即失效。
+func RotateInferenceKey(data *canonical.Value, workspace string) (string, error) {
+	name, err := requireNamedWorkspace(workspace)
+	if err != nil {
+		return "", err
+	}
+	if err := requireWorkspaceTasks(data, name); err != nil {
+		return "", err
+	}
+	entry := lookup(lookup(data, "workspaces"), name)
+	if !entry.IsObject() {
+		return "", opErrf(404, "工作空间不存在: %s", name)
+	}
+	key, err := config.GenerateInferenceKey()
+	if err != nil {
+		return "", err
+	}
+	if err := checkWorkspaceSecret(data, name, "inference_key", key); err != nil {
+		return "", err
+	}
+	entry.SetKey("inference_key", canonical.NewString(key))
+	return key, nil
+}
+
+// SetWorkspaceModels 设定工作空间允许直呼的模型清单。
+//
+// 逐个校验名字确实指向一个已配置的模型：写错一个名字会让该空间静默少一个可用模型，
+// 而调用方只看到 403/404，排查要翻两边配置。config.Validate 是最终防线，这里是为了
+// 在**写盘前**给出同一个结论（_update_config 不跑 FromDict）。
+//
+// 空清单是合法输入（表示「不许直呼任何模型，只走任务名」），与「不限制」的区别由
+// 字段是否存在表达；这里传 nil 表示清除该字段（回到不限制）。
+func SetWorkspaceModels(data *canonical.Value, workspace string, models []string) error {
+	name, err := requireNamedWorkspace(workspace)
+	if err != nil {
+		return err
+	}
+	if err := requireWorkspaceTasks(data, name); err != nil {
+		return err
+	}
+	entry := lookup(lookup(data, "workspaces"), name)
+	if !entry.IsObject() {
+		return opErrf(404, "工作空间不存在: %s", name)
+	}
+	if models == nil {
+		entry.DeleteKey("models")
+		return nil
+	}
+
+	known := configuredModelNames(data)
+	list := canonical.NewArray()
+	for index, raw := range models {
+		modelName := strings.TrimSpace(raw)
+		if modelName == "" {
+			return opErrf(422, "workspaces.%s.models[%d] 不能为空", name, index)
+		}
+		if !known[modelName] {
+			return opErrf(422, "workspaces.%s.models[%d] 引用了未配置的模型: %s", name, index, modelName)
+		}
+		list.Arr = append(list.Arr, canonical.NewString(modelName))
+	}
+	entry.SetKey("models", list)
+	return nil
+}
+
+// configuredModelNames 从原始配置数据里收集全部可用模型名（真实 id 与别名）。
+//
+// 走原始数据而不是 config.RouterConfig：这一层拿到的是待写入的 *canonical.Value，
+// 而 FromDict 会连带跑别的校验；这里只要一份名字集合。形状与 config 的 models 段
+// 一致：`models` 是 `{id: {aliases: [...]}}`，且 aliases 与 targets 一样是**可选**的。
+//
+// 因此每一层都要容忍缺失（lookup 返回 nil）：直接取 `.Arr` 会在最普通的配置上 panic
+// ——只要有一个模型没写 aliases 就够了。
+func configuredModelNames(data *canonical.Value) map[string]bool {
+	names := map[string]bool{}
+	for _, model := range objectItems(lookup(data, "models")) {
+		names[model.Key] = true
+		aliases := lookup(model.Value, "aliases")
+		if aliases == nil {
+			continue
+		}
+		for _, alias := range aliases.Arr {
+			if name := strings.TrimSpace(alias.StringValue()); name != "" {
+				names[name] = true
+			}
+		}
+	}
+	return names
+}
+
+// checkWorkspaceSecret 判定一把待写入的凭据是否可用，不可用时返回 422。
+//
+// 两类 key 共用这一份判定，且**互相视为占用**（kind 只影响错误文本）：它们的判定
+// 发生在不同调用点（面板面与 /v1 面），同一个字符串两处都命中会让权限边界取决于
+// 走到哪条路由。与 config.Validate 的最终防线保持一致。
+func checkWorkspaceSecret(data *canonical.Value, target, kind, secret string) error {
+	if secret == "" {
+		return nil
+	}
+	if secret == config.VISITOR_API_KEY {
+		return opErrf(422, "工作空间 %s 的 %s 不能使用保留的访客 key: %s", target, kind, config.VISITOR_API_KEY)
+	}
+	if local := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); local != "" && secret == local {
+		return opErrf(422, "工作空间 %s 的 %s 不能与 local_api_key 相同", target, kind)
+	}
+	if owner := secretOwnerOutside(data, secret, target); owner != "" {
+		return opErrf(422, "工作空间 %s 与 %s 的 %s 重复", owner, target, kind)
+	}
+	return nil
 }
 
 // requireNamedWorkspace 归一化并确认这是一个**命名**工作空间。
@@ -495,13 +623,38 @@ func requireWorkspaceTasks(data *canonical.Value, workspace string) error {
 	return nil
 }
 
-// workspaceExists 报告命名工作空间是否存在于配置里（有任务或有 api_key）。
+// workspaceExists 报告命名工作空间是否存在于配置里（有任务或有凭据）。
 func workspaceExists(data *canonical.Value, workspace string) bool {
 	if WorkspaceTasks(data, workspace).Obj.Len() > 0 {
 		return true
 	}
 	entry := lookup(lookup(data, "workspaces"), workspace)
-	return entry.IsObject() && strings.TrimSpace(entry.Lookup("api_key").StringValue()) != ""
+	return entry.IsObject() && hasWorkspaceCredential(entry)
+}
+
+// hasWorkspaceCredential 报告一个工作空间分组是否带着**必须留住**的东西——凭据或
+// 模型授权清单。
+//
+// 面板 key 与推理 key 都算：两者都是「这个空间已经发出去了、必须留得住」的依据。
+// models 也算：它是运维显式写下的授权配置，随着「删掉最后一个任务」一起消失是静默
+// 失效——界面看起来配过，实际没生效。
+//
+// 抽成一个函数是为了让「删空即删分组」与「改名/删除时算不算存在」两处判据不可能
+// 走偏——它们必须一致，否则会出现「列表里有、改名说 404」这种自相矛盾的状态。同样的
+// 判据在 config.parseTasks 里也有一份（那边决定留不留进 RouterConfig），两边必须同时改。
+func hasWorkspaceCredential(entry *canonical.Value) bool {
+	if !entry.IsObject() {
+		return false
+	}
+	if strings.TrimSpace(entry.Lookup("api_key").StringValue()) != "" {
+		return true
+	}
+	if strings.TrimSpace(entry.Lookup("inference_key").StringValue()) != "" {
+		return true
+	}
+	// models 存在即为留住（含空数组：那是「一个都不许直呼」这条禁令本身）。
+	_, hasModels := entry.LookupOK("models")
+	return hasModels
 }
 
 // RepairTasks 删掉引用已不存在模型（或参数非法）的任务，返回被清理的任务名（升序）。

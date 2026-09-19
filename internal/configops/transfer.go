@@ -71,16 +71,21 @@ func TransferableConfig(data *canonical.Value, includeVisitor bool) (*canonical.
 	}
 	// 工作空间随任务一起迁移，否则导入方只剩默认空间，命名空间的任务全丢。
 	//
-	// 但**必须摘掉 api_key**：和 local_api_key 同类，它是本实例的入站凭据。导出文件
-	// 会被贴到工单、聊天记录、文档里，把面板 key 一起带出去等于把每个空间的门禁卡
-	// 散出去；导入方也会凭空获得一堆能开自己实例面板的 key（而原名空间可能压根不是
-	// 同一回事）。工作空间有自己的独立迁移通道（带 key，见 workspace.go），那是**有意
-	// 的**凭据搬迁，与这里顺手带出去性质完全不同。
+	// 但**必须摘掉两把 key**：和 local_api_key 同类，它们都是本实例的入站凭据。导出文件
+	// 会被贴到工单、聊天记录、文档里，把凭据一起带出去等于把每个空间的门禁卡散出去；
+	// 导入方也会凭空获得一堆能开自己实例面板或刷自己额度的 key（而原名空间可能压根不是
+	// 同一回事）。工作空间有自己的独立迁移通道（带 api_key，见 workspace_bundle.go），
+	// 那是**有意**的凭据搬迁，与这里顺手带出去性质完全不同。
+	//
+	// inference_key 必须一起摘：它比 api_key 更敏感——api_key 只开一个空间的**面板**，
+	// inference_key 能直接消耗上游额度。只摘 api_key 会让这条「导出不含凭据」的承诺
+	// 在新增字段后悄悄失效。
 	if workspaces := lookup(data, "workspaces"); workspaces.IsObject() && workspaces.Obj.Len() > 0 {
 		exported := workspaces.Clone()
 		for _, workspace := range objectItems(exported) {
 			if workspace.Value.IsObject() {
 				workspace.Value.DeleteKey("api_key")
+				workspace.Value.DeleteKey("inference_key")
 			}
 		}
 		result.SetKey("workspaces", exported)
