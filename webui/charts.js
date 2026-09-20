@@ -540,8 +540,14 @@ function heatCellClass(cell, max) {
 export function sankey({ links, layers, metricLabel, height = 420, formatValue: format = formatCompactNumber, ariaLabel = "请求流向桑基图" }) {
   const host = h("div.chart-host", { style: { height: `${height}px` } });
 
+  // 层标题单独占一条顶带。标题画在 y=12，而满高的列从 y=0 起就顶到画布上沿，
+  // 不把图整体下移的话列标题必然被自己的节点压住——这就是"文字叠加、看不清"的
+  // 一半原因（另一半是流带上的标签，见下面的文字描边）。
+  const TOP = 22;
+  const CANVAS_BOTTOM = 6;
+
   sizing(host, (width) => {
-    const layout = sankeyLayout(links, { width: Math.max(320, width - 2), height: height - 34 });
+    const layout = sankeyLayout(links, { width: Math.max(320, width - 2), height: height - TOP - CANVAS_BOTTOM });
     const node = svg("svg", {
       width, height, viewBox: `0 0 ${width} ${height}`,
       class: "chart sankey", role: "img", "aria-label": ariaLabel,
@@ -557,7 +563,9 @@ export function sankey({ links, layers, metricLabel, height = 420, formatValue: 
     // 流带先画，节点后画：节点盖在流带端点上，接缝更干净。
     const ribbonLayer = svg("g", { class: "sankey-ribbons" });
     const nodeLayer = svg("g", { class: "sankey-nodes" });
-    node.append(ribbonLayer, nodeLayer);
+    // 整体下移一条顶带的高度，把画布上方让给列标题。用 transform 而不是给每个
+    // 坐标加偏移：布局算出的坐标保持"从 0 开始"的原样，探针断言不用跟着改口径。
+    node.append(svg("g", { class: "sankey-plot", transform: `translate(0, ${TOP})` }, ribbonLayer, nodeLayer));
 
     // 颜色按**起点节点名**分配：同一个工作空间/模型的流出保持同色，方便顺着
     // 一条流看下去。色板只用 styles.css 里真实定义的变量——写一个不存在的
@@ -582,6 +590,7 @@ export function sankey({ links, layers, metricLabel, height = 420, formatValue: 
     }
 
     layout.columns.forEach((column, layerIndex) => {
+      const last = layerIndex === layout.columns.length - 1;
       for (const item of column.nodes) {
         const rect = svg("rect", {
           class: "sankey-node",
@@ -590,25 +599,29 @@ export function sankey({ links, layers, metricLabel, height = 420, formatValue: 
         });
         rect.append(svg("title", {}, `${item.name}：${format(item.value)} ${metricLabel}`));
         nodeLayer.append(rect);
-        // 标签：首层放左边（外面），其余层放右边，避免压到上一层的流带。
-        const anchor = layerIndex === 0 ? "end" : "start";
-        const dx = layerIndex === 0 ? -6 : column.width + 6;
+        // 标签一律留在**列与列之间的空隙**里：首列也写在节点右侧（写成左侧会落到
+        // x=-6，整段跑出画布外），末列改为右对齐写在节点左侧（写成右侧同样会跑出
+        // 右边界）。这样五列的标签都不会溢出画布，顶多压在流带上——流带是半透明的，
+        // 靠 .sankey-label 的底色描边（paint-order）保证字仍然清楚。
         nodeLayer.append(svg("text", {
           class: "sankey-label",
-          x: column.x + dx, y: item.y + item.height / 2 + 3.5,
-          "text-anchor": anchor, ...AXIS_TEXT,
+          x: last ? column.x - 6 : column.x + column.width + 6,
+          y: item.y + item.height / 2 + 3.5,
+          "text-anchor": last ? "end" : "start", ...AXIS_TEXT,
         }, clampLabel(item.name)));
       }
     });
 
     // 层标题：说明每一列是什么，否则读者不知道第 3 列为什么是 provider。
+    // 画在顶带里（y=12），首列左对齐、末列右对齐，中间列居中，都不会越出画布。
     if (layers && layers.length) {
       const labels = { workspace: "工作空间", requested_model_id: "请求模型", model_id: "实际模型", provider_id: "供应商", upstream_model_id: "上游模型" };
       layout.columns.forEach((column, index) => {
         const key = layers[index];
+        const anchor = index === 0 ? "start" : index === layout.columns.length - 1 ? "end" : "middle";
         node.append(svg("text", {
           class: "axis-label sankey-column-label",
-          x: column.x, y: 12, "text-anchor": index === 0 ? "start" : "middle", ...AXIS_TEXT,
+          x: column.x, y: 12, "text-anchor": anchor, ...AXIS_TEXT,
         }, labels[key] || key || ""));
       });
     }

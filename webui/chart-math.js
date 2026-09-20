@@ -648,12 +648,16 @@ export function sankeyLayout(links, { width = 900, height = 420, nodeWidth = 14,
     const columnHeight = totals[index] * scale + gap * Math.max(0, nodes.length - 1);
     // 垂直居中：留白平分到上下，而不是全压在底部。
     let cursor = Math.max(0, (height - columnHeight) / 2);
+    const x = index * step;
     return {
-      x: index * step,
+      x,
       width: nodeWidth,
+      // 节点的 x 必须挂在**节点自己**身上：连边锚点要同时用到两端节点的 x
+      // （左边缘进、右边缘出），只有列上带 x 的话锚点会算成 NaN/undefined，
+      // 整条流带的路径就退化成 "M NaN … L undefined … Z" 而被浏览器丢弃。
       nodes: nodes.map((node) => {
         const nodeHeight = node.value * scale;
-        const entry = { ...node, y: cursor, height: nodeHeight, offset: 0, outOffset: 0 };
+        const entry = { ...node, x, y: cursor, height: nodeHeight, offset: 0, outOffset: 0 };
         cursor += nodeHeight + gap;
         return entry;
       }),

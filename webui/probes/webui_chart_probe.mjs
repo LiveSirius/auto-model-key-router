@@ -388,11 +388,35 @@ check("sankey_out_edges_do_not_overlap",
   outs.length === 2 && near(outs[0].source.y + outs[0].thickness, outs[1].source.y, 1e-6),
   outs.map((edge) => `${edge.source.y}+${edge.thickness}`).join(" "));
 
-// 路径是合法的闭合 SVG 路径。
+// 路径是合法的闭合 SVG 路径，且**每个坐标都必须是有限数字**。
+//
+// 只断言"M 开头、Z 结尾"是漏的：端点算成 NaN/undefined 时路径会变成
+// "M NaN 6 C NaN 6, … L undefined 0 … Z"，照样以 M 开头、以 Z 结尾，浏览器却会
+// 把整条路径丢弃——图上表现为"五列之间一根流带都没有"。所以这里必须连坐标一起验。
 const flowPath = m.sankeyLinkPath(layout.edges[0]);
 check("sankey_path_is_closed",
   typeof flowPath === "string" && flowPath.startsWith("M ") && flowPath.endsWith("Z"),
   String(flowPath).slice(0, 24));
+check("sankey_path_coordinates_are_finite",
+  !/NaN|undefined|null|Infinity/.test(flowPath), String(flowPath).slice(0, 60));
+let badPath = 0;
+for (const edge of layout.edges) {
+  if (/NaN|undefined|null|Infinity/.test(m.sankeyLinkPath(edge))) badPath += 1;
+}
+check("sankey_all_paths_have_finite_coordinates", badPath === 0, `${badPath}/${layout.edges.length} 条含非法坐标`);
+
+// 每条流带的两端锚点都必须落在**节点的左右边缘**上。缺 x（历史上节点对象只带
+// y/height、x 只挂在列上）正是上面那条路径 NaN 的根因，这里直接盯住锚点本身。
+let badAnchor = 0;
+for (const edge of layout.edges) {
+  const from = layout.columns[edge.sourceLayer].nodes.find((n) => n.name === edge.sourceName);
+  const to = layout.columns[edge.targetLayer].nodes.find((n) => n.name === edge.targetName);
+  if (!from || !to) { badAnchor += 1; continue; }
+  if (!Number.isFinite(edge.source.x) || !Number.isFinite(edge.target.x)) { badAnchor += 1; continue; }
+  if (Math.abs(edge.source.x - (from.x + layout.nodeWidth)) > 1e-6) badAnchor += 1;
+  else if (Math.abs(edge.target.x - to.x) > 1e-6) badAnchor += 1;
+}
+check("sankey_edge_anchors_hug_node_edges", badAnchor === 0, `${badAnchor} 个锚点没贴在节点边缘`);
 
 // 退化输入不能抛异常。
 check("sankey_empty_is_empty", m.sankeyLayout([], {}).edges.length === 0);
