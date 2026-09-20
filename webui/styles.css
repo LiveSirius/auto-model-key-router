@@ -321,13 +321,16 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 .stream { max-height: 520px; overflow-y: auto; }
 
 /* ══ KPI 瓦片 ══ */
-/* 显式列数而不是 auto-fit：看板瓦片数量固定为 8，auto-fit 会在宽屏排成 7+1 的
- * 孤儿行。写成 4 列则任何宽度下都是 2 整行，视觉节奏稳定。 */
+/* 显式列数而不是 auto-fit：瓦片数量是各页写死的（概览 10、用量统计 8、成本与面板 4），
+ * auto-fit 会在宽屏把最后一张甩成孤儿行。写死列数则每行都排满，视觉节奏稳定。
+ *
+ * 默认 4 列；概览是 10 张，用 cols-5 恰好两整行。 */
 .stat-grid {
   display: grid;
   gap: var(--sp-2);
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
+.stat-grid.cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .stat {
   position: relative;
   min-width: 0;
@@ -411,9 +414,16 @@ code, .mono { font-family: var(--mono); font-size: 12px; }
 }
 .chart.sankey .sankey-ribbon:hover { opacity: 0.72; }
 .chart.sankey .sankey-node { transition: opacity var(--dur) var(--ease); }
+/* 节点标签必然有一部分压在流带上（两列之间就是流带的走廊），半透明流带会从笔画
+   缝隙里透出来，字就糊了。用底色描一圈"光晕"：paint-order: stroke 让描边画在填充
+   **下面**，字形本身不被描边啃掉，只是四周多了一圈底色衬底。 */
 .chart.sankey .sankey-label {
   fill: var(--md-on-surface);
   font-family: var(--font);
+  stroke: var(--md-surface);
+  stroke-width: 3;
+  stroke-linejoin: round;
+  paint-order: stroke;
 }
 .chart.sankey .sankey-column-label { fill: var(--md-on-surface-variant); }
 
@@ -1121,9 +1131,13 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
 /* ══ 响应式：栅格逐级塌缩，看板在窄屏变单列 ══ */
 @media (max-width: 1280px) {
   .col-3 { grid-column: span 4; }
-  /* 8 个瓦片排 4 列时每张只有 ~150px，"最慢 9.80s" 这类副文案会换行挤压，
-   * 所以中等宽度就退回 2 列。 */
-  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* 瓦片排 4 列时每张只有 ~150px，"最慢 9.80s" 这类副文案会换行挤压，
+   * 所以中等宽度就退回 2 列。
+   *
+   * cols-5 必须一起写：媒体查询里的 .stat-grid 只有 1 个类，压不过
+   * .stat-grid.cols-5 的 2 个类，漏了这句概览在窄屏会一直卡在 5 列不塌缩。 */
+  .stat-grid,
+  .stat-grid.cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 1024px) {
   :root { --nav-w: 200px; }
@@ -1169,7 +1183,9 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   .app-bar { gap: 8px; padding: 0 8px; }
   .app-bar .brand { font-size: 15px; }
   .page-actions { margin-left: 0; width: 100%; }
-  .stat-grid { grid-template-columns: minmax(0, 1fr); }
+  /* cols-5 同 1280px 断点：2 个类压得过 1 个类，不一起写概览在手机上会是 5 列挤成一团。 */
+  .stat-grid,
+  .stat-grid.cols-5 { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* 系统级减弱动效：关掉位移与循环动画，但保留状态可辨识度 */

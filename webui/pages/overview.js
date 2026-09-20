@@ -12,7 +12,7 @@ import {
 } from "../dom.js";
 import { api } from "../api.js";
 import {
-  card, cardHead, stat, statGrid, notice, badge, empty, skeleton, render,
+  card, cardHead, stat, statGrid5, statSkeleton, notice, badge, empty, skeleton, render,
   buttonNode, segmented, freshness, progressBar, toast,
 } from "../ui.js";
 import { icon } from "../icons.js";
@@ -151,6 +151,8 @@ function kpiTiles(metrics, points, bucketSeconds) {
   const total = metrics.total || {};
   const successRatio = total.requests ? total.successes / total.requests : null;
   const cacheRatio = total.prompt_tokens ? total.cached_tokens / total.prompt_tokens : null;
+  // retries 是 SUM(retried)，每行一条尝试记录，所以分母同样用 requests（= COUNT(*)）。
+  const retryRatio = total.requests ? total.retries / total.requests : null;
   const currentRpm = metrics.current_rpm ?? 0;
   const currentTpm = metrics.current_tpm ?? 0;
   // 环比只看"已完结"的桶，否则末尾残桶会把结论拖偏。
@@ -161,7 +163,7 @@ function kpiTiles(metrics, points, bucketSeconds) {
   const statusTone = metrics.router_status === "red" ? "bad"
     : metrics.router_status === "yellow" ? "warn" : null;
 
-  return statGrid(
+  return statGrid5(
     stat("当前 RPM", formatCount(currentRpm), `近 ${metrics.rate_window_seconds || 60} 秒窗口`, {
       unit: "次/分", iconName: "bolt", tone: statusTone,
     }),
@@ -177,6 +179,18 @@ function kpiTiles(metrics, points, bucketSeconds) {
       `${formatCount(total.successes)} 成功 · ${formatCount(total.failures)} 失败`, {
         iconName: "check",
         tone: successRatio !== null && successRatio < 0.95 ? "bad" : null,
+      }),
+    // 重试率补的是成功率盖住的那一半：成功率只说"最终成没成"，
+    // 上游抖动到靠重试兜住时它照样接近 100%，这里才看得出来。
+    // 分母用 requests 与成功率同源，两个数字可以直接对读。
+    stat("重试率", retryRatio === null ? "-" : formatPercentValue(retryRatio, 1),
+      retryRatio === null
+        ? "窗口内无请求"
+        : `${formatCount(total.retries)} 次重试 / ${formatCount(total.requests)} 次请求`, {
+        iconName: "refresh",
+        // 重试率升高是坏事，用默认的 inverse 极性（涨=红）；>10% 直接把瓦片标红。
+        tone: retryRatio !== null && retryRatio > 0.1 ? "bad"
+          : retryRatio !== null && retryRatio > 0.02 ? "warn" : null,
       }),
     stat("Token 用量", formatCompact(total.total_tokens),
       `输入 ${formatCompact(total.prompt_tokens)} · 输出 ${formatCompact(total.completion_tokens)}`, {
@@ -791,7 +805,8 @@ function draw(firstPaint = false) {
   }
 
   if (!metrics) {
-    children.push(skeleton("stats"));
+    // 10 张 / 5 列，与 kpiTiles 的真实网格对齐。
+    children.push(statSkeleton(10, 5));
     children.push(card(cardHead("流量趋势"), skeleton("chart")));
     render(host, children);
     return;

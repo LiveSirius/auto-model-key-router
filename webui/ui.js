@@ -142,9 +142,17 @@ export function stat(label, value, hint, options = {}) {
   );
 }
 
-// KPI 网格：自适应列宽，窄屏自动单列。
+// KPI 网格：列数由 CSS 决定（默认 4 列），窄屏逐级塌缩。
 export function statGrid(...tiles) {
   return h("div.stat-grid", {}, tiles.flat().filter(Boolean));
+}
+
+// 5 列变体：给 10 张瓦片的看板用（目前只有概览）。
+// 单开一个函数而不是给 statGrid 加参数：它是变参的，插一个列数参数会把另外四处
+// 调用（用量统计 8 张、工作空间 5 张、成本页 4 张、面板 4 张）一起卷进改动，
+// 而那几处都靠默认的 4 列。
+export function statGrid5(...tiles) {
+  return h("div.stat-grid.cols-5", {}, tiles.flat().filter(Boolean));
 }
 
 export function empty(text, options = {}) {
@@ -245,14 +253,18 @@ export function kv(pairs) {
   return list;
 }
 
+// KPI 骨架：瓦片数与列数必须与真实网格一致，否则数据到位时会整块跳一下。
+export function statSkeleton(count = 4, cols = 4) {
+  return h(cols === 5 ? "div.stat-grid.cols-5" : "div.stat-grid", {},
+    Array.from({ length: count }, () =>
+      h("div.stat.is-loading", {},
+        h("div.skel.skel-sm"), h("div.skel.skel-lg"), h("div.skel.skel-sm"))));
+}
+
 // —— 骨架屏 ——
 // 结构形状贴近真实内容（读数块 + 图区 + 行），比转圈更能说明"将要出现什么"。
 export function skeleton(kind = "chart", rows = 5) {
-  if (kind === "stats") {
-    return h("div.stat-grid", {}, Array.from({ length: 4 }, () =>
-      h("div.stat.is-loading", {},
-        h("div.skel.skel-sm"), h("div.skel.skel-lg"), h("div.skel.skel-sm"))));
-  }
+  if (kind === "stats") return statSkeleton(4);
   if (kind === "table") {
     return h("div.table-scroll", {}, h("div.skeleton-table", {},
       Array.from({ length: rows }, (_, index) =>

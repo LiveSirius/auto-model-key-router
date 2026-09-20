@@ -892,6 +892,12 @@ if (scenario === "stale_key_prompts_login") {
   // 首次进入：等异步数据落地，确认首页确实画出了 KPI 瓦片。
   await settle();
   checks.firstEntryHasContent = byClass("stat-grid").length === 1;
+  // 概览是 10 张瓦片排 5 列（两整行）。列数写死在 CSS 的 .cols-5 里，这里同时
+  // 锁住"类名还在"和"瓦片数正好排满"，否则以后加第 11 张又会甩出孤儿行。
+  checks.overviewUsesFiveColumns = byClass("cols-5").length === 1;
+  checks.overviewHasTenTiles = byClass("stat").length === 10;
+  // 重试率是补进第 10 格的那张，得真的画出来（不是被 cols-5 挤掉）。
+  checks.showsRetryKpi = text().includes("重试率");
 
   // 切走再切回：这一次 state 里的快照/序列/热力图都还在缓存里，两条 load* 都会
   // 提前 return（不产生任何回调），所以内容只能靠 renderOverview 里的同步首绘。
