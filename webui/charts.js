@@ -10,7 +10,7 @@ import { h, svg, mount, formatClockSeconds, formatDateTime, formatAxisTime, clam
 import {
   METRIC_MAP, axisScale, timeTicks, metricValue, windowSums,
   heatmapCells, heatmapScale, heatmapLevel, WEEKDAY_LABELS, HEATMAP_SLOTS, HEAT_LEVELS,
-  slotLabel,
+  slotLabel, fitLabel, sankeyLabelBudget,
   readable, gapBridges, sankeyLayout, sankeyLinkPath,
   formatNumber, formatCompactNumber, formatPercentValue, formatDurationValue,
 } from "./chart-math.js";
@@ -591,6 +591,12 @@ export function sankey({ links, layers, metricLabel, height = 420, formatValue: 
 
     layout.columns.forEach((column, layerIndex) => {
       const last = layerIndex === layout.columns.length - 1;
+      // 标签一律写在**列与列之间的走廊**里，而最右那条走廊里挤着两个标签
+      // （倒数第二列从左往右写、末列从右往左写），所以末列只能分到走廊的一半；
+      // 其余列各自独占一条走廊，可以写满。不按走廊收窄的话，窄窗口下最右那两个
+      // 标签会贴到一起糊成一片。减掉的 12px + 节点宽是两端各 6px 偏移与节点占位。
+      const step = layout.columns.length > 1 ? layout.columns[1].x - layout.columns[0].x : width;
+      const labelBudget = sankeyLabelBudget({ step, nodeWidth: layout.nodeWidth, last });
       for (const item of column.nodes) {
         const rect = svg("rect", {
           class: "sankey-node",
@@ -608,7 +614,7 @@ export function sankey({ links, layers, metricLabel, height = 420, formatValue: 
           x: last ? column.x - 6 : column.x + column.width + 6,
           y: item.y + item.height / 2 + 3.5,
           "text-anchor": last ? "end" : "start", ...AXIS_TEXT,
-        }, clampLabel(item.name)));
+        }, fitLabel(item.name, labelBudget)));
       }
     });
 
@@ -632,11 +638,8 @@ export function sankey({ links, layers, metricLabel, height = 420, formatValue: 
   return host;
 }
 
-// 标签过长会盖住流带：截断而不是换行（SVG 里换行要手算 tspan，不值得）。
-function clampLabel(name) {
-  const text = String(name ?? "");
-  return text.length > 18 ? `${text.slice(0, 17)}…` : text;
-}
+// 节点标签的截断走 chart-math.js 的 fitLabel：那里不碰 DOM，探针能直接断言
+// 截断结果塞得进可用宽度，而不是只靠肉眼在浏览器里看。
 
 // —— 图例 ——
 export function legend(items) {

@@ -418,6 +418,36 @@ for (const edge of layout.edges) {
 }
 check("sankey_edge_anchors_hug_node_edges", badAnchor === 0, `${badAnchor} 个锚点没贴在节点边缘`);
 
+// —— 节点标签排版 ——
+// 标签宽度按像素估：汉字按 1 个字宽、ASCII 按 0.56，混排不能只数字符数，
+// 否则 'gpt-4o-2024-08-06' 这类名字会被砍掉近一半而它本来放得下。
+check("text_width_counts_cjk_wider", m.textWidth("中文") > m.textWidth("ab"),
+  `${m.textWidth("中文")} vs ${m.textWidth("ab")}`);
+check("text_width_ascii_is_fractional", Math.abs(m.textWidth("abcd") - 4 * 0.56 * 10) < 1e-9,
+  String(m.textWidth("abcd")));
+check("fit_label_keeps_text_that_fits", m.fitLabel("gpt-4o", 100) === "gpt-4o");
+// 截断结果必须**真的**塞进预算内，否则窄窗口下还是会和邻列贴到一起。
+let overflow = 0;
+for (const [name, budget] of [["gpt-4o-2024-08-06", 60], ["claude-sonnet-4-20250514", 80], ["中文很长的模型名字", 50]]) {
+  if (m.textWidth(m.fitLabel(name, budget)) > budget) overflow += 1;
+}
+check("fit_label_result_fits_budget", overflow === 0, `${overflow} 条溢出`);
+check("fit_label_marks_truncation", m.fitLabel("gpt-4o-2024-08-06", 40).endsWith("…"),
+  m.fitLabel("gpt-4o-2024-08-06", 40));
+// 退化预算不能算出空串或抛异常（窄到极限时仍要留下可读的字符）。
+check("fit_label_survives_tiny_budget",
+  typeof m.fitLabel("gpt-4o", 1) === "string" && m.fitLabel("gpt-4o", 1).length > 0,
+  m.fitLabel("gpt-4o", 1));
+
+// 末列与倒数第二列共用同一条走廊，预算必须只有其它列的一半；否则窄窗口下
+// 最右那两个标签会贴到一起（宽窗口下看不出来，所以只靠肉眼看会漏）。
+const midBudget = m.sankeyLabelBudget({ step: 300, nodeWidth: 14, last: false });
+const lastBudget = m.sankeyLabelBudget({ step: 300, nodeWidth: 14, last: true });
+check("sankey_last_label_budget_is_half", Math.abs(lastBudget - midBudget / 2) < 1e-9,
+  `${lastBudget} vs ${midBudget}`);
+check("sankey_label_budget_positive_on_tiny_step",
+  m.sankeyLabelBudget({ step: 0, nodeWidth: 14 }) > 0, String(m.sankeyLabelBudget({ step: 0 })));
+
 // 退化输入不能抛异常。
 check("sankey_empty_is_empty", m.sankeyLayout([], {}).edges.length === 0);
 check("sankey_layers_empty", m.sankeyLayers([]).length === 0);

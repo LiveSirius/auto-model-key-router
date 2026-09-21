@@ -715,6 +715,45 @@ export function sankeyLinkPath(edge) {
   return `${top} ${back}`;
 }
 
+// 轴/节点标签的**排版估算**放在这里（而不是 charts.js）：charts.js 碰 DOM，探针
+// 加载不了，截断长度算错就只能靠肉眼在浏览器里发现——桑基图流带坐标缺失那个 bug
+// 正是这样漏出去的。
+//
+// 10px 字号下的近似字宽：CJK/全角按 10px，ASCII 按 5.6px。混排时不能只按字符数
+// 估：'gpt-4o-2024-08-06'（17 字）与 17 个汉字宽度差近一倍。
+export function textWidth(text, size = 10) {
+  let units = 0;
+  for (const ch of String(text ?? "")) units += ch.codePointAt(0) > 0x2e80 ? 1 : 0.56;
+  return units * size;
+}
+
+// 把标签截断到能塞进 budget 像素，放得下就原样返回。
+//
+// 用二分找最长前缀而不是"按字数换算"：混排文本每多一个字宽度增量不同，累加判断
+// 才对得上 textWidth；省略号本身也占位，所以先给结尾留一个全角位。
+export function fitLabel(name, budget, size = 10) {
+  const text = String(name ?? "");
+  if (textWidth(text, size) <= budget) return text;
+  const chars = [...text];
+  const room = budget - size;
+  let low = 0;
+  let high = chars.length;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (textWidth(chars.slice(0, mid).join(""), size) <= room) low = mid;
+    else high = mid - 1;
+  }
+  return `${chars.slice(0, low).join("")}…`;
+}
+
+// 节点标签能占多宽：标签写在列与列之间的走廊里，而**最右那条走廊挤着两个标签**
+// （倒数第二列从左往右写、末列从右往左写），所以末列只能分到走廊的一半。
+// 列宽与左右各 6px 的偏移要从走廊里扣掉。
+export function sankeyLabelBudget({ step, nodeWidth = 14, last = false, inset = 6 } = {}) {
+  const room = Math.max(20, (step || 0) - nodeWidth - inset * 2);
+  return last ? room / 2 : room;
+}
+
 export function cumulativeSeries(seriesPoints) {
   let running = 0;
   return (seriesPoints || []).map((point) => {
