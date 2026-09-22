@@ -542,14 +542,18 @@ function draw(firstPaint = false) {
   }
 
   children.push(kpiTiles(metrics, points, bucketSeconds));
+  // 每排都要正好排满 12 轨，否则右边会剩一条空轨。这条约束在四档断点下同时成立
+  // 靠的是两种排法：整宽卡（col-12）自成一行，半宽卡（col-4/col-5/col-6）两两成对。
+  // 因此 col-8 不能夹在半宽卡中间：<=1024px 时它会变成整行，把前面的半宽卡剩在
+  // 半行里（性能趋势与上游构成原来各占 col-8/col-4，就在这一档留了空轨）。
   children.push(h("div.grid-12", {},
     h("div.col-12", {}, cumulativeCard(points, bucketSeconds)),
     h("div.col-8", {}, dailyCard(points)),
     h("div.col-4", {}, hourlyCard(points)),
-    h("div.col-8", {}, latencyCard(points, bucketSeconds)),
     h("div.col-4", {}, compositionCard(metrics)),
     h("div.col-4", {}, statusCard(metrics)),
     h("div.col-4", {}, upstreamCard(metrics)),
+    h("div.col-12", {}, latencyCard(points, bucketSeconds)),
     h("div.col-6", {}, breakdownCard("模型用量", metrics.models, "模型", "窗口内没有模型调用。")),
     h("div.col-6", {}, breakdownCard("调用方用量", metrics.caller_types, "调用方", "窗口内没有调用方数据。")),
     h("div.col-12", {}, breakdownCard("模型 / Key 用量", flattenKeys(metrics.keys), "条目", "窗口内没有 Key 调用数据。")),
