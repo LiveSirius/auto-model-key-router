@@ -822,16 +822,19 @@ function draw(firstPaint = false) {
   children.push(h("div.grid-12", {},
     // 实时脉搏紧跟在 KPI 下方并占满整行：它和 KPI 是同一个时间尺度上的两种读法。
     h("div.col-12", {}, pulseCard(points, bucketSeconds)),
-    h("div.col-8", {}, trendCard()),
-    h("div.col-4", {}, unifiedCard()),
+    // 趋势与统一视图固定 6+6：<=1024px 时 col-7/col-8 会变成整行，若这里是
+    // 8+4，窄档会把 unifiedCard 剩成半行；6+6 在半宽档仍然是 6+6，四档都排满。
+    h("div.col-6", {}, trendCard()),
+    h("div.col-6", {}, unifiedCard()),
     // 热力图是"一眼看节律"的图，占满整行；24 个小时列塞进 col-4 每格只剩十几像素。
     h("div.col-12", {}, heatmapCard()),
-    h("div.col-5", {}, streamCard()),
+    // 同上：请求流与它右边那一列在窄档都退化成半宽，只有 6+6 能成行。
+    h("div.col-6", {}, streamCard()),
     // 两张堆叠柱上下同列：它们画的是同一份 points、同一个桶宽，横轴完全对齐，
     // 并排看"结果结构"与"Token 结构"才读得出同步异动。此前 Token 图单独占
     // col-12，而请求流限高 520px 把本排撑到 652px，"结果构成"卡下方空出近 300px
     // —— 不是把图拉高填满（定高图表拉长只会让图内多出空白），而是把这张图搬进来。
-    h("div.col-7", {},
+    h("div.col-6", {},
       outcomeCard(points, bucketSeconds),
       tokenBreakdownCard(points, bucketSeconds),
     ),
