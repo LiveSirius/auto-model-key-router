@@ -30,8 +30,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
-    # Python 退役后，前端资产（webui/，18 个文件）仍是随包发布的共享资产，它们的
-    # 正确性不能只靠"没改过"来保证。这里用三个独立的 node 探针把它锁住。
+    # Python 退役后，前端资产（webui/）仍是随包发布的共享资产，它们的正确性不能只
+    # 靠"没改过"来保证。这里用一组独立的 node 探针把它锁住：每个探针只管一个口径，
+    # 失败时自己退出非 0。
     #
     # 为什么必须单独跑 module check：探针只 import app.js / api.js / charts.js /
     # chart-math.js 及其传递依赖，**入口 main.js 不被任何探针加载**——它出错
@@ -90,6 +91,12 @@ jobs:
         # （与管理面同源，共享存储会互相覆盖凭据）、绝不发 X-AMKR-Workspace
         # （空间由 key 钉死）。面板会被嵌进第三方后台，这三条是它的全部安全边界。
         run: node webui/probes/webui_panel_probe.mjs
+
+      - name: 看板栅格探针
+        # 锁住"每一排都排满"：空轨是 CSS 栅格的产物，DOM 垫片没有 CSS 引擎量不到，
+        # 所以它直接读 styles.css 的断点定义与页面里声明的卡片/瓦片/列数，按 max-width
+        # 级联算一遍。列数除不尽（孤儿瓦片）与半宽卡落单（空轨）都会在这里失败。
+        run: node webui/probes/webui_layout_probe.mjs
 
   go:
     name: Go 静态检查与测试
