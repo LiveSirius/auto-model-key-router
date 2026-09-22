@@ -487,8 +487,8 @@ const setup = {
     storage.set("amkr.apiKey", "good-key");
     server.historyFrom = "2020-01-01T00:00:00+08:00";
   },
-  // 工作空间页：KPI 是 5 张瓦片，必须排成 5 列的一整行。用默认的 4 列会变成 4+1，
-  // 「未归属请求」被甩到第二行独自占位——这是概览页修过一轮的同一个毛病。
+  // 工作空间页：KPI 是 10 张瓦片，必须排满每一档（5 列两整行 / 2 列五行）。
+  // 5 张时 2 列档会甩出一张孤儿瓦片——这是概览页修过一轮的同一个毛病。
   workspaces_kpi_grid_has_no_orphan: () => {
     global.location.hash = "#/workspaces";
     storage.set("amkr.apiKey", "good-key");
@@ -497,8 +497,8 @@ const setup = {
       window: { from: "2026-01-01T09:00:00+08:00", to: "2026-01-01T10:00:00+08:00", hours: 1 },
       workspaces: [
         // 两个空间：只给一个空间有量，另一个为空，顺带覆盖"空空间仍要列出来"。
-        { name: "default", stats: { requests: 120, successes: 118, failures: 2, retries: 1, prompt_tokens: 8000, completion_tokens: 2000, total_tokens: 10000, cached_tokens: 4000 } },
-        { name: "team-a", stats: { requests: 0, successes: 0, failures: 0, retries: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0 } },
+        { name: "default", stats: { requests: 120, successes: 118, failures: 2, retries: 1, prompt_tokens: 8000, completion_tokens: 2000, total_tokens: 10000, cached_tokens: 4000, total_duration_ms: 9600, total_first_token_ms: 2400 } },
+        { name: "team-a", stats: { requests: 0, successes: 0, failures: 0, retries: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0, total_duration_ms: 0, total_first_token_ms: 0 } },
       ],
       // 未归属非零：升级前的历史行，页面要把它当"说明"而不是"次要细节"。
       unattributed: { requests: 30, total_tokens: 3000, successes: 29, failures: 1 },
@@ -973,15 +973,19 @@ if (scenario === "stale_key_prompts_login") {
   await settle();
   const body = text();
   checks.isWorkspacesPage = body.includes("工作空间") && body.includes("归属请求");
-  // 5 张瓦片排 5 列 = 一整行，没有孤儿瓦片。列数写死在 CSS 的 .cols-5 里，
-  // 这里同时锁住"类名还在"和"瓦片数正好排满"。
+  // 10 张瓦片排 5 列 = 两整行，没有孤儿瓦片。列数写死在 CSS 的 .cols-5 里，
+  // 这里同时锁住"类名还在"和"瓦片数正好排满"（2 列档还有一层：10 也要能被 2 整除）。
   checks.usesFiveColumns = byClass("cols-5").length === 1;
-  checks.hasFiveTiles = byClass("stat").length === 5;
-  // 五张瓦片各自的读数都在（少一张也照样可能凑够 5 个 .stat，所以要按名字点）。
-  checks.showsAllKpiLabels = ["工作空间", "归属请求", "归属 Token", "成功率", "未归属请求"]
-    .every((label) => body.includes(label));
+  checks.hasTenTiles = byClass("stat").length === 10;
+  // 十张瓦片各自的读数都在（少一张也照样可能凑够 10 个 .stat，所以要按名字点）。
+  checks.showsAllKpiLabels = [
+    "工作空间", "归属请求", "归属 Token", "成功率", "未归属请求",
+    "失败请求", "重试次数", "缓存命中率", "平均耗时", "平均首字",
+  ].every((label) => body.includes(label));
   // 未归属 30 / 全部 150 = 20.0%：这个占比是升级后第一眼要看的数字。
   checks.showsOrphanShare = body.includes("20.0%");
+  // 缓存 4000 / 输入 8000 = 50.0%：补进来的那批瓦片必须真的在算，不是摆样子。
+  checks.showsCacheRatio = body.includes("50.0%");
   // 未归属非零时流向图前面必须给说明，否则用户会以为图少画了一块。
   checks.explainsUnattributed = body.includes("没有工作空间归属");
   // 流向图真的画出来了（五列都要有节点）。

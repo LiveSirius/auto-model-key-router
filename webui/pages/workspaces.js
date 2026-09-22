@@ -8,7 +8,7 @@
 // 它同时给出各空间的用量统计与五层流向连边，共用同一个时间窗口。
 
 import {
-  h, formatCount, formatCompact, errorText,
+  h, formatCount, formatCompact, formatDuration, errorText,
 } from "../dom.js";
 import { api } from "../api.js";
 import {
@@ -119,9 +119,16 @@ function kpiTiles(data) {
     requests: acc.requests + (item.stats.requests || 0),
     successes: acc.successes + (item.stats.successes || 0),
     failures: acc.failures + (item.stats.failures || 0),
+    retries: acc.retries + (item.stats.retries || 0),
+    prompt_tokens: acc.prompt_tokens + (item.stats.prompt_tokens || 0),
     total_tokens: acc.total_tokens + (item.stats.total_tokens || 0),
     cached_tokens: acc.cached_tokens + (item.stats.cached_tokens || 0),
-  }), { requests: 0, successes: 0, failures: 0, total_tokens: 0, cached_tokens: 0 });
+    duration_ms: acc.duration_ms + (item.stats.total_duration_ms || 0),
+    first_token_ms: acc.first_token_ms + (item.stats.total_first_token_ms || 0),
+  }), {
+    requests: 0, successes: 0, failures: 0, retries: 0, prompt_tokens: 0,
+    total_tokens: 0, cached_tokens: 0, duration_ms: 0, first_token_ms: 0,
+  });
 
   const successRatio = totals.requests ? totals.successes / totals.requests : null;
   const busiest = workspaces.reduce(
@@ -129,9 +136,14 @@ function kpiTiles(data) {
   // 未归属占比：升级后第一眼最需要的数字——它说明有多少历史还没归到空间上。
   const allRequests = totals.requests + (unattributed.requests || 0);
   const orphanRatio = allRequests ? (unattributed.requests || 0) / allRequests : 0;
+  // 后五张与「用量统计」同一套口径：都按请求数加权，而不是把各空间的平均值再平均。
+  const perRequest = (total) => (totals.requests ? Math.round(total / totals.requests) : null);
+  const cacheRatio = totals.prompt_tokens ? totals.cached_tokens / totals.prompt_tokens : null;
+  const retryRatio = totals.requests ? totals.retries / totals.requests : null;
+  const failRatio = successRatio === null ? null : 1 - successRatio;
 
-  // 5 张瓦片排 5 列，正好一整行；用默认的 4 列会变成 4+1，
-  // 「未归属请求」孤零零甩在第二行。
+  // 10 张瓦片：5 列时两整行、2 列时五行、1 列时十行，每一档都排满。
+  // 只放 5 张的话 2 列档会甩出一张孤儿瓦片（webui/probes/webui_layout_probe.mjs 锁这条）。
   return statGrid5(
     stat("工作空间", formatCount(workspaces.length),
       workspaces.length ? `最活跃：${busiest?.name}（${formatCount(busiest?.stats.requests)} 次）` : "窗口内没有归属记录",
@@ -147,6 +159,22 @@ function kpiTiles(data) {
         ? `占窗口内全部请求的 ${formatPercentValue(orphanRatio, 1)}`
         : "窗口内无请求",
       { iconName: "alert", tone: orphanRatio > 0 ? "warn" : null }),
+    stat("失败请求", formatCount(totals.failures),
+      failRatio === null ? "窗口内无请求" : `占归属请求的 ${formatPercentValue(failRatio, 1)}`,
+      { iconName: "alert", tone: totals.failures ? "bad" : null }),
+    // 重试次数与成功率分开看：上游抖动到靠重试兜住时，成功率照样接近 100%。
+    stat("重试次数", formatCount(totals.retries),
+      retryRatio === null ? "窗口内无请求" : `重试率 ${formatPercentValue(retryRatio, 1)}`,
+      { iconName: "refresh" }),
+    stat("缓存命中率", cacheRatio === null ? "-" : formatPercentValue(cacheRatio, 1),
+      `缓存 ${formatCompact(totals.cached_tokens)} / 输入 ${formatCompact(totals.prompt_tokens)} Token`,
+      { iconName: "filter", tone: cacheRatio !== null && cacheRatio > 0.3 ? "good" : null }),
+    stat("平均耗时", perRequest(totals.duration_ms) === null ? "-" : formatDuration(perRequest(totals.duration_ms)),
+      totals.requests ? `按 ${formatCount(totals.requests)} 次归属请求加权` : "窗口内无请求",
+      { iconName: "clock" }),
+    stat("平均首字", perRequest(totals.first_token_ms) ? formatDuration(perRequest(totals.first_token_ms)) : "-",
+      totals.requests ? `按 ${formatCount(totals.requests)} 次归属请求加权` : "窗口内无请求",
+      { iconName: "bolt" }),
   );
 }
 
@@ -283,6 +311,25 @@ function rankCard(data) {
   );
 }
 
+// tokenRankCard 与请求排行并排，排序经常不一样：长上下文的空间在 Token 榜上更靠前。
+// 与 rankCard 不同，它空数据时也返回一张卡——它和请求排行同处一排，留空会看见缺口。
+function tokenRankCard(data) {
+  const rows = (data.workspaces || [])
+    .map((item) => ({ name: item.name, value: item.stats.total_tokens || 0 }))
+    .filter((row) => row.value > 0)
+    .sort((a, b) => b.value - a.value);
+  return card(
+    cardHead("Token 排行", badge(rangeLabel(), "muted")),
+    rows.length
+      ? barList(rows, {
+          tone: "secondary",
+          format: (row) => `${formatCompact(row.value)} Token`,
+          emptyText: "窗口内没有归属 Token。",
+        })
+      : empty("窗口内没有归属 Token。", { icon: "cost" }),
+  );
+}
+
 // —— 页面组装 ——
 function draw(firstPaint = false) {
   if (!host) return;
@@ -313,8 +360,8 @@ function draw(firstPaint = false) {
   if (state.loading && data) children.push(notice("正在读取所选窗口的数据，下方读数仍属于上一次查询的窗口。", "info"));
 
   if (!data) {
-    // 5 张 / 5 列，与 kpiTiles 的真实网格对齐。
-    children.push(statSkeleton(5, 5));
+    // 10 张 / 5 列，与 kpiTiles 的真实网格对齐（对不上数据到位时会整块跳一下）。
+    children.push(statSkeleton(10, 5));
     children.push(card(cardHead("请求流向"), skeleton("chart")));
     render(host, children);
     return;
@@ -332,8 +379,10 @@ function draw(firstPaint = false) {
   }
   children.push(h("div.grid-12", {},
     h("div.col-12", {}, flowCard(data)),
-    h("div.col-8", {}, breakdownCard(data)),
-    h("div.col-4", {}, rankCard(data) || card(cardHead("请求排行"), empty("窗口内没有归属请求。", { icon: "activity" }))),
+    // 明细表独占整行：它 9 列，收成半宽在 1024px 以下会挤出横向滚动条。
+    h("div.col-12", {}, breakdownCard(data)),
+    h("div.col-6", {}, rankCard(data) || card(cardHead("请求排行"), empty("窗口内没有归属请求。", { icon: "activity" }))),
+    h("div.col-6", {}, tokenRankCard(data)),
   ));
 
   render(host, children);
