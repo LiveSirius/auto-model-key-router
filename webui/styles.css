@@ -1177,8 +1177,12 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   .app-bar .brand small { display: none; }
   .live-pill .live-metrics { display: none; }
   .stat-value { font-size: 23px; }
+  /* 窄屏只留 4 轨：状态条 / 时间 / 模型 / 金额，与 .cost-row 的取舍一致
+   * （丢掉 Token 计数、留住金额）。列数与可见子元素必须一致，否则多出来的
+   * 金额列会掉到下一行、贴在那条 4px 状态条下面。 */
   .stream-row { grid-template-columns: 4px 58px minmax(0, 1fr) 64px; }
-  .stream-row .stream-latency { display: none; }
+  .stream-row .stream-latency,
+  .stream-row .stream-tokens { display: none; }
   .cost-row { grid-template-columns: minmax(0, 1fr) 64px; }
   .cost-row .cost-tokens { display: none; }
 }
