@@ -147,10 +147,10 @@ export function statGrid(...tiles) {
   return h("div.stat-grid", {}, tiles.flat().filter(Boolean));
 }
 
-// 5 列变体：给 10 张瓦片的看板用（目前只有概览）。
-// 单开一个函数而不是给 statGrid 加参数：它是变参的，插一个列数参数会把另外四处
-// 调用（用量统计 8 张、工作空间 5 张、成本页 4 张、面板 4 张）一起卷进改动，
-// 而那几处都靠默认的 4 列。
+// 5 列变体：给瓦片数能被 5 整除的看板用（概览 10 张、工作空间 5 张）。
+// 单开一个函数而不是给 statGrid 加参数：它是变参的，插一个列数参数会把另外三处
+// 调用（用量统计 8 张、成本页 4 张、面板 4 张）一起卷进改动，而那几处都靠默认的
+// 4 列正好排满。
 export function statGrid5(...tiles) {
   return h("div.stat-grid.cols-5", {}, tiles.flat().filter(Boolean));
 }

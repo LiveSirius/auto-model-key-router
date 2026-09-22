@@ -12,7 +12,7 @@ import {
 } from "../dom.js";
 import { api } from "../api.js";
 import {
-  card, cardHead, stat, statGrid, notice, badge, empty, skeleton, render,
+  card, cardHead, stat, statGrid5, statSkeleton, notice, badge, empty, skeleton, render,
   segmented, table, freshness,
 } from "../ui.js";
 import { sankey, barList } from "../charts.js";
@@ -130,7 +130,9 @@ function kpiTiles(data) {
   const allRequests = totals.requests + (unattributed.requests || 0);
   const orphanRatio = allRequests ? (unattributed.requests || 0) / allRequests : 0;
 
-  return statGrid(
+  // 5 张瓦片排 5 列，正好一整行；用默认的 4 列会变成 4+1，
+  // 「未归属请求」孤零零甩在第二行。
+  return statGrid5(
     stat("工作空间", formatCount(workspaces.length),
       workspaces.length ? `最活跃：${busiest?.name}（${formatCount(busiest?.stats.requests)} 次）` : "窗口内没有归属记录",
       { iconName: "layers" }),
@@ -311,7 +313,8 @@ function draw(firstPaint = false) {
   if (state.loading && data) children.push(notice("正在读取所选窗口的数据，下方读数仍属于上一次查询的窗口。", "info"));
 
   if (!data) {
-    children.push(skeleton("stats"));
+    // 5 张 / 5 列，与 kpiTiles 的真实网格对齐。
+    children.push(statSkeleton(5, 5));
     children.push(card(cardHead("请求流向"), skeleton("chart")));
     render(host, children);
     return;

@@ -136,6 +136,9 @@ const server = {
   // 服务日志页的文本。
   logs: "",
   logsError: null,
+  // 工作空间用量快照（/ui/workspace-usage.json）。null = 服务端尚未给出，
+  // 此时页面应走加载态骨架而不是画空看板。
+  workspaceUsage: null,
 };
 
 function respond(status, payload) {
@@ -232,6 +235,12 @@ global.fetch = async (url, options = {}) => {
       settings: { host: "127.0.0.1", port: 28881, max_retries: 2, local_auth_enabled: true },
     });
   }
+  // 工作空间用量（工作空间页的 KPI、流向图与两张表都出自这一份）。
+  // 挂在 /ui/ 下但仍需鉴权，所以放在鉴权分支之后。
+  if (path.startsWith("/ui/workspace-usage.json")) {
+    if (!server.workspaceUsage) return respond(503, { detail: "工作空间用量尚不可用" });
+    return respond(200, server.workspaceUsage);
+  }
   if (path.startsWith("/api/models")) {
     return respond(200, {
       config_revision: "rev-1",
@@ -311,7 +320,12 @@ function findAll(node, predicate, out = []) {
 const text = () => root.textContent;
 const inputs = () => findAll(root, (n) => n.tagName === "input");
 const buttons = () => findAll(root, (n) => n.tagName === "button");
-const byClass = (name) => findAll(root, (n) => String(n.className || "").split(/\s+/).includes(name));
+// 按类名找节点。必须**同时**看 className 与 attrs.class：SVG 节点的 className 是
+// 只读的 SVGAnimatedString，dom.js 因此对 SVG 一律走 setAttribute，类名落在 attrs 里。
+// 早先只读 className，于是所有 SVG 节点（桑基图的 sankey-node 等）对 byClass 隐形——
+// 断言它们存在时会永远为 0，断言它们不存在时则永远为真，两种都是假的。
+const byClass = (name) => findAll(root, (n) => `${n.className || ""} ${n.attrs?.class || ""}`
+  .split(/\s+/).includes(name));
 const clickButton = async (label) => {
   const target = buttons().find((b) => b.textContent.trim() === label);
   if (!target) throw new Error(`找不到按钮: ${label}`);
@@ -472,6 +486,30 @@ const setup = {
     global.location.hash = "#/activity";
     storage.set("amkr.apiKey", "good-key");
     server.historyFrom = "2020-01-01T00:00:00+08:00";
+  },
+  // 工作空间页：KPI 是 5 张瓦片，必须排成 5 列的一整行。用默认的 4 列会变成 4+1，
+  // 「未归属请求」被甩到第二行独自占位——这是概览页修过一轮的同一个毛病。
+  workspaces_kpi_grid_has_no_orphan: () => {
+    global.location.hash = "#/workspaces";
+    storage.set("amkr.apiKey", "good-key");
+    server.workspaceUsage = {
+      count_semantics: "attempts",
+      window: { from: "2026-01-01T09:00:00+08:00", to: "2026-01-01T10:00:00+08:00", hours: 1 },
+      workspaces: [
+        // 两个空间：只给一个空间有量，另一个为空，顺带覆盖"空空间仍要列出来"。
+        { name: "default", stats: { requests: 120, successes: 118, failures: 2, retries: 1, prompt_tokens: 8000, completion_tokens: 2000, total_tokens: 10000, cached_tokens: 4000 } },
+        { name: "team-a", stats: { requests: 0, successes: 0, failures: 0, retries: 0, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0, cached_tokens: 0 } },
+      ],
+      // 未归属非零：升级前的历史行，页面要把它当"说明"而不是"次要细节"。
+      unattributed: { requests: 30, total_tokens: 3000, successes: 29, failures: 1 },
+      layers: ["workspace", "requested_model_id", "model_id", "provider_id", "upstream_model_id"],
+      links: [
+        { source_layer: 0, target_layer: 1, source: "default", target: "unified-model", requests: 120, total_tokens: 10000 },
+        { source_layer: 1, target_layer: 2, source: "unified-model", target: "deepseek-v4.1-flash", requests: 120, total_tokens: 10000 },
+        { source_layer: 2, target_layer: 3, source: "deepseek-v4.1-flash", target: "wb2api", requests: 120, total_tokens: 10000 },
+        { source_layer: 3, target_layer: 4, source: "wb2api", target: "deepseek-v4.1-flash", requests: 120, total_tokens: 10000 },
+      ],
+    };
   },
   // 服务日志页：级别过滤、关键字搜索与自动跟随都必须真的作用在文本上。
   logs_page_filters_by_level: () => {
@@ -931,6 +969,23 @@ if (scenario === "stale_key_prompts_login") {
   // 未匹配到单价的条目显示 "—"，**不能**是 "$0"。
   checks.unpricedShowsDash = costCells.includes("—");
   checks.noCostCellIsZero = costCells.every((t) => t !== "$0");
+} else if (scenario === "workspaces_kpi_grid_has_no_orphan") {
+  await settle();
+  const body = text();
+  checks.isWorkspacesPage = body.includes("工作空间") && body.includes("归属请求");
+  // 5 张瓦片排 5 列 = 一整行，没有孤儿瓦片。列数写死在 CSS 的 .cols-5 里，
+  // 这里同时锁住"类名还在"和"瓦片数正好排满"。
+  checks.usesFiveColumns = byClass("cols-5").length === 1;
+  checks.hasFiveTiles = byClass("stat").length === 5;
+  // 五张瓦片各自的读数都在（少一张也照样可能凑够 5 个 .stat，所以要按名字点）。
+  checks.showsAllKpiLabels = ["工作空间", "归属请求", "归属 Token", "成功率", "未归属请求"]
+    .every((label) => body.includes(label));
+  // 未归属 30 / 全部 150 = 20.0%：这个占比是升级后第一眼要看的数字。
+  checks.showsOrphanShare = body.includes("20.0%");
+  // 未归属非零时流向图前面必须给说明，否则用户会以为图少画了一块。
+  checks.explainsUnattributed = body.includes("没有工作空间归属");
+  // 流向图真的画出来了（五列都要有节点）。
+  checks.hasFlowNodes = byClass("sankey-node").length >= 5;
 } else if (scenario === "usage_page_renders_history_ranges") {
   await settle();
   const body = text();
