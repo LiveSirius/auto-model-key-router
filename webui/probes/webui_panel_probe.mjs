@@ -282,6 +282,9 @@ if (scenario === "no_key_asks_for_one") {
   checks.showsRequests = text().includes("4");
   checks.showsFlowLayers = text().includes("任务/别名") && text().includes("上游模型");
   checks.showsTasks = text().includes("TASK_1") || text().includes("任务（1）");
+  // 任务表下面那两张半宽卡：任务用量按连边起点（任务名）汇总，上游模型用量按第 4 段
+  // 终点汇总。栅格本身的 12 + 6 + 6 形状由 webui_layout_probe.mjs 锁。
+  checks.hasUsageCards = text().includes("任务用量") && text().includes("上游模型用量");
 } else if (scenario === "wrong_key_says_invalid") {
   // 被拒时要说"key 无效"，并且**重新给出填写入口**——只说失败会让人无处可去。
   checks.saysKeyInvalid = text().includes("无效");

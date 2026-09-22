@@ -248,19 +248,49 @@ function flowCard(usage) {
   );
 }
 
-function modelsCard(usage) {
-  const links = (usage?.links || []).filter((link) => link.source_layer === 1);
+// sumLinks 把某一段连边按一端汇总成排行行。side 决定取起点还是终点：
+// 同一段"任务→模型"的连边，取起点是任务排行、取终点是模型排行，两者别混。
+function sumLinks(usage, layer, side) {
   const totals = new Map();
-  for (const link of links) {
-    totals.set(link.target, (totals.get(link.target) || 0) + (Number(link.requests) || 0));
+  for (const link of (usage?.links || []).filter((item) => item.source_layer === layer)) {
+    const key = link[side];
+    totals.set(key, (totals.get(key) || 0) + (Number(link.requests) || 0));
   }
-  const rows = [...totals.entries()]
+  return [...totals.entries()]
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
-  if (!rows.length) return null;
+}
+
+// 任务用量：第 1→2 段连边的**起点**才是任务名（调用方传 TASK_XXXXXX，它以
+// requested_model_id 的身份出现，见 internal/metrics/workspace.go 的层级注释）。
+// 取终点会画成「任务用量」里列一串模型名，和卡头说的不是一回事。
+function taskUsageCard(usage) {
+  const rows = sumLinks(usage, 1, "source");
   return card(
     cardHead("任务用量", badge(rangeLabel(), "muted")),
-    barList(rows, { format: (row) => `${formatCount(row.value)} 次`, emptyText: "窗口内没有请求。" }),
+    rows.length
+      ? barList(rows, { format: (row) => `${formatCount(row.value)} 次`, emptyText: "窗口内没有请求。" })
+      : empty("窗口内没有请求。", { icon: "activity" }),
+  );
+}
+
+// 上游模型用量：第 4 段连边的终点（provider → upstream_model）。面板要看清这个空间
+// 实际打到哪些厂商模型上——本地路由名（model_id）与上游模型名是两回事。
+// 空数据时也返回一张卡：它和任务用量同处一排，留空会看见缺口。
+function upstreamUsageCard(usage) {
+  const rows = sumLinks(usage, 3, "target");
+  return card(
+    cardHead("上游模型用量", badge(rangeLabel(), "muted")),
+    rows.length
+      ? barList(rows, {
+          tone: "secondary",
+          format: (row) => `${formatCount(row.value)} 次`,
+          emptyText: "窗口内没有请求。",
+        })
+      : empty("窗口内没有可归因的上游模型。", {
+          icon: "activity",
+          hint: "上游模型归因从本版本起开始记录，升级前的历史行不会计入。",
+        }),
   );
 }
 
@@ -464,9 +494,12 @@ function draw() {
   children.push(kpiTiles(usage));
   children.push(flowCard(usage));
   children.push(h("div.grid-12", {},
-    h("div.col-8", {}, tasksCard()),
-    h("div.col-4", {}, modelsCard(usage)
-      || card(cardHead("任务用量"), empty("窗口内没有请求。", { icon: "activity" }))),
+    // 任务表独占整行：它 4 列，收成半宽后窄屏会把「模型」和行内动作一起挤掉。
+    h("div.col-12", {}, tasksCard()),
+    // 两张半宽卡成一排。6+6 在四档断点下都排满；col-8 + col-4 在 <=1024px 会让
+    // 第二张剩成半行（详见 webui/probes/webui_layout_probe.mjs）。
+    h("div.col-6", {}, taskUsageCard(usage)),
+    h("div.col-6", {}, upstreamUsageCard(usage)),
   ));
   if (!state.tasks.length) {
     children.push(notice("这个工作空间还没有任务。调用方要指定任务名（或模型别名）才能用到它。", "info"));
