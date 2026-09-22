@@ -164,8 +164,10 @@ function draw(firstPaint = false) {
   children.push(h("div.grid-12", {},
     h("div.col-7", {}, modelCostCard(metrics, index)),
     h("div.col-5", {}, compositionCard(metrics, index)),
-    h("div.col-6", {}, providerCostCard(index)),
-    h("div.col-6", {}, recentCostCard(index)),
+    // 5+7 而不是 6+6：<=1024px 时 col-7 会变成整行，与上面那排的 7+5 正好对称，
+    // 每排都排满；模型名更长的"最近请求成本"拿宽的那一半。
+    h("div.col-5", {}, providerCostCard(index)),
+    h("div.col-7", {}, recentCostCard(index)),
     // 明细表放在最后：它不提供结论，而是让人**核对**结论——匹配错了模型价格，
     // 上面所有金额都会错，这张表是唯一能一眼看出"匹配到了哪条价"的地方。
     h("div.col-12", {}, priceTableCard(index, metrics)),
