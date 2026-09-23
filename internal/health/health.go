@@ -1,9 +1,9 @@
 // Package health 构造 /health 的响应体。
 //
 // 移植 auto_model_key_router/app.py:153-181 的 health 处理器与 webui.py:48-70 的
-// webui_status。单独成包的理由：/health 是**冻结契约**——测试与发布流程都断言它的
-// 字段名与语义，调用方（CLI、运维脚本、agent 配置工具）按字段名取值。把它从 HTTP
-// 处理器里剥出来，才能不启动服务就逐字段对拍。
+// webui_status。单独成包的理由：/health 是**冻结契约**——既有调用方（CLI、运维脚本、
+// agent 配置工具）都按字段名取值。把它从 HTTP 处理器里剥出来，才能不启动服务就逐字段
+// 断言。
 //
 // 字段顺序即响应字节顺序，不可重排：canonical 编码器按插入顺序输出，而参照实现是
 // 一个 dict 字面量 + `**webui_status(app)` 展开。顺序固定为
@@ -29,7 +29,7 @@ const webUIPath = "/ui"
 
 // KeyPool 是 /health 需要的 key pool 读数。
 //
-// 用接口而不是直接依赖 *keypool.KeyPool：一是本包因此不依赖 keypool，二是对拍时
+// 用接口而不是直接依赖 *keypool.KeyPool：一是本包因此不依赖 keypool，二是测试里
 // 可以用固定的假实现覆盖「没有模型」等难以在真实 pool 上构造的组合。
 // *keypool.KeyPool 天然满足它。
 type KeyPool interface {
