@@ -281,8 +281,8 @@ func (a *App) withLease(w http.ResponseWriter, next func(*runtime.RuntimeResourc
 
 // withFullAuth 是三条 metrics 路由的公共前缀：租约 + 「必须是完整权限」。
 //
-// 与 handleModels 的区别在判定条件：/v1/models 允许访客，metrics 只允许本地 key
-// （app.py:222、258、299 的 `auth is None or not auth.is_full`）。
+// 与 handleModels 的区别在判定条件：/v1/models 对访问密钥开放（按它自己的清单收窄），
+// metrics 只允许本地 key。
 func (a *App) withFullAuth(w http.ResponseWriter, r *http.Request, next func(*runtime.RuntimeResources)) {
 	a.withLease(w, func(resources *runtime.RuntimeResources) {
 		context := auth.Authenticate(a.options.Authorizer, r, resources.Config.LocalAPIKey)

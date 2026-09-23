@@ -398,13 +398,13 @@ func (s *Server) currentConfig() (*config.RouterConfig, error) {
 // 钉死的含义是**忽略请求头**——空间由 key 决定，绝不能让调用方用 X-AMKR-Workspace
 // 换一个空间，那正是这个模式要防的事。
 //
-// 面板 key 的识别刻意放在这里而不是塞进 auth 包：auth 是逐字节对拍（已退役的
-// Python 参照实现）的纯函数，而工作空间是本项目新增能力，参照实现里没有对应概念。
-// 往 auth 里加分支会让那份对拍证据的含义变模糊；在这里做则只需一次配置查表，且
-// 「工作空间 key 给不了完整权限」是结构性成立的——这条路径**从不构造** ModeFull。
+// 面板 key 的识别刻意放在这里而不是塞进 auth 包：auth 是不依赖 config 的纯函数，而
+// 工作空间是本项目新增能力。往 auth 里加分支会让它的职责变模糊；在这里做则只需一次
+// 配置查表，且「工作空间 key 给不了完整权限」是结构性成立的——这条路径**从不构造**
+// ModeFull。
 //
-// 访客 key 依然拒绝：访客是模型级权限（只能用 allow_visitor 的 key），与「管理某个
-// 空间的任务」无关。
+// 访问密钥在这里同样被拒绝：它是分发给外部使用者的推理凭据，能调哪些模型由它自己的
+// 清单决定，与「管理某个空间的任务」无关。
 func (s *Server) authorizedTaskConfig(r *http.Request) (*config.RouterConfig, string, error) {
 	s.reload()
 	cfg, err := s.currentConfig()
@@ -424,7 +424,7 @@ func (s *Server) authorizedTaskConfig(r *http.Request) (*config.RouterConfig, st
 
 // authorizedConfig 对应 management_api.py:1117 的 _authorized_config。
 //
-// 全部 47 条路由都要求 full 权限（没有访客可用的管理路由），所以判定就是
+// 全部 47 条路由都要求 full 权限（受限的推理凭据没有可用的管理路由），所以判定就是
 // 「authorize 成功且 is_full」。
 func (s *Server) authorizedConfig(r *http.Request) (*config.RouterConfig, error) {
 	s.reload()

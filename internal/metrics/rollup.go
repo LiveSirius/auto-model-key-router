@@ -248,8 +248,8 @@ func (s *Store) snapshotRollup(sinceCreatedAt, untilCreatedAt *string) (*snapsho
 // sortEntries 把每个目标分组的行序重排成「按自己的维度升序」。
 //
 // 一次扫描只能给出一个全局顺序，而各目标分组投影出的顺序互不相同：最细键里
-// caller_type 排在 model_id 前面，于是「local 的行」贡献的模型会整体先于「visitor 的
-// 行」里的新模型，投影到 model_id 就不是字典序了。参照实现是每个分组各自
+// caller_type 排在 model_id 前面，于是「local 的行」贡献的模型会整体先于「access_key
+// 的行」里的新模型，投影到 model_id 就不是字典序了。参照实现是每个分组各自
 // `ORDER BY dims`，而这个顺序就是响应里 JSON 对象的键序（canonical 按插入顺序输出），
 // 所以必须逐分组重排。
 //

@@ -128,8 +128,8 @@ func (a *App) handleWSEvents(w http.ResponseWriter, request *http.Request) {
 //
 // 三个必须照抄的语义：
 //
-//   - **只对完整权限开放**：`auth is not None and auth.is_full`（app.py:337）。访客
-//     key 能过 HTTP 的 /v1/models，但过不了事件流，会被 4003 拒掉。
+//   - **只对完整权限开放**：受限的推理凭据（访问密钥、工作空间推理 key）能过 HTTP 的
+//     /v1/models，但过不了事件流，会被 4003 拒掉。
 //   - **配置在连接建立时读一次**（app.py:329 的
 //     `config = app.state.runtime_manager.current.config`）：之后即使配置文件被改写、
 //     热重载换了配置，这条连接的首帧仍按旧配置里的 local_api_key 校验。这是参照实现
