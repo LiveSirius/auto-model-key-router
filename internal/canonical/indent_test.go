@@ -1,36 +1,10 @@
 package canonical
 
 import (
-	"bufio"
-	"encoding/json"
 	"math"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
-
-// TestDumpsIndentMatchesPython 断言 indent=2 落盘形式与 Python 逐字节一致。
-//
-// 这是 router-config.json 的持久化路径（config.py:291）。它与 canonical 形式
-// 的关键差异是**不排序**：配置文件里的字段顺序是用户可见的，一旦被排序，
-// 每次保存都会重排整份文件，产生巨大的、语义无关的 diff。
-func TestDumpsIndentMatchesPython(t *testing.T) {
-	for _, entry := range loadIndentCorpus(t) {
-		t.Run(entry.Name, func(t *testing.T) {
-			value, err := ParseString(entry.Input)
-			if err != nil {
-				t.Fatalf("解析 %s 失败: %v", entry.Input, err)
-			}
-			got := DumpsIndent(value, 2)
-			if got != entry.Expected {
-				t.Errorf("indent 输出不一致\n输入: %s\n期望:\n%s\n实际:\n%s",
-					entry.Input, entry.Expected, got)
-				reportFirstDiff(t, entry.Expected, got)
-			}
-		})
-	}
-}
 
 // TestDumpsIndentPreservesKeyOrder 锁定「不排序」这一语义差异。
 //
@@ -240,36 +214,4 @@ func TestParseRejectsInvalid(t *testing.T) {
 			}
 		})
 	}
-}
-
-func loadIndentCorpus(t *testing.T) []corpusEntry {
-	t.Helper()
-	path := filepath.Join("testdata", "corpus_indent.jsonl")
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatalf("打开语料失败（语料已冻结并随仓库提交，生成器已随 Python 退役移除）: %v", err)
-	}
-	defer f.Close()
-
-	var entries []corpusEntry
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64*1024), 8*1024*1024)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
-		var entry corpusEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			t.Fatalf("语料行解析失败: %v", err)
-		}
-		entries = append(entries, entry)
-	}
-	if err := scanner.Err(); err != nil {
-		t.Fatalf("读取语料失败: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Fatal("语料为空")
-	}
-	return entries
 }

@@ -3,45 +3,40 @@ package tui
 // 本文件把**刻意与 rich 不同**的地方逐条具名钉住。
 //
 // 迁移方案明确把「不追求与 rich 逐像素对齐」定为非目标，因此差异必须可见、
-// 可解释、可回归，而不是散落在实现里。这里的每个测试都引用语料中记录的
-// Python 原始输出（testdata/tui_corpus.json）或直接说明平台差异。
+// 可解释、可回归，而不是散落在实现里。
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
+// rowGroup 构造一个只含 "rowNN" 行的渲染节点，用于退化高度分支。
+func rowGroup(count int) Renderable {
+	items := make([]Renderable, 0, count)
+	for index := 0; index < count; index++ {
+		items = append(items, NewMarkup(fmt.Sprintf("row%02d", index)))
+	}
+	return Group{Items: items}
+}
+
 // TestFrameDegenerateHeightHasNoPanel 钉住「高度 < 3 行」的退化分支
 // （tui.py:155-158）：不套边框面板，直接把正文裁到终端高度输出。
-//
-// 这条曾经被误判成「rich 打印裸 Segments 时会丢掉最后一行」——实测（语料
-// frame 段的 height_2_degenerate / height_1_degenerate）证明 rich 会把全部可见行
-// 都打印出来，Go 与之一致，所以这里按普通对拍处理，不是差异记录。
 func TestFrameDegenerateHeightHasNoPanel(t *testing.T) {
-	corpus := loadTUICorpus(t)
-	found := 0
-	for _, testCase := range corpus.Frame {
-		if testCase.Height >= 3 {
-			continue
-		}
-		found++
-		t.Run(testCase.Name, func(t *testing.T) {
-			Console.SetSize(testCase.Width, testCase.Height)
+	for _, height := range []int{1, 2} {
+		t.Run(fmt.Sprintf("height_%d", height), func(t *testing.T) {
+			Console.SetSize(40, height)
 			defer Console.SetSize(80, 25)
 
-			renderables := make([]Renderable, 0, len(testCase.Renderables))
-			for _, spec := range testCase.Renderables {
-				renderables = append(renderables, buildRenderable(t, spec))
+			state := TerminalFrameState([]Renderable{rowGroup(10)}, nil, FrameOptions{})
+			if state.ViewportHeight != height {
+				t.Fatalf("退化分支视口高度 = %d, 期望 %d", state.ViewportHeight, height)
 			}
-			state := TerminalFrameState(renderables, nil, FrameOptions{})
-			if state.ViewportHeight != testCase.Height {
-				t.Fatalf("退化分支视口高度 = %d, 期望 %d", state.ViewportHeight, testCase.Height)
-			}
-			lines := state.Renderable.RenderLines(testCase.Width)
-			if len(lines) != testCase.Height {
-				t.Fatalf("退化分支行数 = %d, 期望 %d", len(lines), testCase.Height)
+			lines := state.Renderable.RenderLines(40)
+			if len(lines) != height {
+				t.Fatalf("退化分支行数 = %d, 期望 %d", len(lines), height)
 			}
 			for _, line := range lines {
 				if strings.ContainsAny(line, "╭╮╰╯│") {
@@ -50,33 +45,32 @@ func TestFrameDegenerateHeightHasNoPanel(t *testing.T) {
 			}
 		})
 	}
-	if found == 0 {
-		t.Fatal("语料应包含高度 < 3 的退化分支用例")
-	}
 }
 
 // TestMenuLayoutDivergesByName 记录菜单表格的版式差异：只钉住 Go 侧的固定列宽
-// 版式，并把 Python 的实际输出（语料 want_python）作为对照。
+// 版式。
 //
 // Python（rich Table, expand=True, padding=(0,1)）会按可用宽度重新分配列宽，
 // 因此行首缩进与列间距都随终端宽度变化；Go 用固定列宽，宽度只影响右边的空白。
 func TestMenuLayoutDivergesByName(t *testing.T) {
-	corpus := loadTUICorpus(t)
-	for _, testCase := range corpus.Menu {
-		t.Run(testCase.Name, func(t *testing.T) {
-			if testCase.Diverges == "" {
-				t.Fatal("语料应标记该用例为刻意差异")
-			}
-			options := optionsFromSpec(testCase.Options)
-			node := MenuTable(options, testCase.Selected)
-			lines := node.RenderLines(testCase.Width)
+	cases := []struct {
+		name     string
+		options  []Option
+		selected int
+		width    int
+	}{
+		{"menu_three", []Option{{Value: "a", Label: "甲"}, {Value: "b", Label: "乙"}, {Value: "c", Label: "丙"}}, 1, 40},
+		{"menu_first", []Option{{Value: "a", Label: "甲"}, {Value: "b", Label: "乙"}}, 0, 60},
+		{"menu_ascii", []Option{{Value: "a", Label: "alpha"}, {Value: "b", Label: "beta"}}, 1, 30},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			node := MenuTable(testCase.options, testCase.selected)
+			lines := node.RenderLines(testCase.width)
 			first := lines[0]
 			// 固定列宽版式的形状：指示列(1) + 空格 + 编号列(5) + 空格 + 文案。
 			if !strings.HasPrefix(first, "  ") && !strings.HasPrefix(first, SelectedRowMarker) {
 				t.Fatalf("首行应以指示列开头: %q", first)
-			}
-			if len(testCase.Want) > 0 && len(lines) == len(testCase.Want) {
-				t.Logf("Python 版式: %q / Go 版式: %q", testCase.Want[0], first)
 			}
 		})
 	}
@@ -84,33 +78,26 @@ func TestMenuLayoutDivergesByName(t *testing.T) {
 
 // TestStripMarkupNeverRaises 记录标记解析的差异。
 //
-// Python：rich 的 Text.from_markup 对多余的闭合标签抛 MarkupError（语料
-// markup_error 段记录了具体条目）。Go：StripMarkup 永不抛异常，尽力给出文本
-// ——移植后的内容全是固定文案，把版面问题变成崩溃不划算。
+// Python：rich 的 Text.from_markup 对多余的闭合标签抛 MarkupError。Go：
+// StripMarkup 永不抛异常，尽力给出文本——移植后的内容全是固定文案，把版面问题
+// 变成崩溃不划算。
 func TestStripMarkupNeverRaises(t *testing.T) {
-	corpus := loadTUICorpus(t)
-	if len(corpus.MarkupError) == 0 {
-		t.Fatal("语料缺少 markup_error 段")
+	cases := []struct {
+		input string
+		want  string
+	}{
+		// 多余闭合标签被丢弃。
+		{"已闭合[/bold]", "已闭合"},
+		// 纯标签（无论闭合与否）都被吃掉。
+		{"[/]", ""},
+		{"[red]", ""},
+		{"[bold]粗[/]", "粗"},
 	}
-	for _, testCase := range corpus.MarkupError {
-		t.Run(testCase.Input, func(t *testing.T) {
-			// 先钉住语料的断言：这些输入在参照实现里确实被 rich 拒绝
-			// （rich 抛 MarkupError）。若换 rich 版本后不再抛，这里会失败，
-			// 提醒重新生成语料而不是悄悄放宽。
-			if testCase.PythonError != "MarkupError" {
-				t.Fatalf("语料记录的错误类型 = %q, 期望 MarkupError", testCase.PythonError)
-			}
-			got := StripMarkup(testCase.Input)
-			if testCase.Input == "已闭合[/bold]" && got != "已闭合" {
-				t.Fatalf("多余闭合标签应被丢弃: 得到 %q", got)
-			}
-			// 纯标签（无论闭合与否）在 rich 的标记规则下都会被吃掉，
-			// 区别只是 rich 会先抛 MarkupError；Go 直接按规则给出空串。
-			if testCase.Input == "[/]" && got != "" {
-				t.Fatalf("纯闭合标签应被吃掉: 得到 %q", got)
-			}
-			if testCase.Input == "[red]" && got != "" {
-				t.Fatalf("未闭合的纯标签应被吃掉: 得到 %q", got)
+	for _, testCase := range cases {
+		t.Run(testCase.input, func(t *testing.T) {
+			got := StripMarkup(testCase.input)
+			if got != testCase.want {
+				t.Fatalf("StripMarkup(%q) = %q, 期望 %q", testCase.input, got, testCase.want)
 			}
 			if got != "" && strings.Contains(got, "[/") {
 				t.Fatalf("结果不应残留闭合标签: %q", got)

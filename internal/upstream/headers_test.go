@@ -177,13 +177,12 @@ func TestRequestHeadersCollapseLastWins(t *testing.T) {
 
 // TestCopyRequestHeadersScopeIsForwardingPathOnly 锁定本函数的适用范围。
 //
-// 实测语料 internal/upstream/testdata/python_upstream_fixtures.jsonl（由另一个 agent
-// 从真实 Python 实现回放生成）：103 条记录里 93 条 accept-encoding=identity（代理
-// 转发路径，即本函数），10 条 gzip, deflate（原生端点能力探测路径，
-// proxy_support.py:494-505 自建 headers，不经 _upstream_headers）。
+// 参照实现的分布：代理**转发**路径恒为 accept-encoding=identity（即本函数），而原生
+// 端点能力探测路径自建 headers（proxy_support.py:494-505），httpx 会补上默认的
+// "gzip, deflate"，不经 _upstream_headers。
 //
-// 这条测试的作用是防止有人看到那 10 条语料后，把本函数改成「跟随调用方传入的
-// accept-encoding」——那会让转发路径丢掉强制 identity 的既定契约。
+// 这条测试的作用是防止有人把本函数改成「跟随调用方传入的 accept-encoding」——那会让
+// 转发路径丢掉强制 identity 的既定契约。
 func TestCopyRequestHeadersScopeIsForwardingPathOnly(t *testing.T) {
 	// 即便调用方传入 gzip，转发路径也必须强制成 identity。
 	for _, incoming := range []string{"gzip, deflate", "br", "identity", ""} {

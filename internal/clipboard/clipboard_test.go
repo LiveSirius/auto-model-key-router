@@ -9,6 +9,29 @@ import (
 	"time"
 )
 
+// equalCommands 逐段比对两次调用的命令序列。
+func equalCommands(got, want [][]string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for index := range got {
+		if len(got[index]) != len(want[index]) {
+			return false
+		}
+		for part := range got[index] {
+			if got[index][part] != want[index][part] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// failingWriter 对应 Python 里会抛异常的 sys.stdout。
+type failingWriter struct{ err error }
+
+func (writer failingWriter) Write([]byte) (int, error) { return 0, writer.err }
+
 // stubEnv 构造一个「什么都不支持」的最小环境，供具名测试按需覆盖字段。
 func stubEnv() Env {
 	return Env{

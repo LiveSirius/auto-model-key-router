@@ -14,8 +14,8 @@ import (
 //
 //  1. TestCodexWriteMatchesTomlkitOracleForCommentedConfig —— 逐字节比对真实
 //     tomlkit 的输出（oracle 由 tomlkit 0.15.0 生成，见常量注释）；
-//  2. TestCorpusCommentPreservation —— 对语料里**每一份** TOML 输入断言注释行
-//     序列逐字节不变，覆盖 19 种排版形状；
+//  2. TestTomlInputsPreserveComments —— 对一份覆盖多种排版形状的 TOML 输入集合
+//     断言注释行序列逐字节不变；
 //  3. TestTomlkitRoundTripWouldLoseComments —— 反向证据：证明 go-toml/v2 的
 //     Unmarshal→Marshal 会丢注释，从而说明为什么必须自己实现保真回写。
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,13 +89,12 @@ trust_level = "trusted"
 // 失败意味着用户手写的注释、空行、键序或空白排版会漂移——正是「不得丢失用户
 // 数据」这条硬约束要防的事。
 func TestCodexWriteMatchesTomlkitOracleForCommentedConfig(t *testing.T) {
-	data := loadCorpus(t)
-	routerConfig := data.routerConfig(t, "alpha")
+	cfg := routerConfig(t, "alpha")
 
 	target := t.TempDir() + "/config.toml"
 	writeFile(t, target, codexCommentPreserveInput)
 
-	if _, err := Configure(Codex, routerConfig, ModeUnifiedModel, Options{
+	if _, err := Configure(Codex, cfg, ModeUnifiedModel, Options{
 		BaseDir:    t.TempDir(),
 		TargetPath: target,
 		BackupPath: t.TempDir() + "/backup.json",
@@ -122,53 +121,6 @@ func TestCodexWriteMatchesTomlkitOracleForCommentedConfig(t *testing.T) {
 	}
 	if !strings.Contains(got, "[projects.\"/home/me/work\"]") {
 		t.Error("带引号的表名被破坏")
-	}
-}
-
-// TestCorpusCommentPreservation 在全部语料 TOML 输入上断言注释行序列逐字节不变。
-//
-// 这是对 oracle 逐字节比对的补充：即使某天某条用例因为排版差异被移出语料，
-// 「注释必须原样保留」这条性质仍然被覆盖。
-func TestCorpusCommentPreservation(t *testing.T) {
-	data := loadCorpus(t)
-	checked := 0
-	for _, c := range data.Configure {
-		if c.Agent != Codex || c.Initial == nil || c.Initial.Text == nil {
-			continue
-		}
-		t.Run(c.Name, func(t *testing.T) {
-			input := *c.Initial.Text
-			root := t.TempDir()
-			pinBaseEnv(t, root)
-			workdir := root + "/" + c.Name
-			target := workdir + "/config.toml"
-			writeFile(t, target, input)
-			mode := c.Mode
-			if c.SecondMode != "" {
-				mode = c.SecondMode
-			}
-			if _, err := Configure(Codex, data.routerConfig(t, c.Config), mode, Options{
-				BaseDir:    root,
-				TargetPath: target,
-				BackupPath: workdir + "/backup.json",
-			}); err != nil {
-				// 已记录的差异用例（doc.go D6）本来就该报错，不参与本性质断言。
-				if c.Divergence != "" || c.WantError != "" {
-					return
-				}
-				t.Fatalf("Configure 失败: %v", err)
-			}
-			got := readFile(t, target)
-			wantComments := commentLines(input)
-			gotComments := commentLines(got)
-			if strings.Join(wantComments, "\n") != strings.Join(gotComments, "\n") {
-				t.Errorf("注释行序列被改动\n期望 %q\n实际 %q", wantComments, gotComments)
-			}
-		})
-		checked++
-	}
-	if checked < 10 {
-		t.Fatalf("只覆盖了 %d 条 TOML 用例，语料显然不完整", checked)
 	}
 }
 

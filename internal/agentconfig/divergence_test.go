@@ -6,6 +6,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Sparrived/auto-model-key-router/internal/canonical"
+	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -15,6 +18,75 @@ import (
 // 注释里的说法，而是可执行、可失败的契约；将来若有人改动行为，会先撞到这些
 // 测试，被迫回来更新 doc.go。
 // ─────────────────────────────────────────────────────────────────────────────
+
+// pinBaseEnv 把 home 与各平台缓存目录钉进 root。
+//
+// 这是「绝不写进开发者真实用户目录」的硬保证：任何一条用例忘了钉，都会在
+// 备份默认路径这类用例上暴露出来。
+func pinBaseEnv(t *testing.T, root string) {
+	t.Helper()
+	t.Setenv("HOME", root)
+	t.Setenv("USERPROFILE", root)
+	t.Setenv("HOMEDRIVE", "")
+	t.Setenv("HOMEPATH", "")
+	t.Setenv("LOCALAPPDATA", filepath.Join(root, "cache"))
+	t.Setenv("APPDATA", filepath.Join(root, "cache-roaming"))
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(root, "xdg-cache"))
+	for _, name := range []string{"CLAUDE_CONFIG_DIR", "PI_CODING_AGENT_DIR", "CODEX_HOME"} {
+		t.Setenv(name, "")
+	}
+}
+
+// testConfigs 是各用例需要的路由配置（内联字面量，原为对拍语料里的 fixture）。
+//
+// 刻意走 config.FromDict：这样配置解析的一致性仍在覆盖范围内。
+var testConfigs = map[string]string{
+	"alpha": `{"config_version":4,"host":"127.0.0.1","port":8123,` +
+		`"local_api_key":"amkr_corpus_local_key",` +
+		`"providers":{"openai":{"base_url":"https://api.openai.com","keys":{` +
+		`"k1":{"api_key":"s1","enabled":true},"disabled":{"api_key":"s2","enabled":false}}}},` +
+		`"models":{"alpha":{"aliases":["alpha-alias"],"reasoning_effort":"high","targets":[` +
+		`{"provider":"openai","key":"k1","upstream_model":"gpt-4o"},` +
+		`{"provider":"openai","key":"disabled","upstream_model":"gpt-4o-mini"}]},` +
+		`"beta":{"aliases":["beta-alias","alpha-alias-dupe"],"targets":[` +
+		`{"provider":"openai","key":"k1","upstream_model":"gpt-5"}]},` +
+		`"gamma":{"targets":[{"provider":"openai","key":"disabled","upstream_model":"gpt-3.5"}]}},` +
+		`"unified_model":{"default":{"primary":{"model":"alpha","key":"k1"}}}}`,
+	"no_unified": `{"config_version":4,"host":"127.0.0.1","port":8123,` +
+		`"local_api_key":"amkr_corpus_local_key",` +
+		`"providers":{"openai":{"base_url":"https://api.openai.com","keys":{` +
+		`"k1":{"api_key":"s1","enabled":true}}}},` +
+		`"models":{"alpha":{"targets":[{"provider":"openai","key":"k1","upstream_model":"gpt-4o"}]}}}`,
+	"empty_key": `{"config_version":4,"host":"127.0.0.1","port":8123,"local_api_key":"",` +
+		`"providers":{"openai":{"base_url":"https://api.openai.com","keys":{` +
+		`"k1":{"api_key":"s1","enabled":true}}}},` +
+		`"models":{"alpha":{"targets":[{"provider":"openai","key":"k1","upstream_model":"gpt-4o"}]}},` +
+		`"unified_model":{"default":{"primary":{"model":"alpha","key":"k1"}}}}`,
+}
+
+// routerConfig 解析一份内联配置。
+func routerConfig(t *testing.T, name string) *config.RouterConfig {
+	t.Helper()
+	raw, ok := testConfigs[name]
+	if !ok {
+		t.Fatalf("没有配置 %q", name)
+	}
+	value, err := canonical.ParseString(raw)
+	if err != nil {
+		t.Fatalf("解析配置 %q 失败: %v", name, err)
+	}
+	parsed, err := config.FromDict(value)
+	if err != nil {
+		t.Fatalf("配置 %q 无法通过 Go 侧校验: %v", name, err)
+	}
+	return parsed
+}
+
+// jsonEscapePath 把路径转成它出现在 JSON 字符串里的样子。
+func jsonEscapePath(path string) string {
+	replaced := strings.ReplaceAll(path, `\`, `\\`)
+	return strings.ReplaceAll(replaced, `"`, `\"`)
+}
 
 // TestDivergenceHomeIsInjected 固定 D1：目标路径完全由 Options.BaseDir 推导，
 // 绝不读开发者真实的 home。
@@ -59,7 +131,6 @@ func TestDivergenceHomeIsInjected(t *testing.T) {
 func TestDivergenceStatusModeEmptyMeansNone(t *testing.T) {
 	root := t.TempDir()
 	pinBaseEnv(t, root)
-	data := loadCorpus(t)
 	target := filepath.Join(root, "config.toml")
 	writeFile(t, target, "# 只有注释\n")
 	opts := Options{BaseDir: root, TargetPath: target, BackupPath: filepath.Join(root, "backup.json")}
@@ -72,7 +143,7 @@ func TestDivergenceStatusModeEmptyMeansNone(t *testing.T) {
 	if status.Mode != "" {
 		t.Errorf("没有备份时 Mode 应为空串（对应 Python 的 None），实际 %q", status.Mode)
 	}
-	if _, err := Configure(Codex, data.routerConfig(t, "alpha"), ModeUnifiedModel, opts); err != nil {
+	if _, err := Configure(Codex, routerConfig(t, "alpha"), ModeUnifiedModel, opts); err != nil {
 		t.Fatalf("Configure 失败: %v", err)
 	}
 	status, err = GetStatus(Codex, opts)
@@ -109,8 +180,7 @@ func TestDivergenceErrorTexts(t *testing.T) {
 		{
 			name: "unsupported_mode",
 			run: func(root string) error {
-				data := loadCorpus(t)
-				_, err := Configure(Codex, data.routerConfig(t, "alpha"), "bogus", Options{
+				_, err := Configure(Codex, routerConfig(t, "alpha"), "bogus", Options{
 					BaseDir: root, TargetPath: filepath.Join(root, "c.toml"),
 					BackupPath: filepath.Join(root, "b.json"),
 				})
@@ -121,8 +191,7 @@ func TestDivergenceErrorTexts(t *testing.T) {
 		{
 			name: "pi_requires_unified",
 			run: func(root string) error {
-				data := loadCorpus(t)
-				_, err := Configure(PiAgent, data.routerConfig(t, "alpha"), ModeNative, Options{
+				_, err := Configure(PiAgent, routerConfig(t, "alpha"), ModeNative, Options{
 					BaseDir: root, TargetPath: filepath.Join(root, "m.json"),
 					BackupPath: filepath.Join(root, "b.json"),
 				})
@@ -133,8 +202,7 @@ func TestDivergenceErrorTexts(t *testing.T) {
 		{
 			name: "missing_unified_model",
 			run: func(root string) error {
-				data := loadCorpus(t)
-				_, err := Configure(Codex, data.routerConfig(t, "no_unified"), ModeUnifiedModel, Options{
+				_, err := Configure(Codex, routerConfig(t, "no_unified"), ModeUnifiedModel, Options{
 					BaseDir: root, TargetPath: filepath.Join(root, "c.toml"),
 					BackupPath: filepath.Join(root, "b.json"),
 				})
@@ -145,8 +213,7 @@ func TestDivergenceErrorTexts(t *testing.T) {
 		{
 			name: "empty_local_key",
 			run: func(root string) error {
-				data := loadCorpus(t)
-				_, err := Configure(ClaudeCode, data.routerConfig(t, "empty_key"), ModeUnifiedModel, Options{
+				_, err := Configure(ClaudeCode, routerConfig(t, "empty_key"), ModeUnifiedModel, Options{
 					BaseDir: root, TargetPath: filepath.Join(root, "s.json"),
 					BackupPath: filepath.Join(root, "b.json"),
 				})
@@ -191,10 +258,9 @@ func TestDivergenceErrorTexts(t *testing.T) {
 		t.Run("prefix/"+c.name, func(t *testing.T) {
 			root := t.TempDir()
 			pinBaseEnv(t, root)
-			data := loadCorpus(t)
 			target := filepath.Join(root, c.path)
 			writeFile(t, target, c.init)
-			_, err := Configure(c.agent, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+			_, err := Configure(c.agent, routerConfig(t, "alpha"), ModeUnifiedModel, Options{
 				BaseDir: root, TargetPath: target, BackupPath: filepath.Join(root, "b.json"),
 			})
 			var configErr *ConfigError
@@ -214,12 +280,11 @@ func TestDivergenceErrorTexts(t *testing.T) {
 func TestDivergenceBackupJSONUsesEnsureASCII(t *testing.T) {
 	root := t.TempDir()
 	pinBaseEnv(t, root)
-	data := loadCorpus(t)
 	// 目标路径里带非 ASCII，逼出 ensure_ascii=True 的差别。
 	target := filepath.Join(root, "中文目录", "config.toml")
 	backup := filepath.Join(root, "备份", "codex.json")
 	writeFile(t, target, "model = \"gpt-5\"\n")
-	if _, err := Configure(Codex, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+	if _, err := Configure(Codex, routerConfig(t, "alpha"), ModeUnifiedModel, Options{
 		BaseDir: root, TargetPath: target, BackupPath: backup,
 	}); err != nil {
 		t.Fatalf("Configure 失败: %v", err)
@@ -237,7 +302,7 @@ func TestDivergenceBackupJSONUsesEnsureASCII(t *testing.T) {
 
 	// 对照：写 Agent 配置时是 ensure_ascii=False，中文必须原样出现。
 	piTarget := filepath.Join(root, "models.json")
-	if _, err := Configure(PiAgent, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+	if _, err := Configure(PiAgent, routerConfig(t, "alpha"), ModeUnifiedModel, Options{
 		BaseDir: root, TargetPath: piTarget, BackupPath: filepath.Join(root, "b2.json"),
 	}); err != nil {
 		t.Fatalf("Configure(Pi) 失败: %v", err)
@@ -309,12 +374,11 @@ func TestDivergenceUnsupportedTomlShapesError(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			root := t.TempDir()
 			pinBaseEnv(t, root)
-			data := loadCorpus(t)
 			target := filepath.Join(root, "config.toml")
 			backup := filepath.Join(root, "backup.json")
 			writeFile(t, target, c.input)
 
-			_, err := Configure(Codex, data.routerConfig(t, "alpha"), ModeUnifiedModel, Options{
+			_, err := Configure(Codex, routerConfig(t, "alpha"), ModeUnifiedModel, Options{
 				BaseDir: root, TargetPath: target, BackupPath: backup,
 			})
 			var configErr *ConfigError
@@ -333,27 +397,33 @@ func TestDivergenceUnsupportedTomlShapesError(t *testing.T) {
 }
 
 // TestDivergenceResolvePathIsLexical 固定 D7：路径规范化只做词法处理
-// （filepath.Abs + Clean），并断言它与 Python 的
-// Path.resolve(strict=False) 在语料里给出同样的字符串。
+// （filepath.Abs + Clean），与 Python 的 Path.resolve(strict=False) 给出同样的
+// 字符串——".."、"." 与 "~" 都按词法展开，不做符号链接解析。
 func TestDivergenceResolvePathIsLexical(t *testing.T) {
 	root := t.TempDir()
 	pinBaseEnv(t, root)
-	data := loadCorpus(t)
-	checked := 0
-	for _, c := range data.Paths {
-		if len(c.Inputs) == 0 {
-			continue
-		}
-		got, err := resolvePath(root, corpusPath(root, c.Inputs[0]))
-		if err != nil {
-			t.Fatalf("resolvePath(%q) 失败: %v", c.Inputs[0], err)
-		}
-		if portablePath(root, got) != *c.Want {
-			t.Errorf("resolvePath(%q) 期望 %q，实际 %q", c.Inputs[0], *c.Want, portablePath(root, got))
-		}
-		checked++
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"<root>/a/../b/c", "<root>/b/c"},
+		{"<root>/x/y/../../z.toml", "<root>/z.toml"},
+		{"~/nested/./file.toml", "<root>/nested/file.toml"},
 	}
-	if checked == 0 {
-		t.Fatal("语料里没有 _resolved_path 用例，本测试失去意义")
+	for _, c := range cases {
+		// 直接拼接而不是 filepath.Join：用例刻意保留 ".." 与 "~"，
+		// Join 会先做词法规范化而抹掉被测量的行为。
+		input := c.input
+		if strings.HasPrefix(input, "<root>") {
+			input = root + filepath.FromSlash(strings.TrimPrefix(input, "<root>"))
+		}
+		got, err := resolvePath(root, input)
+		if err != nil {
+			t.Fatalf("resolvePath(%q) 失败: %v", c.input, err)
+		}
+		want := root + filepath.FromSlash(strings.TrimPrefix(c.want, "<root>"))
+		if got != want {
+			t.Errorf("resolvePath(%q) 期望 %q，实际 %q", c.input, want, got)
+		}
 	}
 }

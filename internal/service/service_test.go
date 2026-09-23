@@ -21,7 +21,7 @@ import (
 // 任何新增动作只要没被处理就会失败。
 func TestRunServiceActionCoversEveryOpsServiceTarget(t *testing.T) {
 	for action := range api.OpsServiceTargets {
-		env, placeholders := newCorpusLikeEnv(t)
+		env, placeholders := newTestFixture(t)
 		loaded, err := config.Load(placeholders.configPath())
 		if err != nil {
 			t.Fatalf("载入配置失败: %v", err)
@@ -41,7 +41,7 @@ func TestRunServiceActionCoversEveryOpsServiceTarget(t *testing.T) {
 // （inner/api/handlers_ops.go 的 `不支持的服务动作: %s`，对应 ops_api.py:187-188）；
 // 本函数只保证直接调用时也拿到同一句话，避免两处文案漂移。
 func TestRunServiceActionUnknownActionMatchesAPIMessage(t *testing.T) {
-	env, placeholders := newCorpusLikeEnv(t)
+	env, placeholders := newTestFixture(t)
 	loaded, err := config.Load(placeholders.configPath())
 	if err != nil {
 		t.Fatalf("载入配置失败: %v", err)
@@ -65,7 +65,7 @@ func TestRunServiceActionSystemKindUsesArgument(t *testing.T) {
 		"uninstall_system_amkr": "schtasks",
 	}
 	for action, wantFirst := range cases {
-		env, placeholders := newCorpusLikeEnv(t)
+		env, placeholders := newTestFixture(t)
 		runner := newFakeRunner([]servicestatus.CommandResult{{Stdout: "OK"}})
 		env.Run = runner.run
 		loaded, err := config.Load(placeholders.configPath())
@@ -84,7 +84,7 @@ func TestRunServiceActionSystemKindUsesArgument(t *testing.T) {
 // TestRunServiceActionRestartJoinsStopAndStart 锁定 restart 的「先停后启、空行连接」
 // （ops_api.py:112-115）。
 func TestRunServiceActionRestartJoinsStopAndStart(t *testing.T) {
-	env, placeholders := newCorpusLikeEnv(t)
+	env, placeholders := newTestFixture(t)
 	runner := newFakeRunner([]servicestatus.CommandResult{
 		{Stdout: `"python.exe","4242","Console"`},
 		{},
@@ -130,7 +130,7 @@ func TestRunServiceActionPackageFunction(t *testing.T) {
 // TestBackgroundExecutableDivergence 具名锁定刻意的差异：Go 版没有 Python 解释器，
 // 后台启动直接重入自身（service.py:524 会优先挑 pythonw.exe）。
 func TestBackgroundExecutableDivergence(t *testing.T) {
-	env, _ := newCorpusLikeEnv(t)
+	env, _ := newTestFixture(t)
 	if got := env.BackgroundExecutable(); got != env.Executable {
 		t.Errorf("BackgroundExecutable = %q，期望 %q", got, env.Executable)
 	}
@@ -152,7 +152,7 @@ func TestWindowsTaskCommandLineDivergence(t *testing.T) {
 
 // TestSystemdServiceCommandDivergence 具名锁定 systemd 回退命令的差异（service.py:549）。
 func TestSystemdServiceCommandDivergence(t *testing.T) {
-	env, placeholders := newCorpusLikeEnv(t)
+	env, placeholders := newTestFixture(t)
 	got := env.SystemdServiceCommand(placeholders.configPath())
 	want := []string{env.Executable, "--config", placeholders.configPath(), "--serve-foreground"}
 	if !equalStrings(got, want) {
@@ -176,7 +176,7 @@ func TestElevationArgumentsDivergence(t *testing.T) {
 // TestForegroundPIDHookWritesAndCleans 锁定前台启动的 PID 文件生命周期
 // （service.py:111-112）。
 func TestForegroundPIDHookWritesAndCleans(t *testing.T) {
-	env, placeholders := newCorpusLikeEnv(t)
+	env, placeholders := newTestFixture(t)
 	loaded, err := config.Load(placeholders.configPath())
 	if err != nil {
 		t.Fatalf("载入配置失败: %v", err)
@@ -198,7 +198,7 @@ func TestForegroundPIDHookWritesAndCleans(t *testing.T) {
 // TestArchiveLogForForegroundHonoursEnv 锁定 AMKR_LOG_ARCHIVED=1 时跳过归档
 // （service.py:108-109）。
 func TestArchiveLogForForegroundHonoursEnv(t *testing.T) {
-	env, placeholders := newCorpusLikeEnv(t)
+	env, placeholders := newTestFixture(t)
 	calls := 0
 	env.ArchiveLog = func(string, time.Time) (string, bool, error) {
 		calls++
@@ -337,14 +337,13 @@ func TestEscapeStatusValue(t *testing.T) {
 	}
 }
 
-// newCorpusLikeEnv 构造一个指向临时目录的 Env（与语料回放同一套夹具）。
-func newCorpusLikeEnv(t *testing.T) (*Env, *corpusPlaceholders) {
+// newTestFixture 构造一个指向临时目录的 Env 与对应路径。
+func newTestFixture(t *testing.T) (*Env, *testPaths) {
 	t.Helper()
-	sections := loadServiceCorpus(t)
-	placeholders := newPlaceholders(t, sections)
-	env := newTestEnv(t, placeholders, "windows")
+	paths := newTestPaths(t)
+	env := newTestEnv(t, paths, "windows")
 	env.IsAdmin = func() bool { return true }
 	env.Running = func(int) bool { return false }
 	env.Terminate = func(int) error { return nil }
-	return env, placeholders
+	return env, paths
 }

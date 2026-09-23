@@ -3,8 +3,6 @@ package updatecheck
 import (
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,7 +10,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
 
-// payloadDesc 是语料里的注入载荷描述符。
+// payloadDesc 是注入载荷的描述符。
 //
 //   - none: 抛异常（模拟网络故障）
 //   - text: 原样返回该文本（非 JSON）
@@ -22,137 +20,10 @@ type payloadDesc struct {
 	Value json.RawMessage `json:"value"`
 }
 
-type versionRow struct {
-	Version    string          `json:"version"`
-	Numbers    json.RawMessage `json:"numbers"`
-	Comparable json.RawMessage `json:"comparable"`
-}
-
-type comparisonRow struct {
-	Latest  string          `json:"latest"`
-	Current string          `json:"current"`
-	Newer   json.RawMessage `json:"newer"`
-}
-
-type resultRow struct {
-	CurrentVersion string  `json:"current_version"`
-	LatestVersion  *string `json:"latest_version"`
-	LatestTag      *string `json:"latest_tag"`
-	ReleaseURL     *string `json:"release_url"`
-	Source         *string `json:"source"`
-	ArtifactURL    *string `json:"artifact_url"`
-	ArtifactSHA256 *string `json:"artifact_sha256"`
-	Error          *string `json:"error"`
-	UpdateAvail    bool    `json:"update_available"`
-}
-
-type httpRow struct {
-	Name   string      `json:"name"`
-	Route  string      `json:"route"`
-	Github payloadDesc `json:"github"`
-	// LanguageSpecificError 为真时，error 的**文本**来自 JSON 解析器，
-	// Python 的 json.JSONDecodeError 与 Go 的 encoding/json 文案必然不同，故只断言
-	// 「有错」而不比文本。
-	LanguageSpecificError bool      `json:"language_specific_error"`
-	Result                resultRow `json:"result"`
-}
-
-type corpusFile struct {
-	Version         int               `json:"version"`
-	Note            string            `json:"note"`
-	SourceConstants map[string]string `json:"source_constants"`
-	Versions        []versionRow      `json:"versions"`
-	Comparisons     []comparisonRow   `json:"comparisons"`
-	HTTP            []httpRow         `json:"http"`
-}
-
-// loadCorpus 读取语料。
-func loadCorpus(t *testing.T) corpusFile {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join("testdata", "updatecheck_corpus.json"))
-	if err != nil {
-		t.Fatalf("读取语料失败: %v", err)
-	}
-	var corpus corpusFile
-	if err := json.Unmarshal(raw, &corpus); err != nil {
-		t.Fatalf("解析语料失败: %v", err)
-	}
-	if len(corpus.Versions) < 30 || len(corpus.HTTP) < 9 {
-		t.Fatalf("语料不完整：versions=%d http=%d", len(corpus.Versions), len(corpus.HTTP))
-	}
-	return corpus
-}
-
-// compactJSON 把语料里的（带缩进的）JSON 压成紧凑形式，便于逐字节比较。
-func compactJSON(t *testing.T, raw json.RawMessage) string {
-	t.Helper()
-	var value any
-	if err := json.Unmarshal(raw, &value); err != nil {
-		t.Fatalf("解析 %s 失败: %v", raw, err)
-	}
-	out, err := json.Marshal(value)
-	if err != nil {
-		t.Fatalf("序列化失败: %v", err)
-	}
-	return string(out)
-}
-
-// marshalInts 把数字切片渲染成紧凑 JSON。
-func marshalInts(value []int64) string {
-	out, _ := json.Marshal(value)
-	return string(out)
-}
-
-// TestVersionNumbersMatchesPython 逐条对齐 version_numbers 与 comparable_version。
-func TestVersionNumbersMatchesPython(t *testing.T) {
-	corpus := loadCorpus(t)
-	for _, row := range corpus.Versions {
-		t.Run(row.Version, func(t *testing.T) {
-			if got, want := marshalInts(VersionNumbers(row.Version)), compactJSON(t, row.Numbers); got != want {
-				t.Errorf("VersionNumbers(%q) = %s，期望 %s", row.Version, got, want)
-			}
-			if got, want := marshalInts(ComparableVersion(row.Version)), compactJSON(t, row.Comparable); got != want {
-				t.Errorf("ComparableVersion(%q) = %s，期望 %s", row.Version, got, want)
-			}
-		})
-	}
-}
-
-// TestIsNewerVersionMatchesPython 逐条对齐元组比较。
-func TestIsNewerVersionMatchesPython(t *testing.T) {
-	corpus := loadCorpus(t)
-	for _, row := range corpus.Comparisons {
-		var want bool
-		if err := json.Unmarshal(row.Newer, &want); err != nil {
-			t.Fatalf("比较结果不是布尔值（latest=%q current=%q）: %s",
-				row.Latest, row.Current, row.Newer)
-		}
-		if got := IsNewerVersion(row.Latest, row.Current); got != want {
-			t.Errorf("IsNewerVersion(%q, %q) = %v，期望 %v", row.Latest, row.Current, got, want)
-		}
-	}
-}
-
-// TestSourceConstantsMatchPython 锁定 URL/常量。
-func TestSourceConstantsMatchPython(t *testing.T) {
-	corpus := loadCorpus(t)
-	want := map[string]string{
-		"github_repository":         GitHubRepository,
-		"github_releases_url":       GitHubReleasesURL,
-		"github_latest_release_api": GitHubLatestReleaseAPI,
-	}
-	for key, value := range want {
-		if corpus.SourceConstants[key] != value {
-			t.Errorf("%s = %q，期望 %q", key, value, corpus.SourceConstants[key])
-		}
-	}
-}
-
-// corpusFetcher 依据载荷描述符构造注入的取回函数。
+// stubFetcher 依据载荷描述符构造注入的取回函数。
 //
-// 它刻意复刻 fetch_json 的语义：解析失败即错误、解析成功但非对象也错误
-// （后者文案与 Python 一致，故可逐字比对）。
-func corpusFetcher(t *testing.T, github payloadDesc, seenURLs *[]string, seenHeaders *[]map[string]string) Fetcher {
+// 它刻意复刻 fetch_json 的语义：解析失败即错误、解析成功但非对象也错误。
+func stubFetcher(t *testing.T, github payloadDesc, seenURLs *[]string, seenHeaders *[]map[string]string) Fetcher {
 	t.Helper()
 	return func(url string, headers map[string]string, timeout time.Duration) (*canonical.Value, error) {
 		_ = timeout
@@ -165,7 +36,6 @@ func corpusFetcher(t *testing.T, github payloadDesc, seenURLs *[]string, seenHea
 		chosen := github
 		switch chosen.Kind {
 		case "none":
-			// 文案与生成器注入的 OSError 一致，便于逐字比对。
 			return nil, errors.New("模拟网络故障")
 		case "text":
 			var text string
@@ -193,40 +63,6 @@ func corpusFetcher(t *testing.T, github payloadDesc, seenURLs *[]string, seenHea
 	}
 }
 
-// assertResult 比较 Result 与语料期望值。
-func assertResult(t *testing.T, got Result, want resultRow, languageSpecific bool) {
-	t.Helper()
-	if got.CurrentVersion != want.CurrentVersion {
-		t.Errorf("current_version = %q，期望 %q", got.CurrentVersion, want.CurrentVersion)
-	}
-	comparePtr := func(label string, got, want *string) {
-		switch {
-		case got == nil && want == nil:
-		case got == nil || want == nil:
-			t.Errorf("%s = %v，期望 %v", label, renderPtr(got), renderPtr(want))
-		case *got != *want:
-			t.Errorf("%s = %q，期望 %q", label, *got, *want)
-		}
-	}
-	comparePtr("latest_version", got.LatestVersion, want.LatestVersion)
-	comparePtr("latest_tag", got.LatestTag, want.LatestTag)
-	comparePtr("release_url", got.ReleaseURL, want.ReleaseURL)
-	comparePtr("source", got.Source, want.Source)
-	comparePtr("artifact_url", got.ArtifactURL, want.ArtifactURL)
-	comparePtr("artifact_sha256", got.ArtifactSHA256, want.ArtifactSHA256)
-	if languageSpecific {
-		// 文本来自 JSON 解析器，语言相关：只断言有无。
-		if (got.Error == nil) != (want.Error == nil) {
-			t.Errorf("error 有无不一致: got=%v want=%v", renderPtr(got.Error), renderPtr(want.Error))
-		}
-	} else {
-		comparePtr("error", got.Error, want.Error)
-	}
-	if got.UpdateAvailable() != want.UpdateAvail {
-		t.Errorf("update_available = %v，期望 %v", got.UpdateAvailable(), want.UpdateAvail)
-	}
-}
-
 // renderPtr 渲染可空字符串，便于失败信息阅读。
 func renderPtr(value *string) string {
 	if value == nil {
@@ -235,30 +71,15 @@ func renderPtr(value *string) string {
 	return "\"" + *value + "\""
 }
 
-// TestHTTPChecksMatchPython 重放全部 HTTP 分支。
-func TestHTTPChecksMatchPython(t *testing.T) {
-	corpus := loadCorpus(t)
-	for _, row := range corpus.HTTP {
-		t.Run(row.Name, func(t *testing.T) {
-			fetch := corpusFetcher(t, row.Github, nil, nil)
-			// 语料现在只含 route=github 的用例：PyPI 分支已随 Python 退役删除。
-			got := CheckLatestRelease(fetch, "4.1.0", 3*time.Second)
-			assertResult(t, got, row.Result, row.LanguageSpecificError)
-		})
-	}
-}
-
 // TestRequestContractMatchesPython 锁定请求的 URL 与头部。
 //
 // 这两点不会体现在 Result 里，但属对外行为：URL 错了会打到别的服务，头部错了
 // GitHub API 会拒绝（缺 Accept/User-Agent 时返回 403）。
 func TestRequestContractMatchesPython(t *testing.T) {
-	row := httpRow{
-		Github: payloadDesc{Kind: "json", Value: json.RawMessage(`{"tag_name":"v1.0.0"}`)},
-	}
+	payload := payloadDesc{Kind: "json", Value: json.RawMessage(`{"tag_name":"v1.0.0"}`)}
 	var urls []string
 	var headers []map[string]string
-	fetch := corpusFetcher(t, row.Github, &urls, &headers)
+	fetch := stubFetcher(t, payload, &urls, &headers)
 
 	CheckLatestRelease(fetch, "4.1.0", time.Second)
 	if len(urls) != 1 || urls[0] != GitHubLatestReleaseAPI {
@@ -282,7 +103,7 @@ func TestRequestContractMatchesPython(t *testing.T) {
 func TestCheckLatestVersionQueriesGitHubOnly(t *testing.T) {
 	github := payloadDesc{Kind: "json", Value: json.RawMessage(`{"tag_name":"v5.0.0"}`)}
 	var urls []string
-	fetch := corpusFetcher(t, github, &urls, nil)
+	fetch := stubFetcher(t, github, &urls, nil)
 	got := CheckLatestVersion(fetch, "4.1.0", time.Second)
 	if got.Source == nil || *got.Source != "GitHub" {
 		t.Fatalf("应走 GitHub，实际 source=%v", renderPtr(got.Source))

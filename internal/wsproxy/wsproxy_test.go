@@ -4,11 +4,14 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -18,6 +21,49 @@ import (
 
 	"github.com/Sparrived/auto-model-key-router/internal/proxysupport"
 )
+
+// frameExpectation 是一帧期望值。
+type frameExpectation struct {
+	Kind string
+	Text string
+	B64  string
+}
+
+// assertSame 比较期望与实际，不一致时给出 JSON 形式的差异。
+func assertSame(t *testing.T, name string, want, got any) {
+	t.Helper()
+	if reflect.DeepEqual(want, got) {
+		return
+	}
+	wantJSON, _ := json.Marshal(want)
+	gotJSON, _ := json.Marshal(got)
+	t.Errorf("%s 不一致\n期望: %s\n实际: %s", name, wantJSON, gotJSON)
+}
+
+// encodeRawPairs 把 http.Header 展成 [名, 值] 列表。
+func encodeRawPairs(header http.Header) [][]string {
+	pairs := [][]string{}
+	for name, values := range header {
+		for _, value := range values {
+			pairs = append(pairs, []string{name, value})
+		}
+	}
+	return pairs
+}
+
+// normalizePairs 归一化头部对：键转小写、去掉 host、排序后比较。
+func normalizePairs(pairs [][]string) []string {
+	result := []string{}
+	for _, pair := range pairs {
+		name := strings.ToLower(pair[0])
+		if name == "host" {
+			continue
+		}
+		result = append(result, name+": "+pair[1])
+	}
+	sort.Strings(result)
+	return result
+}
 
 // 连接结果：帧序列与关闭码。
 type connectionResult struct {

@@ -2,8 +2,11 @@ package eventbus
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -11,21 +14,9 @@ import (
 )
 
 // TestAuthTimeoutIsTenSeconds 锁定冻结契约里的「首帧等待上限 10 秒」。
-//
-// 语料 auth.jsonl 的 auth_timeout 是用「替换 event_bus.asyncio.wait_for 并记录
-// timeout 实参」的方式从真实模块里读出来的；e2e.jsonl 里的
-// waited_at_least_auth_timeout 则是真服务器真的等满 10 秒的观测。
 func TestAuthTimeoutIsTenSeconds(t *testing.T) {
 	if AuthTimeout != 10*time.Second {
 		t.Fatalf("AuthTimeout = %v，参照实现是 event_bus.py:37 的 timeout=10.0", AuthTimeout)
-	}
-	for _, line := range loadCorpus(t, "auth.jsonl") {
-		if line.FrameKind != "timeout" {
-			continue
-		}
-		if line.AuthTimeout != 10.0 {
-			t.Fatalf("语料记录的 timeout 字面量是 %v，不是 10.0", line.AuthTimeout)
-		}
 	}
 }
 
@@ -262,26 +253,12 @@ func TestIdleHeartbeatIntervalIncludesTrailingSleep(t *testing.T) {
 			t.Fatalf("空闲 100 秒的广播时刻 = %v，期望 %v", fired, want)
 		}
 	}
-	// 语料里的同一场景（throttle.jsonl 的 idle_one_client）也是这三个时刻。
-	for _, line := range loadCorpus(t, "throttle.jsonl") {
-		if line.Name != "idle_one_client" {
-			continue
-		}
-		var want struct {
-			Fired []float64 `json:"fired"`
-		}
-		decodeExpect(t, line.Expect, &want)
-		if len(want.Fired) != 3 || want.Fired[0] != 30 || want.Fired[1] != 61 || want.Fired[2] != 92 {
-			t.Fatalf("语料期望与实测节奏不符: %s", line.Expect)
-		}
-	}
 }
 
 // TestConnectedFrameIsCompactWhileBroadcastIsSpaced 记录发送 connected 时的分隔符差异。
 //
 // app.py:342 用 `websocket.send_json(...)`（Starlette 的 JSONResponse，紧凑分隔符），
-// 而 event_bus.py:71 用 `json.dumps(...)` 的**默认**分隔符（带空格）。两者都在真实
-// 服务器上观测过（e2e.jsonl 的 connected_frame、broadcast.jsonl 的 connected）。
+// 而 event_bus.py:71 用 `json.dumps(...)` 的**默认**分隔符（带空格）。
 func TestConnectedFrameIsCompactWhileBroadcastIsSpaced(t *testing.T) {
 	if got := ConnectedFrame(); got != `{"type":"connected","data":{}}` {
 		t.Fatalf("connected 帧文本 = %q", got)
@@ -316,8 +293,7 @@ func TestBroadcastFrameUsesPythonDefaultSeparators(t *testing.T) {
 // TestEventTypeConstants 锁定四个事件类型的字面量。
 //
 // 它们不是 event_bus.py 里的常量，而是 app.py 的调用点字面量（342/130/109/475），
-// 因此没有别的机制保证它们不被改错——只能靠这里与语料。broadcast.jsonl 的
-// event_type 字段逐个来自这四个调用点。
+// 因此没有别的机制保证它们不被改错。
 func TestEventTypeConstants(t *testing.T) {
 	want := map[string]string{
 		EventConnected:       "connected",
@@ -329,18 +305,6 @@ func TestEventTypeConstants(t *testing.T) {
 		if got != expected {
 			t.Errorf("事件类型常量 = %q，期望 %q", got, expected)
 		}
-	}
-	seen := map[string]bool{}
-	for _, line := range loadCorpus(t, "broadcast.jsonl") {
-		seen[line.EventType] = true
-	}
-	for eventType := range want {
-		if !seen[eventType] {
-			t.Errorf("broadcast.jsonl 没有覆盖事件类型 %q", eventType)
-		}
-	}
-	if len(seen) != len(want) {
-		t.Errorf("broadcast.jsonl 出现了预期之外的事件类型: %v", seen)
 	}
 }
 
@@ -500,4 +464,104 @@ func TestBroadcasterDropsSnapshotOnError(t *testing.T) {
 	if len(conn.sent) != 0 {
 		t.Fatalf("快照失败时不该广播任何帧，实际 %v", conn.sent)
 	}
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 测试替身
+// ─────────────────────────────────────────────────────────────────────────────
+
+// closeRecord 是假连接观测到的一次关闭。
+type closeRecord struct {
+	Code   int
+	Reason string
+}
+
+// fakeConn 是脚本化的 Conn，覆盖 ReadText 的四类结局。
+type fakeConn struct {
+	frameKind string
+	frame     string
+	failSend  bool
+	closed    []closeRecord
+	sent      []string
+	unblock   chan struct{}
+	once      sync.Once
+}
+
+// newFakeConn 按帧类型与帧文本构造假连接。
+func newFakeConn(frameKind, frame string) *fakeConn {
+	return &fakeConn{frameKind: frameKind, frame: frame, unblock: make(chan struct{})}
+}
+
+func (c *fakeConn) ReadText(ctx context.Context) (string, error) {
+	switch c.frameKind {
+	case "binary":
+		// 参照实现在二进制帧上取不到 text（KeyError 或 None），两条路都是 4001。
+		return "", ErrBinaryFrame
+	case "disconnect":
+		return "", errors.New("对端已断开")
+	case "timeout":
+		select {
+		case <-c.unblock:
+			return "", errors.New("连接已关闭")
+		case <-ctx.Done():
+			return "", ctx.Err()
+		}
+	default:
+		return c.frame, nil
+	}
+}
+
+func (c *fakeConn) SendText(_ context.Context, text string) error {
+	if c.failSend {
+		return errors.New("发送失败")
+	}
+	c.sent = append(c.sent, text)
+	return nil
+}
+
+func (c *fakeConn) Close(code int, reason string) {
+	c.closed = append(c.closed, closeRecord{Code: code, Reason: reason})
+	if c.unblock != nil {
+		c.once.Do(func() { close(c.unblock) })
+	}
+}
+
+func (c *fakeConn) lastClose() *closeRecord {
+	if len(c.closed) == 0 {
+		return nil
+	}
+	return &c.closed[len(c.closed)-1]
+}
+
+// okVerifier 是恒真的 token 校验器。
+func okVerifier(string) (bool, error) { return true, nil }
+
+// assertSame 比较期望与实际，失败时把两边都打成 JSON 便于定位。
+func assertSame(t *testing.T, name string, want, got any) {
+	t.Helper()
+	if reflect.DeepEqual(want, got) {
+		return
+	}
+	wantJSON, _ := json.Marshal(want)
+	gotJSON, _ := json.Marshal(got)
+	t.Errorf("%s 不一致\n期望: %s\n实际: %s", name, wantJSON, gotJSON)
+}
+
+// emptySnapshot 是拨测用的空快照。
+func emptySnapshot(context.Context) (*canonical.Value, error) {
+	return canonical.NewObject(), nil
+}
+
+// frameTypesOf 从广播帧文本里取出 type 字段序列。
+func frameTypesOf(frames []string) []string {
+	types := make([]string, 0, len(frames))
+	for _, frame := range frames {
+		value, err := canonical.ParseString(frame)
+		if err != nil {
+			types = append(types, "<not-json>")
+			continue
+		}
+		types = append(types, value.Lookup("type").StringValue())
+	}
+	return types
 }

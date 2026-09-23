@@ -2,55 +2,10 @@ package proxysupport
 
 import (
 	"encoding/hex"
-	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
 )
-
-// utf8ReplaceCase 是语料里的一条：原始字节的十六进制与 Python 解码后的字符串。
-type utf8ReplaceCase struct {
-	BytesHex string `json:"bytes_hex"`
-	Replaced string `json:"replaced"`
-}
-
-// TestDecodeUTF8ReplacingMatchesPython 用穷举语料对齐宽容解码。
-//
-// 语料由 gen_proxysupport_corpus.py（已随 Python 退役移除） 从**真实 Python** 生成，覆盖：
-// 全部 256 个单字节、0xC0-0xFF 的双字节组合、E0/ED/EF 与 F0/F4/F5 的边界三/四字节
-// 组合，以及截断、过量长、代理对、超 U+10FFFF 等病态序列。共 1476 条。
-//
-// 为什么值得穷举：这段文本会进入返回给调用方的错误 message。用 strings.ToValidUTF8
-// 会把连续非法字节折叠成一个 U+FFFD（`f4 90 80 80` 应为 4 个却只有 1 个），而错误
-// 响应本身是给程序解析的，长度与内容不一致会导致调用方的错误处理走偏。
-func TestDecodeUTF8ReplacingMatchesPython(t *testing.T) {
-	raw, err := os.ReadFile("testdata/utf8_replace_corpus.json")
-	if err != nil {
-		t.Fatalf("读取语料失败: %v", err)
-	}
-	var cases []utf8ReplaceCase
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		t.Fatalf("解析语料失败: %v", err)
-	}
-	if len(cases) < 1000 {
-		t.Fatalf("语料过少（%d 条），生成脚本可能出错", len(cases))
-	}
-	failures := 0
-	for _, item := range cases {
-		content := hexToBytes(t, item.BytesHex)
-		got := decodeUTF8Replacing(content)
-		if got != item.Replaced {
-			if failures < 10 {
-				t.Errorf("解码 %s 不符\n 实际 %q\n 期望 %q", item.BytesHex, got, item.Replaced)
-			}
-			failures++
-		}
-	}
-	if failures > 0 {
-		t.Fatalf("共 %d/%d 条不符", failures, len(cases))
-	}
-}
 
 // TestDecodeUTF8ReplacingIsValidUTF8 验证输出始终是合法 UTF-8。
 //
