@@ -98,6 +98,13 @@ jobs:
         # 级联算一遍。列数除不尽（孤儿瓦片）与半宽卡落单（空轨）都会在这里失败。
         run: node webui/probes/webui_layout_probe.mjs
 
+      - name: 访客看板探针
+        # 访客看板是**唯一**把访问密钥交给浏览器并长期保存的地方，因此它锁的是安全
+        # 边界而不是外观：绝不读写管理面的 localStorage 键（共用会让两边互相踢下
+        # 线）、绝不自己指定密钥或工作空间、绝不发写请求、明文 key 绝不上页，以及
+        # 401（请重填）与 403（已被停用，去找管理员）必须给出不同指引。
+        run: node webui/probes/webui_guest_probe.mjs
+
   go:
     name: Go 静态检查与测试
     runs-on: ubuntu-latest

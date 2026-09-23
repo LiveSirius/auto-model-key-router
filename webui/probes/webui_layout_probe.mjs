@@ -33,6 +33,7 @@ const read = (file) => readFileSync(path.join(WEBUI, file), "utf8");
 // 只有这几个模块有固定列数的栅格；其余页面（设置/日志/供应商等）用的是 auto-fit。
 const PAGES = [
   { file: "panel.js", label: "面板" },
+  { file: "pages/guest.js", label: "访客看板" },
   { file: "pages/activity.js", label: "用量统计" },
   { file: "pages/cost.js", label: "成本" },
   { file: "pages/overview.js", label: "概览" },

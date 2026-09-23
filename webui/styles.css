@@ -1261,6 +1261,20 @@ details > summary:focus-visible { outline: 2px solid var(--md-primary-variant); 
   flex-wrap: wrap;
 }
 
+/* 密钥尾号：页头里用来确认"看的是哪一把 key"的那一小段。
+ * 刻意只显示尾部 6 位而不是完整 key —— 访客看板常被投屏或截图，页头不该带着凭据。
+ * 用等宽字并压低存在感：它是一条身份注记，不是标题。 */
+.panel-hint {
+  display: block;
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--md-on-surface-variant);
+}
+
+/* 表格里的"时间"等不该被折断的短字段。 */
+.nowrap { white-space: nowrap; }
+
 /* 流向链路：桑基图在窄 iframe 里会挤成一团，这一行是它在任何宽度下的可读摘要，
  * 同时给读屏用户一个带数值的文字替代（图上只有 aria-label，说不出各层有几个节点）。
  * 它是本页唯一的"签名"元素，其余部分保持安静。 */
