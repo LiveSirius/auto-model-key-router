@@ -73,6 +73,9 @@ func (a *App) buildHandler() http.Handler {
 		// 嵌入方面板的读数（理由见 workspace_panel.go）：与上一条形状相同，但只认
 		// 面板 key，且只回 key 所属那**一个**空间的用量。
 		mux.HandleFunc(path+workspacePanelPath, a.handleWorkspacePanel)
+		// 访客看板的读数（理由见 accesskey_usage.go）：只认访问密钥，且只回**这一把
+		// key** 自己的用量。身份完全由凭据决定，不接受任何参数指定密钥。
+		mux.HandleFunc(path+accessKeyUsagePath, a.handleAccessKeyUsage)
 		a.webuiMounted = true
 	}
 

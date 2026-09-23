@@ -106,6 +106,18 @@ var workspaceUsageParams = []qParam{
 	{name: "all_history", kind: qBool, def: qBoolFalse},
 }
 
+// accessKeyUsageParams 是 GET /ui/access-key-usage.json（访客看板）的签名。
+//
+// 同样复用 hours + all_history 这一对，让看板与 /metrics、workspace-usage 的时间
+// 选择器语义一致。
+//
+// **刻意没有 key_id 之类的参数**：要查哪一把 key 完全由 Bearer 凭据决定。加一个
+// 这样的参数就等于让任何一把 key 读别人的用量（见 accesskey_usage.go 的说明）。
+var accessKeyUsageParams = []qParam{
+	{name: "hours", kind: qFloat, def: qFloat24, gt: qFloat0, le: qFloat8760},
+	{name: "all_history", kind: qBool, def: qBoolFalse},
+}
+
 // requestHistoryParams 对应 app.py:235-251 的 GET /metrics/requests 签名。
 //
 // 声明顺序与 app.py 一致：hours、all_history、caller_type、六个字符串过滤、
