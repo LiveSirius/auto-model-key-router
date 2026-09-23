@@ -92,6 +92,14 @@ type RecordParams struct {
 	PoolName         *string
 	UpstreamModelID  *string
 	Workspace        string
+	// AccessKeyID 是发起本次请求的访问密钥的 key_id（配置里的稳定标识符）。
+	//
+	// 空串表示这次请求不出自访问密钥（完整权限、工作空间推理凭据，以及所有历史写入
+	// 路径）。它不落 request_metrics 的列，而是单独进 request_access_key 旁挂表，
+	// 理由见 schema.go。
+	//
+	// 与 Workspace **互不排斥**：访问密钥照常带工作空间头，两者会各写各的旁挂表。
+	AccessKeyID string
 }
 
 // Open 打开（必要时创建）指标库，对应 MetricsStore.__init__。
@@ -239,6 +247,15 @@ func (s *Store) initSchema() error {
 	if _, err := s.writeDB.Exec(createWorkspaceTableSQL); err != nil {
 		return err
 	}
+	// 访问密钥旁挂表（理由见 schema.go）。与工作空间旁挂表同一位置：只在
+	// sqlite_master 里多一条新表条目，request_metrics 自身逐字节不变。
+	if _, err := s.writeDB.Exec(createAccessKeyTableSQL); err != nil {
+		return err
+	}
+	// 它的查找索引（理由见 schema.go）：看板按 access_key_id 过滤，没索引就是全表扫。
+	if _, err := s.writeDB.Exec(createAccessKeyIndexSQL); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -364,22 +381,35 @@ func (s *Store) recordSync(
 	if err != nil {
 		return err
 	}
-	// 工作空间归属写进旁挂表。**必须在 writeMu 内**（调用方已持锁）：LastInsertId
+	// 两张旁挂表都写在这里，**必须在 writeMu 内**（调用方已持锁）：LastInsertId
 	// 是连接级状态，writeDB 恰好只有一条连接（SetMaxOpenConns(1)），因此这里读到
 	// 的就是刚插入的那一行——换连接池就会读到别的连接的上一次插入。
 	//
 	// 用 INSERT OR REPLACE 而非 INSERT：request_id 是主键，重放同一行（测试里的
 	// 重复写入）不应炸掉，且替换语义与"归属只有一份"一致。
-	if params.Workspace == "" {
+	//
+	// 两张表各自独立判空：访问密钥的请求**同时**有工作空间归属（它照常带
+	// X-AMKR-Workspace），因此不能用 `if params.Workspace == ""` 提前 return，
+	// 那会把访问密钥那一行整个丢掉。
+	if params.Workspace != "" || params.AccessKeyID != "" {
+		requestID, err := result.LastInsertId()
+		if err != nil {
+			return err
+		}
 		// 没有归属就不写：历史行与不走 proxy 的写入路径都不会凭空获得一个工作空间。
-		return nil
+		if params.Workspace != "" {
+			if _, err := s.writeDB.Exec(insertWorkspaceSQL, requestID, params.Workspace); err != nil {
+				return err
+			}
+		}
+		// 同理：非访问密钥的请求不会凭空获得一个访问密钥归属。
+		if params.AccessKeyID != "" {
+			if _, err := s.writeDB.Exec(insertAccessKeySQL, requestID, params.AccessKeyID); err != nil {
+				return err
+			}
+		}
 	}
-	requestID, err := result.LastInsertId()
-	if err != nil {
-		return err
-	}
-	_, err = s.writeDB.Exec(insertWorkspaceSQL, requestID, params.Workspace)
-	return err
+	return nil
 }
 
 // nullableParam 把可选参数转成驱动可接受的 nil/值。

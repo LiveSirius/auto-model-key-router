@@ -105,6 +105,48 @@ const insertWorkspaceSQL = `
         INSERT OR REPLACE INTO request_workspace (request_id, workspace) VALUES (?, ?)
         `
 
+// createAccessKeyTableSQL 是访问密钥旁挂表的建表语句。
+//
+// 与 request_workspace 完全同构，理由也相同：不改 request_metrics 的列序，旧二进制
+// 打开新库只是看不到这张表，仍能正常读写指标。
+//
+// **为什么需要它**：request_metrics.caller_type 只能说明「这把流量来自访问密钥」，
+// 说不出**来自哪一把**——而访问密钥是按人分发的，两把 key 的流量在数据层混在一起
+// 就回答不了「这个人用了多少」，而那正是访问密钥看板的全部意义。注意
+// request_metrics.key_name 是**被选中的上游 Provider key 名**（internal/proxy 的
+// recordMetric 写的是 key.Name，key 是 config.KeyConfig），与调用方身份无关，
+// 不能拿来替代这张表。
+//
+// 工作空间旁挂表也替代不了：访问密钥不绑定工作空间，它的请求照常带
+// X-AMKR-Workspace（归一化后通常是 default），因此两把访问密钥会落进同一个
+// workspace 值。
+//
+// 存的是配置里的 key_id（稳定标识符）而不是明文 key 或显示名：显示名可改，明文不该
+// 进指标库。没有归属的行（完整权限、工作空间推理凭据、历史行）不写这张表。
+const createAccessKeyTableSQL = `
+            CREATE TABLE IF NOT EXISTS request_access_key (
+                request_id INTEGER PRIMARY KEY,
+                access_key_id TEXT NOT NULL
+            )
+            `
+
+// insertAccessKeySQL 写入一行访问密钥归属，与工作空间归属同一次 record() 的写入。
+const insertAccessKeySQL = `
+        INSERT OR REPLACE INTO request_access_key (request_id, access_key_id) VALUES (?, ?)
+        `
+
+// createAccessKeyIndexSQL 给访问密钥旁挂表的查找列建索引。
+//
+// 与 request_workspace 的差别：那张表按 request_id 一对一 JOIN，工作空间的过滤发生在
+// **JOIN 之后**（`w.workspace = ?`），SQLite 仍会先走 rowid。而访问密钥读数是
+// 「先按 access_key_id 选出这把 key 的行」（accesskey.go 的 accessKeyWindow），
+// 没有索引就是整张旁挂表全扫——看板每次刷新都付这个代价。
+//
+// 建在新表上是安全的：request_metrics 的 7 条索引一字未动，这里是本包自己的对象。
+const createAccessKeyIndexSQL = `
+        CREATE INDEX IF NOT EXISTS idx_request_access_key ON request_access_key(access_key_id)
+        `
+
 // createIndexStatements 对应 metrics.py:929-947 的 7 条索引。
 //
 // requested_model_id / caller / provider / upstream_model 四类维度是后加的，
