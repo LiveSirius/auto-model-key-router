@@ -11,7 +11,8 @@ import (
 // 本文件固化工作空间在代理层的可观察行为。
 //
 // 工作空间是 Go 侧的新增能力（参照实现没有这个概念），因此这些用例是手写的，
-// 而不是来自对拍语料。既有语料（不带 X-AMKR-Workspace 头）继续锁定兼容性。
+// 而不是从参照实现的录制里来的。既有调用方（不带 X-AMKR-Workspace 头）的行为
+// 必须保持不变。
 
 // workspaceConfig 构造一份两空间配置：
 //
@@ -183,7 +184,7 @@ func TestEmptyWorkspaceHeaderUsesDefault(t *testing.T) {
 
 // TestTaskWithoutModelIsRejectedExplicitly 固化「尚未指定模型」的任务行为（Go 侧分叉）。
 //
-// 参照实现里任务必须写 model，因此这条路径在 Python 侧不存在，没有对拍语料可依。
+// 参照实现里任务必须写 model，因此这条路径在 Python 侧不存在，没有参照行为可依。
 // 刻意选的是**明确报错**而不是「回落到 unified_model.default」或「回落到第一个已配置
 // 模型」：静默回落会让一个忘记选模型的任务照常服务，用户既看不到问题、也无从知道
 // 自己调用的其实是另一个模型；而占位任务本就允许存在，所以必须在请求时把它挑明。

@@ -729,7 +729,7 @@ func (w *failingWriter) Flush() {}
 // 这是迁移方案 §Phase 3 明确要求新增的两个测试之一：Go 里下游写失败会短路读取
 // 循环，但收尾（写指标、回写健康、释放 key）必须照样执行。
 //
-// **未能对拍的一点**：下游断开时参照实现记的 failed 是 true 还是 false，取决于
+// **未能与参照实现比对的一点**：下游断开时参照实现记的 failed 是 true 还是 false，取决于
 // Starlette/anyio 抛的是 Exception（被 `except Exception` 捕获 ⇒ true）还是
 // BaseException（GeneratorExit / CancelledError，不被捕获 ⇒ false）。本包按 true
 // 处理（把「写不出去」视为失败），因为更保守、也更能被监控看到。要钉死这一点需要

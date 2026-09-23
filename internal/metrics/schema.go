@@ -75,11 +75,11 @@ var columnUpgrades = [...]struct{ Name, Definition string }{
 // **本包唯一有意新增的库对象**（参照实现没有工作空间），因此不对应 metrics.py 的
 // 任何一行。放成旁挂表而不是给 request_metrics 加一列，理由是兼容成本：
 //
-//   - request_metrics 的建表原文、列序与索引定义被 schema.jsonl 逐字节锁定
-//     （TestSchemaMatchesPython），那是整条兼容链的根。而 ALTER TABLE ADD COLUMN
+//   - request_metrics 的建表原文、列序与索引定义是**对外兼容性契约**：旧二进制要
+//     能继续读写同一个库，靠的就是这份定义不被改写。而 ALTER TABLE ADD COLUMN
 //     **会重写 sqlite_master.sql**（实测：即便在全新库上也会把新列以
 //     ", workspace TEXT NOT NULL DEFAULT ”" 的形式追加到原文末尾），加列必然
-//     打破那条语料，且语料生成器已随 Python 退役、无法重生成。
+//     改写这份定义，代价由所有既有二进制承担。
 //   - 旁挂表让 request_metrics 自身保持逐字节不变，只在 sqlite_master 里多出一条
 //     **新表**的条目，差异面从「表定义被改写」缩小到「多了一张表」。
 //   - 旧二进制打开新库时只是看不到这张表，仍能正常读写指标；加列则会遇到它不认识

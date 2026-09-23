@@ -22,7 +22,7 @@ func TestDecodeUTF8ReplacingIsValidUTF8(t *testing.T) {
 
 // TestDecodeUTF8ReplacingCountsMaximalSubparts 锁定几个有代表性的计数。
 //
-// 直接写明数字，让回归时不至于只剩一个"与语料一致"的模糊结论。
+// 直接写明数字，让回归时不至于只剩一个"与参照实现一致"的模糊结论。
 func TestDecodeUTF8ReplacingCountsMaximalSubparts(t *testing.T) {
 	cases := []struct {
 		hex       string

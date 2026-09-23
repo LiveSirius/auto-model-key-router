@@ -67,9 +67,9 @@ var blockedResponseHeaders = map[string]bool{
 // 范围说明：本函数只复刻 _upstream_headers，即**代理转发**路径。参照实现里还有一
 // 组原生端点能力探测（proxy_support.py:474-529 的 test_native_messages_support 与
 // proxy_support.py:534-576 的 responses 版本），它们自建 headers、不带
-// accept-encoding，因此 httpx 会补上默认的 "gzip, deflate"。实测语料
-// internal/upstream/testdata/python_upstream_fixtures.jsonl 正是这个分布：103 条
-// 记录里 93 条 identity（转发路径）、10 条 gzip, deflate（探测路径）。探测属于
+// accept-encoding，因此 httpx 会补上默认的 "gzip, deflate"。迁移期录下的上游
+// 夹具正是这个分布：103 条记录里 93 条 identity（转发路径）、10 条 gzip, deflate
+// （探测路径）。探测属于
 // 「能力缓存」职责、自带 10 秒超时（proxy_support.py:504），不在本包范围内；若日后
 // 要移植，给探测请求显式设一个 Accept-Encoding 默认值即可。
 func CopyRequestHeaders(src http.Header, apiKey string) http.Header {

@@ -22,7 +22,7 @@
 // 与参照实现的三处**有意分叉**（产品决策）：上游调用上限 + 结构化日志、显式
 // multipart 处理、畸形请求体显式 400。三者都可通过 Options 关掉以回到逐字一致
 // 的参照行为（见 BodyPolicy / MultipartPolicy / DefaultMaxUpstreamCallsPerRequest），
-// 对拍语料走的正是「关掉」档。
+// 与参照实现比对时走的正是「关掉」档。
 package proxy
 
 import (

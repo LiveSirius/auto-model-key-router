@@ -327,7 +327,7 @@ func (p *KeyPool) resolveModelID(modelID string) string {
 //
 // 返回的 key 用 string，"" 表示「无 key」。Go 侧把 None 与 "" 统一成 ""：
 // 下游四处使用（proxy_handler.py:111/232/391/424）全部是真值判断，两者行为
-// 完全相同，因此这里不做区分；对拍测试对 key 位置做 null≡"" 归一后比较。
+// 完全相同，因此这里不做区分；测试对 key 位置做 null≡"" 归一后比较。
 func (p *KeyPool) ResolveRoute(modelID string, keyName *string, path string) (string, string, error) {
 	return p.ResolveRouteIn(config.DefaultWorkspace, modelID, keyName, path)
 }

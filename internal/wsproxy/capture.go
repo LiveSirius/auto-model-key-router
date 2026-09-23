@@ -151,7 +151,7 @@ func headerValue(header http.Header, name string) string {
 // 与本仓库已有的两份逐字相同：internal/proxysupport/support.go:642 与
 // internal/api/handlers_ops.go:672。两处都是私有实现，而本次迁移的约定是
 // 「只新增自己的包」，不值得为了一个 helper 去导出别人的内部件——本任务更是明确
-// 禁止改动那两个包。wsproxy 与 api 一样，用对拍语料锁住行为，不会各自漂移。
+// 禁止改动那两个包。三份实现必须保持逐字一致，改动其中一份就要同步改另两份。
 //
 // 为什么不能图省事：
 //   - strings.ToValidUTF8 会把**连续**非法字节折叠成一个 U+FFFD；

@@ -309,7 +309,7 @@ func (s *statsScan) stats() *UsageStats {
 // 调用方只剩 snapshot 的 rate 窗口（几分钟、行数极少）与
 // TestSnapshotRollupMatchesGroupedQueries：snapshot 的 9 个分组已经改走
 // snapshotRollup（一次扫描 + 上卷，见 rollup.go），但**别删这里**——它是参照实现
-// 那份取数口径的落点，既是上卷的对照物，也是语料之外唯一覆盖维度分支的路径。
+// 那份取数口径的落点，既是上卷的对照物，也是除上卷之外唯一覆盖任意维度组合的路径。
 func (s *Store) queryStats(
 	dimensions []string,
 	sinceCreatedAt, untilCreatedAt *string,

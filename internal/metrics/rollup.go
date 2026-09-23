@@ -18,8 +18,8 @@ import (
 //
 // 能上卷的前提是 usageAggregates 的 16 个聚合对分组**可结合**：COUNT/SUM 相加、
 // MIN/MAX 取极值。于是按「最细维度组合 + status_code」分组一次，再把每个最细组合
-// 折进它所属的各个目标分组，数值与逐分组查询逐字节相同（由 TestQueriesMatchPython
-// 与 TestSnapshotRollupMatchesGroupedQueries 锁定）。
+// 折进它所属的各个目标分组，数值与逐分组查询逐字节相同（由
+// TestSnapshotRollupMatchesGroupedQueries 锁定）。
 //
 // 为什么最细组合里带 status_code：status_codes 分布本来是第二次扫描
 // （`GROUP BY dims, status_code`）的结果，把它并进分组键以后，同一批行同时给出
@@ -27,7 +27,7 @@ import (
 // 请求），只是不进 status_codes 字典——参照实现的第二遍带 `status_code IS NOT NULL`。
 //
 // 这是**有意的实现偏离**：响应体逐字节不变，变的只是取的路径。参照实现那份
-// queryStats 仍在（rate 窗口那一小段用它），留作上卷的对照物与语料回放的主体。
+// queryStats 仍在（rate 窗口那一小段用它），留作上卷的对照物。
 
 // snapshotDim 是最细分组里的维度列。
 type snapshotDim int

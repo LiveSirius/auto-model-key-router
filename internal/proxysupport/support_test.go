@@ -501,10 +501,9 @@ func TestTaskParamConflicts(t *testing.T) {
 // 用的：调用方显式传了任务已固定的 reasoning_effort 时必须和 temperature 一样被明确拒绝
 // （400），否则「我传的值没生效」这种沉默的错配会一直藏着。
 //
-// 语料不受影响：internal/proxy/testdata/handler.jsonl 与
-// internal/upstream/testdata/python_upstream_fixtures.jsonl 里没有任何一条任务用例由
-// 调用方传 reasoning_effort（后者那条 test_task_allows_caller_reasoning_effort_but_still_
-// overrides_it 是 Python 侧录的，Go 不做回放），因此这是纯语义增补，不是语料回归。
+// 与既有用例不冲突：原先录制的 handler 与上游夹具里没有任何一条任务用例由
+// 调用方传 reasoning_effort（唯一涉及它的那条是 Python 侧用例，Go 侧从未回放），
+// 因此这是纯语义增补，不是行为回归。
 func TestTaskParamConflictsRejectsCallerReasoningEffort(t *testing.T) {
 	cases := []struct {
 		payload string

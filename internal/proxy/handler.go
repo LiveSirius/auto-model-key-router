@@ -386,7 +386,7 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 // 非空时整体替换，对应参照实现的 create_app(authenticator=...)。
 //
 // 受限凭据（访问密钥、工作空间推理 key）的识别刻意放在这里而不是塞进 internal/auth：
-// auth 是被语料锁定的纯函数，而这两条通道要读配置清单。顺序也不能反——本地主凭据
+// auth 是不读配置的纯函数，而这两条通道要读配置清单。顺序也不能反——本地主凭据
 // 必须**先**判，否则一把受限 key 可能被当成管理员凭据用。
 func (h *Handler) authorize(request *http.Request, cfg *config.RouterConfig) *AuthorizerResult {
 	if h.authorizer != nil {
@@ -416,8 +416,8 @@ func (h *Handler) authorize(request *http.Request, cfg *config.RouterConfig) *Au
 // 兜底成 500。而 `resolve_route` 只在「unified-model 未配置 unified_model」时抛
 // `KeyError(UNIFIED_MODEL_ID)`——这是配置缺失，不是服务故障。用户看到
 // 「模型 unified-model 未配置；请先在 AMKR 的模型设置中配置该模型」比看到 500
-// 有用得多，因此这里**刻意分叉**为 404 + 该文案；对拍语料覆盖的路径不受影响
-// （那种配置不会出现在语料里）。
+// 有用得多，因此这里**刻意分叉**为 404 + 该文案。该分叉只在「unified_model
+// 未配置」时生效，其余路径的响应一字未变。
 func (h *Handler) writeRouteError(w http.ResponseWriter, path, requestedModelID, workspace string, _ error) {
 	h.logModelNotConfigured(path, requestedModelID, "", workspace, "key_selection_failed")
 	writeJSON(w, http.StatusNotFound, jsonErrorResponse(

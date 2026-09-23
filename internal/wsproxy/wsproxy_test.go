@@ -336,7 +336,7 @@ func TestHandshakeHeadersAreFiltered(t *testing.T) {
 //
 // 影响面：上游收到的同名头数量不同（HTTP 层大小写不敏感，值也不会丢给「没有重复」
 // 的普通请求），只有「同一请求里带仅大小写不同的同名头」才会被观测到。这是 Go
-// 标准库的既定行为，不是实现缺陷；记录下来是为了让对拍差异有出处。
+// 标准库的既定行为，不是实现缺陷；记录下来是为了让这处与参照实现的差异有出处。
 func TestCanonicalisedHeaderNamesDivergeFromPythonRawBytes(t *testing.T) {
 	handshake := http.Header{}
 	handshake.Add("X-Multi", "first")
@@ -346,7 +346,7 @@ func TestCanonicalisedHeaderNamesDivergeFromPythonRawBytes(t *testing.T) {
 	request := SynthesizeRequest("http", mustURL(t, "/v1/chat/completions"), handshake, []byte("{}"))
 	got := proxysupport.UpstreamHeaders(map[string][]string(request.Header), "sk-up")
 
-	// Python 侧的同名输入产出两个键；语料 proxy.jsonl 的 full_handshake 记录了这个
+	// Python 侧的同名输入产出两个键；迁移期录下的 full_handshake 记录了这个
 	// 事实（upstream_headers 里同时有 X-Multi 与 x-multi）。Go 侧只剩一个。
 	// 键数 = X-Multi + Content-Type + 补上的 Authorization / Accept-Encoding。
 	if len(got) != 4 {

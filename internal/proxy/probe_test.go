@@ -74,8 +74,8 @@ func TestNativeProbe404FallsBackToChat(t *testing.T) {
 		t.Fatalf("回退路径: got %s", env.transport.calls[1].path)
 	}
 	// 回退后的体必须走 OpenAI 方言的适配路径。注意 `max_tokens` 会**保留**——
-	// 实测参照实现（语料 native_first_probe_supported）在回退体里原样留下
-	// `max_tokens`，只有 messages 会被适配成 chat 形态。这里按实测值断言，不按直觉。
+	// 实测参照实现在回退体里原样留下 `max_tokens`，只有 messages 会被适配成
+	// chat 形态。这里按实测值断言，不按直觉。
 	upstreamBody := env.transport.calls[1].body
 	if !strings.Contains(upstreamBody, `"messages"`) {
 		t.Fatalf("回退体应保留 messages: %s", upstreamBody)

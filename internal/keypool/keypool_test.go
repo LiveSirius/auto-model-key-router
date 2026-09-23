@@ -12,10 +12,10 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// TestSelectionCorpusIsDiscriminating 证明对拍语料确实有鉴别力。
+// TestSelectionCorpusIsDiscriminating 证明这套断言本身不是空转。
 //
-// 对拍最容易变成「永远通过」的测试：如果断言写错（比如只比较了空字符串），
-// 语料再丰富也发现不了偏差。这里用一个**已知错误**的期望值去跑同一套断言
+// 断言最容易变成「永远通过」的测试：如果断言写错（比如只比较了空字符串），
+// 用例再多也发现不了偏差。这里用一个**已知错误**的期望值去跑同一套断言
 // 路径，必须失败——否则说明断言本身是空的。
 func TestSelectionCorpusIsDiscriminating(t *testing.T) {
 	raw := `{
@@ -40,7 +40,7 @@ func TestSelectionCorpusIsDiscriminating(t *testing.T) {
 	}
 	// 反证：若断言逻辑写错（例如恒等比较），下面这个「错误的期望」就不会被发现。
 	if first.Name == "k2" {
-		t.Fatal("对拍断言无鉴别力：错误的期望值未被识别")
+		t.Fatal("断言无鉴别力：错误的期望值未被识别")
 	}
 }
 
@@ -124,7 +124,7 @@ func TestConcurrentNextKeyDoesNotRace(t *testing.T) {
 	}
 }
 
-// TestHealthStoreCooldownArithmetic 验证冷却算术，覆盖语料不方便表达的边界。
+// TestHealthStoreCooldownArithmetic 验证冷却算术，覆盖端到端用例不方便表达的边界。
 func TestHealthStoreCooldownArithmetic(t *testing.T) {
 	now := 1000.0
 	store := NewKeyHealthStore(func() float64 { return now })

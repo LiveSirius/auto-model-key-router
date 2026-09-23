@@ -22,7 +22,7 @@ import (
 // 查自己的请求。
 //
 // 产品决策是改为显式 400，但**保留参照行为**作为可选档，因为它是既定契约
-// （迁移期要能逐字节对拍）。
+// （迁移期要能与参照实现逐字节比对，该档就是比对用的）。
 type BodyPolicy string
 
 const (
@@ -57,7 +57,7 @@ const (
 	// 对 AMKR 是不透明的，原样转发即可。
 	MultipartPassthrough MultipartPolicy = "passthrough"
 	// MultipartPython 复刻参照实现：multipart 字节被当 JSON 解析 ⇒ payload={} ⇒
-	// 400「缺少 model 字段」。保留它是为了迁移期对拍。
+	// 400「缺少 model 字段」。保留它是为了迁移期能与参照实现逐字节比对。
 	MultipartPython MultipartPolicy = "python"
 )
 
@@ -135,7 +135,7 @@ func parseJSONObject(body []byte, policy BodyPolicy) (*canonical.Value, error) {
 	value, err := canonical.Parse(body)
 	if err != nil {
 		if policy == BodyPolicyPython {
-			// 迁移期对拍档：静默变 {}，后续自然 400「缺少 model 字段」。
+			// 复刻参照实现档：静默变 {}，后续自然 400「缺少 model 字段」。
 			return canonical.NewObject(), nil
 		}
 		return nil, malformedBodyError()

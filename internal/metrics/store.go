@@ -12,7 +12,7 @@ import (
 	// 纯 Go 的 SQLite 实现：不依赖 CGO，静态二进制在精简镜像里也能跑。
 	// 参照实现用 Python 标准库的 sqlite3（同样是嵌入的 C 库），这里换成
 	// modernc 版本；两者操作同一份文件格式，实测 schema、strftime 与整数除法
-	// 语义一致（见 TestSchemaMatchesPython 与 TestClockMatchesPython）。
+	// 语义一致。
 	_ "modernc.org/sqlite"
 )
 
@@ -40,10 +40,9 @@ var nowBeijing = func() time.Time { return time.Now().In(beijingTZ) }
 
 // SetNowForTest 替换包内时钟并返回还原函数；仅供测试使用。
 //
-// 这是给**别的包**留的测试缝隙：包内测试直接改 nowBeijing 就够了，但
-// internal/server 的语料回放要先读语料里记录的固定时刻，再让回放落在同一个
-// 瞬间上（对应生成脚本对 metrics_module._now_beijing 的 monkeypatch），跨包
-// 改不了未导出的变量。不改动任何生产路径。
+// 这是给**别的包**留的测试缝隙：包内测试直接改 nowBeijing 就够了，但跨包测试
+// 改不了未导出的变量，需要能先把时钟钉在一个固定时刻再断言（历史上对应参照
+// 实现测试对 metrics_module._now_beijing 的 monkeypatch）。不改动任何生产路径。
 func SetNowForTest(now func() time.Time) (restore func()) {
 	previous := nowBeijing
 	nowBeijing = now
