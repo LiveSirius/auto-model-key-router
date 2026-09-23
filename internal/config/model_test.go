@@ -358,6 +358,118 @@ func TestWorkspaceModelsParseErrors(t *testing.T) {
 	}
 }
 
+// TestAccessKeyParseErrors 固化 access_keys 段的解析与引用校验。
+//
+// 两份清单都在写盘时逐个校验引用的目标确实存在：写错一个名字就让某把已经分发出去的
+// key 静默少一项权限，排查要同时翻配置与调用方两侧，因此宁可在这里直接报错，且错误
+// 文本要带上 key_id 与字段下标。
+func TestAccessKeyParseErrors(t *testing.T) {
+	build := func(accessKeys string) string {
+		return `{"config_version":4,"local_api_key":"k",
+			"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
+			"models":{"model-a":{"targets":[{"provider":"p","key":"k"}],"aliases":["alias-a"]}},
+			"access_keys":` + accessKeys + `}`
+	}
+	// 别名也算合法引用：调用方写什么名字就按什么名字授权，清单里可以写别名。
+	assertOK := func(t *testing.T, accessKeys string) {
+		t.Helper()
+		if _, err := FromDict(mustParse(t, build(accessKeys))); err != nil {
+			t.Errorf("配置应合法: %v", err)
+		}
+	}
+	t.Run("别名与供应商 ID 均可引用", func(t *testing.T) {
+		assertOK(t, `{"trial":{"key":"ak","providers":["p"],"models":["alias-a"]}}`)
+	})
+	// 三态里「省略」与「空数组」是两种不同的授权状态，解析必须原样保留。
+	t.Run("三态被原样保留", func(t *testing.T) {
+		cfg, err := FromDict(mustParse(t, build(
+			`{"open":{"key":"a1"},"none":{"key":"a2","providers":[],"models":[]},
+			  "some":{"key":"a3","providers":["p"],"models":["model-a"]}}`)))
+		if err != nil {
+			t.Fatalf("配置应合法: %v", err)
+		}
+		byID := map[string]AccessKeyConfig{}
+		for _, key := range cfg.AccessKeys {
+			byID[key.ID] = key
+		}
+		if open := byID["open"]; open.Providers != nil || open.Models != nil {
+			t.Errorf("省略字段应是 nil（不限制），实得 %v / %v", open.Providers, open.Models)
+		}
+		none := byID["none"]
+		if none.Providers == nil || none.Models == nil {
+			t.Fatalf("显式空数组应是非 nil 空切片（一个都不许），实得 %v / %v",
+				none.Providers, none.Models)
+		}
+		if none.AllowsProvider("p") || none.AllowsModel("model-a") {
+			t.Error("空清单应什么都不许")
+		}
+		some := byID["some"]
+		if !some.AllowsProvider("p") || !some.AllowsModel("model-a") {
+			t.Error("清单内应放行")
+		}
+		if some.AllowsProvider("other") || some.AllowsModel("alias-a") {
+			t.Error("清单外应拒绝")
+		}
+	})
+	cases := []struct {
+		name       string
+		accessKeys string
+		want       string
+	}{
+		{"引用未配置的供应商", `{"trial":{"key":"ak","providers":["nope"]}}`,
+			"access_keys.trial.providers[0] 引用了未配置的供应商: nope"},
+		{"引用未配置的模型", `{"trial":{"key":"ak","models":["nope"]}}`,
+			"access_keys.trial.models[0] 引用了未配置的模型: nope"},
+		{"供应商元素为空串", `{"trial":{"key":"ak","providers":[""]}}`,
+			"access_keys.trial.providers[0] 不能为空"},
+		{"模型元素为空串", `{"trial":{"key":"ak","models":[""]}}`,
+			"access_keys.trial.models[0] 不能为空"},
+		{"缺少 key", `{"trial":{"name":"试用"}}`, "'key'"},
+		{"key 为空串", `{"trial":{"key":""}}`, "访问密钥 trial 的 key 不能为空"},
+		{"整个 access_keys 不是对象", `[]`, "access_keys 必须是对象"},
+		{"条目不是对象", `{"trial":"ak"}`, "访问密钥 trial 必须是对象"},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			_, err := FromDict(mustParse(t, build(testCase.accessKeys)))
+			if err == nil {
+				t.Fatalf("应报错: %s", testCase.want)
+			}
+			if err.Error() != testCase.want {
+				t.Errorf("错误文本 = %q，期望 %q", err.Error(), testCase.want)
+			}
+		})
+	}
+}
+
+// TestAccessKeyForIsConstantTimeAndSkipsEmpty 固化 AccessKeyFor 的匹配边界。
+//
+// 空 key 一律不匹配（否则任何不带凭据的请求都会命中一把空 key）；停用的 key
+// **仍然匹配**并由调用方判 enabled——把它当「不存在」会让「停用」与「删除」在错误
+// 文本上无法区分，而这两件事对调用方的含义完全不同（停用是可恢复的）。
+func TestAccessKeyForIsConstantTimeAndSkipsEmpty(t *testing.T) {
+	cfg := &RouterConfig{AccessKeys: []AccessKeyConfig{
+		{ID: "on", Name: "启用", Key: "ak-on", Enabled: true},
+		{ID: "off", Name: "停用", Key: "ak-off", Enabled: false},
+	}}
+	if got := cfg.AccessKeyFor(""); got != nil {
+		t.Errorf("空 key 不应匹配，实得 %v", got)
+	}
+	if got := cfg.AccessKeyFor("nope"); got != nil {
+		t.Errorf("未知 key 不应匹配，实得 %v", got)
+	}
+	if got := cfg.AccessKeyFor("ak-on"); got == nil || got.ID != "on" {
+		t.Errorf("ak-on 应匹配到 on，实得 %v", got)
+	}
+	if got := cfg.AccessKeyFor("ak-off"); got == nil || got.ID != "off" {
+		t.Errorf("停用的 key 应仍可匹配（由调用方判 enabled），实得 %v", got)
+	}
+	// 前缀不能被当成匹配：比较必须整串相等。
+	if got := cfg.AccessKeyFor("ak-o"); got != nil {
+		t.Errorf("前缀不应匹配，实得 %v", got)
+	}
+}
+
 // TestWorkspaceModelsKeepsGroupWithoutCredentials 固化：只带 models（无任何 key）的
 // 空间分组不会被解析丢掉。
 //
