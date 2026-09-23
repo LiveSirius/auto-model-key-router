@@ -27,7 +27,7 @@ x-api-key: your-local-api-key
 | 调用方 | 可访问接口 | 说明 |
 | --- | --- | --- |
 | 本地 API key | `/v1/models`、`/v1/*`、`/metrics`、`/api/*` | 完整权限 |
-| **访问密钥**（`amkr_ak_…`） | `/v1/models`、`/v1/*` | 每把密钥自带 `providers` / `models` 两份清单；不绑定工作空间，随 `X-AMKR-Workspace` 头走。**不能**用 `unified-model` 与任务名，拿不到 `/metrics` 与管理接口 |
+| **访问密钥**（`amkr_ak_…`） | `/v1/models`、`/v1/*`、`/ui/access-key-usage.json` | 每把密钥自带 `providers` / `models` 两份清单；不绑定工作空间，随 `X-AMKR-Workspace` 头走。**不能**用 `unified-model` 与任务名，拿不到 `/metrics` 与管理接口。看板端点只回**这把 key 自己**的用量 |
 | **工作空间推理 key**（`amkr_ik_…`） | `/v1/models`、`/v1/*` | 空间由 key **钉死**（`X-AMKR-Workspace` 被忽略）；只能用任务名，或 `workspaces.<空间>.models` 清单内的模型 |
 | 工作空间面板 key（`amkr_ws_…`） | `/api/tasks*`、`/ui/workspace-panel.json` | 空间由 key 钉死；**不能**用 `/v1/*` |
 | 无 key | `HEAD /`、`GET /health` | 当运行时 `local_api_key` 为空时，其他接口也按本地完整权限处理 |
@@ -89,6 +89,7 @@ x-api-key: your-local-api-key
 | `GET` | `/ui/` | 无 | 内置 WebUI（需 `webui_enabled`，未启用或资产缺失时返回 `404`） |
 | `GET` | `/ui/pricing.json` | 无 | models.dev 价格目录快照，用于 WebUI 估算成本（需 `webui_enabled`） |
 | `GET` | `/ui/workspace-usage.json` | 仅本地 | 按工作空间拆分的用量读数与请求流向，供 WebUI 的「工作空间」页（需 `webui_enabled`） |
+| `GET` | `/ui/access-key-usage.json` | 访问密钥 | 只回**这把**访问密钥自己的用量、按模型/供应商/上游模型的拆分与最近调用，供访客看板 `/ui/guest.html`（需 `webui_enabled`） |
 | `GET` | `/ui/update/status` | 无 | 报告本构建是否具备自更新能力及当前版本，供 WebUI 决定是否显示「立即更新」 |
 | `POST` | `/ui/update/apply` | 仅本地 | 执行自更新：下载并校验新版、就地替换、启动收尾助手重启服务 |
 | `GET` | `/api/logs` | 仅本地 | 读取日志文件尾部（默认最后 64 KiB） |
@@ -1271,6 +1272,8 @@ http://127.0.0.1:8000/ui/
 
 `/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
 
+三个页面各自的凭据面不同，不能互换：`index.html`（管理面）用本地鉴权 Key；`panel.html`（工作空间面板）用工作空间的面板 key，走 URL fragment；`guest.html`（访客看板）用访问密钥，存在**独立键名** `amkr.guestAccessKey` 下——与 `amkr.apiKey` 分开，否则访客的访问密钥会覆盖管理员已登录的本地鉴权 Key。
+
 ### `GET /api/workspaces`、`POST /api/workspaces`、`PUT|DELETE /api/workspaces/{workspace}`、`POST /api/workspaces/{workspace}/inference-key`、`PUT /api/workspaces/{workspace}/models`、`POST /api/workspaces/export|import`
 
 工作空间自身的读/改/删、凭据轮换、模型授权与整包迁移。这些是管理面的正式资源，因此挂在 `/api` 之下（详见「任务路由接口」一节），而不是像价格目录那样挂 `/ui/`。全部只认完整权限——包括**空间自己的**面板 key 与推理 key：让被嵌入的面板给自己扩权，「只能读写这一个空间」这句承诺就没了。
@@ -1360,6 +1363,55 @@ http://127.0.0.1:8000/ui/
 关于 `links`：某一端为空的请求（`provider_id` / `upstream_model_id` 可空）**不成边**，在图上留出缺口，而不是补一个占位节点——否则无法区分哪条是数据、哪条是兜底。
 
 > 该端点挂在 `/ui/` 之下而非新增 `/api/metrics/*`：它是本项目自有的响应形状（参照实现没有工作空间，没有可比对的 oracle），不混进被逐字节语料锁定的 `/metrics` 系列。
+
+### `GET /ui/access-key-usage.json`
+
+**这把访问密钥自己**的用量，供访客看板 `/ui/guest.html` 使用。
+
+**鉴权方式与其它端点都不同**：它认的是**访问密钥**（`amkr_ak_…`）本身，本地管理 key、工作空间的面板 key 与推理 key 一律 `401`。这与「访问密钥拿不到 `/metrics`」并不矛盾：`/metrics` 回的是**整台实例**的读数，是管理面信息；这里回的是**调用方自己的**流量，等同于把「你用了多少」还给调用方。
+
+| 参数 | 类型 | 默认 | 约束 | 说明 |
+| --- | --- | --- | --- | --- |
+| `hours` | number | `24` | `> 0` 且 `<= 8760` | 统计窗口 |
+| `all_history` | boolean | `false` | — | 为真时忽略 `hours`，统计全部历史 |
+
+**没有 `key_id` 参数**：可见范围完全由凭据决定。加一个可传的标识，读代码的人就会以为换个值能看别人的 key。
+
+参数校验同样**先于**鉴权（`hours=0` 不带凭据返回 `422` 而不是 `401`）。
+
+```json
+{
+  "count_semantics": "upstream_attempt",
+  "window": {"from": "2026-01-01T00:00:00+08:00", "to": "2026-01-02T00:00:00+08:00", "hours": 24},
+  "access_key_id": "9f2c…",
+  "access_key_name": "试用账号 A",
+  "stats": {"requests": 4, "successes": 3, "total_tokens": 1500, "...": "..."},
+  "dimensions": {
+    "model_id": {"gpt-4o-mini": {"requests": 4, "total_tokens": 1500, "...": "..."}},
+    "provider_id": {"openai-main": {"...": "..."}},
+    "upstream_model_id": {"gpt-4o-mini-2024-07-18": {"...": "..."}}
+  },
+  "recent_requests": [
+    {"created_at": "…", "model_id": "gpt-4o-mini", "provider_id": "openai-main",
+     "upstream_model_id": "gpt-4o-mini-2024-07-18", "status_code": 200, "success": true,
+     "retried": false, "prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150,
+     "cached_tokens": 0, "first_token_ms": 20, "duration_ms": 120}
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `access_key_name` | 配置里的密钥名，供页面标注「看的是哪一把」。页面**不显示**明文 key |
+| `stats` | 与 `/metrics` 的 `total` 同形（同一套聚合口径） |
+| `dimensions` | 三个拆分维度，键名是**原始列名**，与 `/ui/workspace-usage.json` 的 `layers` 同一约定 |
+| `recent_requests` | 最近调用明细，默认 50 条、上限 200 条 |
+
+关于 `upstream_model_id`：成本估算必须按这一维分组。`model_id` 是调用方自取的**本地路由名**（可能叫 `gpt-4o` 而实际打到 `gpt-4o-2024-07-18`），它是唯一能与 models.dev 价格目录对上的字段。
+
+**明文 key 在任何响应里都不出现**：新建与轮换是仅有的两个例外。这把 key 的持有者本来就知道自己的凭据，服务端没有理由再回显一次——看板会被投屏、截图、随手转发。
+
+被停用的密钥回 `403`（`访问密钥已被停用`），与「凭据不认识」的 `401` 刻意区分：停用是可恢复的，认错凭据不是。
 
 ### `GET /ui/pricing.json`
 

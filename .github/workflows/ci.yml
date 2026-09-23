@@ -2,14 +2,13 @@ name: CI
 
 # AMKR 的测试门禁。Python 参照实现已退役，仓库现在只剩 Go 实现 + 前端资产，
 # 因此这里有两个作业：
-#   * go    —— gofmt / go vet / go test。Go 测试会逐一回放 internal/*/testdata/ 与
-#              cmd/amkr/testdata/ 下**冻结的差分语料**（它们由已退役的 Python 参照实现
-#              产出并逐字节保留）。这些语料是兼容性的唯一凭证：配置读写、canonical
-#              序列化、key 选择、代理改写这些地方出错都不报警，只表现为「偶尔不对」。
-#   * webui —— 前端资产的 ES 模块加载检查与三个口径探针。
+#   * go    —— gofmt / go vet / go test。涵盖配置读写、canonical 序列化、key 选择、
+#              代理改写等模块的行为用例（差分语料已随 Python 参照实现的退役一并删除，
+#              不再有逐字节回放；见 CHANGELOG 的「退役冻结语料」一条）。
+#   * webui —— 前端资产的 ES 模块加载检查与全部口径探针（清单即下面逐个点名的步骤）。
 #
 # 触发：推送到主分支（master）与所有 PR。刻意不加 paths 过滤 —— 任何文件都可能
-# 引入漂移（改实现影响语料回放、改 Dockerfile 影响打包等），漏跑等于没门禁。
+# 引入漂移（改实现影响行为用例、改 Dockerfile 影响打包等），漏跑等于没门禁。
 on:
   push:
     branches: [master]
@@ -139,5 +138,5 @@ jobs:
         run: go vet ./...
 
       - name: Go 测试（go test）
-        # Go 侧测试是迁移的兼容性证据：它们逐条重放 Python 生成的语料。
+        # 行为用例：配置解析与校验、canonical 序列化、key 选择、代理改写、指标读写等。
         run: go test ./...

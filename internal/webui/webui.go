@@ -32,7 +32,7 @@ const IndexFile = "index.html"
 
 // probesDir 是只供开发/CI 使用的探针目录（webui/probes/*.mjs），**不对外服务**。
 //
-// 这 8 个 .mjs 是 webui/ 的开发期回归测试：CI 用 node 从**仓库检出**里逐个运行它们
+// 这些 .mjs 是 webui/ 的开发期回归测试：CI 用 node 从**仓库检出**里逐个运行它们
 // （.github/workflows/ci.yml 的 webui 作业），浏览器从不加载——webui/ 下没有任何
 // 资产 import probes/。但资产的发布物是整个 webui/ 目录，//go:embed webui 又无法按
 // 子目录排除（embed 只支持「全部」或「跳过点/下划线开头的文件」），因此它们会被编进

@@ -218,6 +218,8 @@ amkr --no-webui     # 关闭，并写入配置
 
 WebUI 的页面：概览、用量统计、**工作空间**、服务日志、**成本**、供应商、模型路由、统一模型、任务路由、集成、设置。其中「工作空间」页给出各空间的用量读数与请求流向（桑基图，经 `GET /ui/workspace-usage.json`）；「成本」页按 models.dev 的公开单价估算开销——服务端启动时取回一次目录、此后每 6 小时复验（命中 `304` 时不重复下载），通过 `GET /ui/pricing.json` 提供给界面。**金额只能用来比较量级**：它是现算的派生读数（目录更新后历史金额也会变），未匹配到单价的用量不计入合计，也不会被当成 `0`。详见 [成本估算](docs/USAGE.md#14-成本估算基于-modelsdev) 与 [`docs/API.md`](docs/API.md) 的「内置 WebUI 与运维 API」。
 
+除了 `index.html`（上面这些管理页），`/ui/` 下还有两个凭据面不同的独立页面：`panel.html` 给嵌入第三方后台的工作空间面板（用面板 key，走 URL fragment），`guest.html` 给访问密钥的持有者看自己的用量（用访问密钥本身）。它们不进管理面，因为管理面是完整权限的界面，配一个受限凭据会让每个链接都 `401`。见 [`docs/PANEL.md`](docs/PANEL.md) 与 [访客看板](docs/USAGE.md#156-让持有者看自己的用量访客看板)。
+
 ## 常用命令
 
 ```bash
@@ -390,6 +392,8 @@ amkr --version
 
 用 WebUI 的「访问密钥」页新建最省事：明文只在创建与轮换时显示一次，之后列表只给指纹。也可以走管理 API（`/api/access-keys`）集成到自己的系统里。
 
+持有者可以打开 **`/ui/guest.html`** 用自己的密钥登录，看**这把密钥自己**的用量：请求数/成功率/Token/耗时、按模型与供应商的排行、按上游模型的花费估算，以及最近调用明细（失败与重试都有标记）。看板是只读的，页头只显示密钥名与尾号，不回显明文。
+
 详细限制和示例见 [完整使用教程：使用访问密钥](docs/USAGE.md#15-使用访问密钥)。
 
 ## 数据与配置
@@ -412,18 +416,13 @@ go test ./...           # 全部包
 前端资产的检查（可选，只在改动 `webui/` 时需要）：
 
 ```bash
-node scripts/webui_module_check.mjs      # 24 个 ES 模块的加载检查
-node webui/probes/webui_chart_probe.mjs  # 图表口径
-node webui/probes/webui_chart_sizing_probe.mjs  # 桑基图布局与尺寸
-node webui/probes/webui_tip_probe.mjs
-node webui/probes/webui_routing_probe.mjs  # 模型路由页左侧导航
-node webui/probes/webui_providers_probe.mjs
-node webui/probes/webui_pricing_probe.mjs
-node webui/probes/webui_auth_probe.mjs   # 鉴权与任务路由页；不带参数=跑全部场景
-node webui/probes/webui_panel_probe.mjs  # 可嵌入面板（凭据来源与三条安全规则）
+node scripts/webui_module_check.mjs   # 逐个 import webui/ 下的全部 ES 模块
+for p in webui/probes/*.mjs; do node "$p" || break; done   # 全部口径探针
 ```
 
-探针都不带参数时跑全部场景（也可以给一个场景名只跑那一个），退出码非 0 表示有断言失败。
+探针各自只管一个口径（图表、成本、鉴权、面板、栅格、访客看板等），失败时自己退出非 0。
+多数探针不带参数时会为每个场景各起一个子进程跑全量，也可以只给一个场景名单跑。
+CI 的 `webui` 作业逐个点名运行它们，清单见 [`.github/workflows/ci.yml`](.github/workflows/ci.yml)。
 
 ## 文档
 

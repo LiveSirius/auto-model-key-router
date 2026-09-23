@@ -96,6 +96,39 @@
 - 供应商删除/迁移的凭据占用表把访问密钥也纳进来：工作空间整包导入时，包里的 `api_key`
   撞上任意一把访问密钥同样**报错**而不是悄悄换一个（`configops.secretOwnerOutside`）。
 
+- **访客看板：访问密钥的持有者能看自己的用量**。原先的访客模式是一把全局共享的固定
+  key，因此「这个人用了多少」根本无从谈起；访问密钥一人一把之后它才成为一个能回答的问题。
+
+  - **用量归属**：新增 `request_access_key` 旁挂表（`access_key_id` 主键即
+    `request_id`，与既有的 `request_workspace` 同一形状，`request_metrics` 的建表 SQL
+    因此保持逐字节不变）。`metrics.RecordParams` 与 `proxy.MetricRecord` 各增一个
+    `AccessKeyID`，由 `internal/proxy/retry.go` 的 `recordMetric` 从
+    `RequestContext.AccessKey` 带上——流式与非流式共用这一条路径，因此两条都覆盖到了。
+  - **读数端点** `GET /ui/access-key-usage.json`（`internal/server/accesskey_usage.go`）：
+    **认访问密钥本身**，本地管理 key / 面板 key / 推理 key 一律 `401`。它与「访问密钥拿不到
+    `/metrics`」不矛盾——`/metrics` 回的是整台实例的读数（管理面信息），这里回的是调用方
+    **自己的**流量。**没有 `key_id` 参数**：可见范围完全由凭据决定，加一个可传的标识只会让人
+    以为换个值能看别人的。返回 `stats`（与 `/metrics` 的 `total` 同形）、三个拆分维度
+    （`model_id` / `provider_id` / `upstream_model_id`）与最近 50 条调用明细。
+  - **页面** `/ui/guest.html`（`webui/pages/guest.js`、`webui/guest-api.js`）：KPI 瓦片、
+    模型与供应商请求排行、按上游模型的花费估算（对 models.dev 单价，标注「几项匹配到单价」，
+    匹配不上的不计入）、最近调用明细（失败标红、无响应与 4xx/5xx 分开、重试打标）。
+    `/ui/` 因此有三个凭据面互不相同的页面：管理面（`amkr.apiKey`）、工作空间面板
+    （URL fragment 的面板 key）、访客看板（访问密钥）。
+  - 访客凭据存在**独立键名** `amkr.guestAccessKey` 下，与 WebUI 的 `amkr.apiKey` 分开：
+    同一个浏览器里既登录管理面又看看板时，两边不会互相覆盖。**页头只显示密钥名与尾号 6
+    位**，不回显明文——这一页会被投屏、截图、随手转发。
+
+  成本估算必须按 `upstream_model_id` 分组：`model_id` 是调用方自取的**本地路由名**
+  （可能叫 `gpt-4o` 而实际打到 `gpt-4o-2024-07-18`），上游名才是唯一能与价格目录对上的字段。
+
+  回归由 `internal/metrics/accesskey_test.go`、`internal/server/accesskey_usage_test.go`
+  与 `webui/probes/webui_guest_probe.mjs`（5 个场景）三方守着。前端探针锁的是安全边界而非
+  外观：绝不读写管理面的 `localStorage` 键、绝不自己指定密钥或工作空间、绝不发写请求、
+  明文 key 绝不上页，以及 `401`（请重填）与 `403`（已被停用，去找管理员）给出不同指引。
+  看板页也纳入了 `webui_layout_probe.mjs` 的栅格检查（KPI 固定四张，不随数据增减，否则窄屏
+  会甩出孤儿瓦片）。
+
 ## [5.2.1] - 2026-09-19
 
 ### 新增
