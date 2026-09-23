@@ -19,7 +19,8 @@ import (
 //
 // 脚本调用 auto_model_key_router.protocols.anthropic 的转换函数，用
 // json.dumps(..., ensure_ascii=False, separators=(",", ":")) 打印结果，再把文本
-// 粘进下面的表里。这是与参照实现做差分测试的唯一可信方式。
+// 粘进下面的表里。这是从参照实现取期望值的可信方式（Python 源码已不在仓库里，
+// 表里的文本就是留存的历史依据）。
 
 // ev 拼出一个完整的 SSE 事件文本。
 //

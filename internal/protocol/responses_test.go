@@ -19,8 +19,8 @@ import (
 // （脚本放在系统临时目录，用完即删，不留在仓库里。）脚本调用
 // auto_model_key_router.protocols.responses 的转换函数，用
 // json.dumps(..., ensure_ascii=False, separators=(",", ":")) 打印结果，再把文本
-// 粘进下面的表里。这与 anthropic_test.go 的做法一致，是与参照实现做差分测试的
-// 唯一可信方式。
+// 粘进下面的表里。这与 anthropic_test.go 的做法一致，是从参照实现取期望值的
+// 可信方式（Python 源码已不在仓库里，表里的文本就是留存的历史依据）。
 
 // collectResponsesStream 把若干块喂进 Responses 流式转换器，返回全部事件文本。
 //
