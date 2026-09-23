@@ -22,8 +22,10 @@ type RequestContext struct {
 	Request *http.Request
 	Runtime *runtime.RuntimeResources
 
-	VisitorOnly bool
-	CallerType  string
+	// AccessKey 非空表示本请求由一把访问密钥发起，它的两份清单（供应商、模型名）
+	// 分别在选 key 与解析模型名时生效。nil 表示完整权限或工作空间推理凭据。
+	AccessKey  *config.AccessKeyConfig
+	CallerType string
 
 	Payload     *canonical.Value
 	IsStream    bool

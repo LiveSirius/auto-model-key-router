@@ -415,12 +415,12 @@ type attemptOutcome struct {
 //
 // 移植 proxy_handler.py:387。两处异常各自对应一个响应：
 //   - KeyError ⇒ 404「模型未配置」；
-//   - RuntimeError ⇒（访客且指定了 key 时）403，否则 503 且异常文本原样回给调用方
+//   - RuntimeError ⇒（访问密钥且指定了 key 时）403，否则 503 且异常文本原样回给调用方
 //     （key_pool.py 的文案如「模型 X 没有可用 key」是对外契约）。
 func (h *Handler) selectKey(context *RequestContext, excluded map[string]bool) (*config.KeyConfig, attempt) {
 	pool := context.pool()
 	if context.RequestedKeyName != nil && *context.RequestedKeyName != "" {
-		key, err := pool.KeyByName(context.ModelID, *context.RequestedKeyName, context.VisitorOnly)
+		key, err := pool.KeyByName(context.ModelID, *context.RequestedKeyName, context.AccessKey)
 		if err != nil {
 			return nil, h.keySelectionFailure(context, err)
 		}
@@ -435,7 +435,7 @@ func (h *Handler) selectKey(context *RequestContext, excluded map[string]bool) (
 	if context.CacheAffinityKey != nil {
 		affinity = *context.CacheAffinityKey
 	}
-	key, err := pool.NextKey(context.ModelID, excludedNames, context.VisitorOnly, affinity)
+	key, err := pool.NextKey(context.ModelID, excludedNames, context.AccessKey, affinity)
 	if err != nil {
 		return nil, h.keySelectionFailure(context, err)
 	}
@@ -455,9 +455,9 @@ func (h *Handler) keySelectionFailure(context *RequestContext, err error) attemp
 		return jsonResult(http.StatusNotFound, jsonErrorResponse(
 			"模型 "+context.RequestedModelID+" 未配置；请先在 AMKR 的模型设置中配置该模型"))
 	}
-	if context.VisitorOnly && context.RequestedKeyName != nil && *context.RequestedKeyName != "" {
+	if context.AccessKey != nil && context.RequestedKeyName != nil && *context.RequestedKeyName != "" {
 		return jsonResult(http.StatusForbidden, jsonErrorResponse(
-			"访客 key 无权访问模型 key: "+context.RequestedModelName+
+			"访问密钥 "+context.AccessKey.Name+" 无权访问模型 key: "+context.RequestedModelName+
 				"["+*context.RequestedKeyName+"]"))
 	}
 	return jsonResult(http.StatusServiceUnavailable, jsonErrorResponse(err.Error()))

@@ -88,17 +88,17 @@ type KeyPool interface {
 	// ResolveRouteIn 在指定工作空间里解析路由；任务名只在该空间内查表。
 	ResolveRouteIn(workspace, modelID string, keyName *string, path string) (string, string, error)
 	ResolveUnifiedPlan(routeKind string, keyName *string) (config.RoutePlan, error)
-	ResolveVisitorModelID(publicModelID string) (string, bool)
 	TaskPlan(taskName string) (config.RoutePlan, bool)
 	// TaskPlanIn / TaskParamsIn 按 (工作空间, 任务名) 查表。
 	TaskPlanIn(workspace, taskName string) (config.RoutePlan, bool)
 	TaskParams(taskName string) *canonical.Value
 	TaskParamsIn(workspace, taskName string) *canonical.Value
 	KeyCount(modelID string) int
-	VisitorKeyCount(modelID string) int
+	// KeyCountFor 返回模型在**某把访问密钥作用域内**可用的 key 数（nil = 不限制）。
+	KeyCountFor(modelID string, accessKey *config.AccessKeyConfig) int
 	RoutingMode(modelID string) string
-	KeyByName(modelID, keyName string, visitorOnly bool) (config.KeyConfig, error)
-	NextKey(modelID string, excluded []string, visitorOnly bool, affinityKey string) (config.KeyConfig, error)
+	KeyByName(modelID, keyName string, accessKey *config.AccessKeyConfig) (config.KeyConfig, error)
+	NextKey(modelID string, excluded []string, accessKey *config.AccessKeyConfig, affinityKey string) (config.KeyConfig, error)
 	AcquireKey(modelID, keyName string)
 	ReleaseKey(modelID, keyName string)
 	MarkSuccess(modelID, keyName string)
@@ -189,11 +189,7 @@ type Options struct {
 }
 
 // AuthorizerResult 是鉴权结果。
-//
-// 只带 VisitorOnly 一个布尔：参照实现的 authorize() 返回的 AuthorizationMode 也
-// 只被读这一个字段（proxy_handler.py:209）。
 type AuthorizerResult struct {
-	VisitorOnly bool
 	// Workspace 非空表示本次请求由一把**作用域推理凭据**发起，且它被钉死在这个
 	// 工作空间上。
 	//
@@ -202,6 +198,17 @@ type AuthorizerResult struct {
 	// key 就等于所有空间的推理权限。与面板 key 的做法一致（见 api 的
 	// authorizedTaskConfig）。
 	Workspace string
+	// AccessKey 非空表示本次请求由一把**访问密钥**发起。
+	//
+	// 它是完整的配置对象（而不是只抽出两份清单）：调用方要按它过滤供应商（选上游
+	// key）、按它过滤模型名（解析阶段），还要把 name 写进日志与指标。抽字段会让这三处
+	// 各拿一份副本，改一处漏一处的风险大于多传一个指针。
+	AccessKey *config.AccessKeyConfig
+	// Denied 非空表示凭据本身有效但**被停用**，值是给调用方的说明。
+	//
+	// 与「未通过鉴权」分开：停用的 key 是已知身份被管理员关掉，回 403 并说清原因，
+	// 而错误凭据回 401。合并两者会让「我明明配对了 key」这种排查无从下手。
+	Denied string
 }
 
 // Handler 是代理请求的编排器。

@@ -213,28 +213,151 @@ func TestTaskWithoutModelIsRejectedExplicitly(t *testing.T) {
 	}
 }
 
-// TestVisitorCannotUseWorkspaceTasks 固化：访客带工作空间头也拿不到任务。
-func TestVisitorCannotUseWorkspaceTasks(t *testing.T) {
+// TestAccessKeyCannotUseTasks 固化：访问密钥拿不到任务，带工作空间头也一样。
+//
+// 任务的模型由运维预先固定，那把模型可能不在访问密钥的授权清单里——绕过去等于清单
+// 失效。工作空间头也不例外：多一个维度只会扩大面。
+//
+// **清单不受限的访问密钥是这条规则最容易漏的一档**：受限 key 会因 AllowsModel(任务名)
+// 为假而 403，那只是巧合（任务名写不进 models 清单，见 parseAccessKeyModels）。不受限
+// key 能一路走到 keypool 的任务查表，拿到任务指向的模型并跳过任务固定参数。因此这里
+// 同时覆盖受限与不受限两档，且两条路径都必须 403、不触达上游。
+func TestAccessKeyCannotUseTasks(t *testing.T) {
+	// shared 在默认空间与 teamA 都是任务名。
+	headers := []map[string]string{
+		{"Authorization": "Bearer ak-trial"},
+		{"Authorization": "Bearer ak-trial", config.WorkspaceHeader: "teamA"},
+	}
+	cases := []struct {
+		label     string
+		accessKey config.AccessKeyConfig
+	}{
+		{
+			// 本可访问 model-b（两份清单都放行），用例才能证明是**任务**被拦下，
+			// 而不是模型不可见。
+			label: "受限清单",
+			accessKey: config.AccessKeyConfig{
+				ID: "trial", Name: "试用", Key: "ak-trial", Enabled: true,
+				Providers: []string{"p"}, Models: []string{"model-b"}},
+		},
+		{
+			// 两份清单都不写 = 不限制。这一档若不显式拦任务，任务名就会被
+			// ResolveRouteIn 解析成任务指向的模型。
+			label: "不受限清单",
+			accessKey: config.AccessKeyConfig{
+				ID: "trial", Name: "试用", Key: "ak-trial", Enabled: true},
+		},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.label, func(t *testing.T) {
+			cfg := workspaceConfig()
+			cfg.AccessKeys = []config.AccessKeyConfig{testCase.accessKey}
+			for i := range cfg.Models {
+				cfg.Models[i].Keys[0].Provider = "p"
+			}
+			env := newTestEnv(t, cfg, Options{
+				BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+
+			for _, header := range headers {
+				recorder := env.request(http.MethodPost, "chat/completions",
+					`{"model":"shared","messages":[{"role":"user","content":"hi"}]}`, header)
+				if recorder.Code != http.StatusForbidden {
+					t.Fatalf("访问密钥调任务状态码: got %d（%s）", recorder.Code, recorder.Body.String())
+				}
+			}
+			if len(env.transport.calls) != 0 {
+				t.Fatalf("访问密钥不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
+			}
+		})
+	}
+}
+
+// TestAccessKeyScopeRejectsOutOfScopeName 固化模型名清单与供应商清单各自的 403。
+//
+// 两条拒绝对应两份清单，错误都必须是 403（有权访问该路径，只是这个模型不在授权内），
+// 且都不该触达上游。
+func TestAccessKeyScopeRejectsOutOfScopeName(t *testing.T) {
+	base := func(accessKey config.AccessKeyConfig) *config.RouterConfig {
+		cfg := workspaceConfig()
+		cfg.AccessKeys = []config.AccessKeyConfig{accessKey}
+		for i := range cfg.Models {
+			cfg.Models[i].Keys[0].Provider = "p"
+		}
+		return cfg
+	}
+	envFor := func(accessKey config.AccessKeyConfig) *testEnv {
+		return newTestEnv(t, base(accessKey), Options{
+			BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+	}
+	body := `{"model":"model-b","messages":[{"role":"user","content":"hi"}]}`
+
+	// 模型名不在清单里 -> 403，且不触达上游。
+	byModel := envFor(config.AccessKeyConfig{ID: "a", Name: "只许 model-a", Key: "ak-m",
+		Models: []string{"model-a"}})
+	if got := byModel.request(http.MethodPost, "chat/completions", body,
+		map[string]string{"Authorization": "Bearer ak-m"}); got.Code != http.StatusForbidden {
+		t.Fatalf("清单外模型状态码: got %d（%s）", got.Code, got.Body.String())
+	}
+	if len(byModel.transport.calls) != 0 {
+		t.Fatalf("清单外模型不应触达上游: %v", describeUpstreams(byModel.transport.calls))
+	}
+
+	// 供应商清单与 model-b 的上游不相交 -> 403，且不触达上游。
+	byProvider := envFor(config.AccessKeyConfig{ID: "b", Name: "只许别的供应商", Key: "ak-p",
+		Providers: []string{"other"}})
+	if got := byProvider.request(http.MethodPost, "chat/completions", body,
+		map[string]string{"Authorization": "Bearer ak-p"}); got.Code != http.StatusForbidden {
+		t.Fatalf("清单外供应商状态码: got %d（%s）", got.Code, got.Body.String())
+	}
+	if len(byProvider.transport.calls) != 0 {
+		t.Fatalf("清单外供应商不应触达上游: %v", describeUpstreams(byProvider.transport.calls))
+	}
+}
+
+// TestAccessKeyCannotUseUnifiedModel 固化：访问密钥用不了 unified-model。
+//
+// 它是运维为整台实例挑的全局计划，绕过按 key 收窄的模型清单。要让它可用，运维就把
+// 具体模型名写进那份清单——那是显式的授权。
+func TestAccessKeyCannotUseUnifiedModel(t *testing.T) {
 	cfg := workspaceConfig()
-	// 访客凭据是保留 key（config.VisitorAPIKey）。把 model-b 的 key 标成允许访客，
-	// 这样「若无任务路由，访客本可访问 model-b」成立，用例才能证明是**任务**被
-	// 拦下，而不是模型不可见。
-	cfg.Models[1].Keys[0].AllowVisitor = true
+	cfg.AccessKeys = []config.AccessKeyConfig{
+		{ID: "trial", Name: "试用", Key: "ak-trial", Enabled: true},
+	}
 	env := newTestEnv(t, cfg, Options{
 		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
 
 	recorder := env.request(http.MethodPost, "chat/completions",
-		`{"model":"shared","messages":[{"role":"user","content":"hi"}]}`,
-		map[string]string{
-			"Authorization":        "Bearer " + config.VisitorAPIKey,
-			config.WorkspaceHeader: "teamA",
-		})
-	// 访客既不能解析任务名，就按普通模型名走到「无权访问模型」。
+		`{"model":"unified-model","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ak-trial"})
 	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("访客状态码: got %d（%s）", recorder.Code, recorder.Body.String())
+		t.Fatalf("访问密钥用 unified-model 状态码: got %d（%s）", recorder.Code, recorder.Body.String())
 	}
-	if len(env.transport.calls) != 0 {
-		t.Fatalf("访客不应触达上游，实得 %v", describeUpstreams(env.transport.calls))
+	if !strings.Contains(recorder.Body.String(), "unified-model") {
+		t.Errorf("403 文案应点明是 unified-model: %s", recorder.Body.String())
+	}
+}
+
+// TestDisabledAccessKeyIsForbiddenNotUnauthorized 固化停用与未知凭据的区别。
+//
+// 停用是**可恢复的配置状态**，不是错误凭据：401 会让调用方以为自己 key 写错了，
+// 403 配上名字才指向「去找运维启用」。
+func TestDisabledAccessKeyIsForbiddenNotUnauthorized(t *testing.T) {
+	cfg := workspaceConfig()
+	cfg.AccessKeys = []config.AccessKeyConfig{
+		{ID: "off", Name: "已停用", Key: "ak-off", Enabled: false},
+	}
+	env := newTestEnv(t, cfg, Options{
+		BodyPolicy: BodyPolicyPython, Multipart: MultipartPython})
+
+	recorder := env.request(http.MethodPost, "chat/completions",
+		`{"model":"model-a","messages":[{"role":"user","content":"hi"}]}`,
+		map[string]string{"Authorization": "Bearer ak-off"})
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("停用凭据状态码: got %d（期望 403，不是 401）（%s）",
+			recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "已停用") {
+		t.Errorf("403 文案应点明已停用: %s", recorder.Body.String())
 	}
 }
 

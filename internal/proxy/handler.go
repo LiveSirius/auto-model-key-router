@@ -90,9 +90,13 @@ func (h *Handler) writeTaskFallback(w http.ResponseWriter, prepared *RequestCont
 //     （proxy_handler.py:148）；
 //   - cache_affinity_key：粘滞哈希的 basis 里含 model_id（proxy_handler.py:153）；
 //   - use_native：备选模型可能有自己的 native_first 设置（proxy_handler.py:156）。
+//
+// 备选的 key 计数也**按凭据作用域重算**（KeyCountFor 而不是 KeyCount）：访问密钥走不到
+// 这里（它既不能用 unified-model 也不能用任务，见 prepare 的两处 403），但把口径留成
+// 「总数」会在将来放开任一入口时静默绕过供应商清单。这里与主路径用同一个判据。
 func (h *Handler) runFallback(w http.ResponseWriter, prepared *RequestContext, result attempt, target config.RouteTarget) {
 	pool := prepared.pool()
-	fallbackKeyCount := pool.KeyCount(target.Model)
+	fallbackKeyCount := pool.KeyCountFor(target.Model, prepared.AccessKey)
 	if fallbackKeyCount == 0 {
 		result.writeTo(w)
 		return
@@ -153,13 +157,20 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		writeJSON(w, http.StatusUnauthorized, jsonErrorResponse("本地 API key 验证失败"))
 		return nil
 	}
-	visitorOnly := authorization.VisitorOnly
+	if authorization.Denied != "" {
+		writeJSON(w, http.StatusForbidden, jsonErrorResponse(authorization.Denied))
+		return nil
+	}
+	// accessKey 非 nil 表示本次请求由一把访问密钥发起：它的两份清单分别在下面
+	// 「模型名」与「挑选上游 key」两处生效。
+	accessKey := authorization.AccessKey
 	// scopedWorkspace 非空表示凭据被钉死在某个工作空间上，据此**忽略请求头**。
 	scopedWorkspace := authorization.Workspace
 	callerType := "local"
-	if visitorOnly {
-		callerType = "visitor"
-	} else if scopedWorkspace != "" {
+	switch {
+	case accessKey != nil:
+		callerType = "access_key"
+	case scopedWorkspace != "":
 		callerType = "workspace"
 	}
 
@@ -188,9 +199,9 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 	if hasKey {
 		requestedKey = &requestedKeyName
 	}
-	if visitorOnly && requestedModelName == config.UNIFIED_MODEL_ID {
+	if accessKey != nil && requestedModelName == config.UNIFIED_MODEL_ID {
 		writeJSON(w, http.StatusForbidden,
-			jsonErrorResponse("访客 key 无权访问模型: "+config.UNIFIED_MODEL_ID))
+			jsonErrorResponse("访问密钥 "+accessKey.Name+" 无权访问模型: "+config.UNIFIED_MODEL_ID))
 		return nil
 	}
 	// 作用域凭据同样不能用 unified-model：它是一份**全局**计划（由运维为整台实例挑的
@@ -207,8 +218,9 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 	// （proxy_handler.py:228）
 	//
 	// 工作空间来自 X-AMKR-Workspace 头，缺省即默认工作空间；任务名只在所选空间
-	// 内查表。访客仍然不能使用任务（`!visitorOnly`），工作空间头也不例外——
-	// 访客无权访问任何任务，多一个维度只会扩大面。
+	// 内查表。访问密钥仍然不能使用任务：任务的模型由运维预先固定，那把模型可能不在
+	// 这把 key 的授权清单里，绕过去等于清单失效。工作空间头也不例外——访问密钥无权
+	// 访问任何任务，多一个维度只会扩大面。
 	//
 	// 作用域推理凭据（scopedWorkspace 非空）**忽略请求头**：空间由 key 决定。这是
 	// 这个模式要防的核心事情，与面板 key 在管理面的做法一致（api 的
@@ -220,73 +232,83 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 	}
 	var taskParams *canonical.Value
 	var taskName *string
-	if !visitorOnly {
-		if plan, isTask := pool.TaskPlanIn(workspace, requestedModelName); isTask {
-			if requestedKey != nil {
-				writeJSON(w, http.StatusBadRequest, jsonErrorResponse(
-					"任务 "+requestedModelName+" 的参数由 AMKR 固定，不能指定 Key"))
-				return nil
-			}
-			// 尚未指定模型的任务（允许先建出来占位）在这里就止住：继续往下走只会
-			// 拿到一个空模型名，最终报出「模型  未配置」这种既看不出是任务、也指不
-			// 出哪个任务的错。明确说清是哪个任务没选模型，用户才知道去哪里修。
-			if plan.Primary.Model == "" {
-				h.logModelNotConfigured(path, requestedModelName, "", workspace, "task_model_unset")
-				writeJSON(w, http.StatusNotFound, jsonErrorResponse(
-					"任务 "+requestedModelName+" 尚未指定模型；请先在 AMKR 的任务路由中为该任务选择模型"))
-				return nil
-			}
-			taskParams = pool.TaskParamsIn(workspace, requestedModelName)
-			name := requestedModelName
-			taskName = &name
-			if conflicts := proxysupport.TaskParamConflicts(payload, taskParams); len(conflicts) > 0 {
-				message := "任务 " + requestedModelName + " 已固定参数 " +
-					joinChineseEnumeration(conflicts) + "，调用方不能再传这些参数"
-				writeJSON(w, http.StatusBadRequest, jsonErrorResponse(message))
-				return nil
-			}
+	if plan, isTask := pool.TaskPlanIn(workspace, requestedModelName); isTask {
+		// 访问密钥一律不能用任务名，且**必须在这里挡**：下面的 ResolveRouteIn 自带
+		// 任务查表，若只靠「参数固定」那一支拦（原先是 `accessKey == nil` 才进入），
+		// 清单不受限的访问密钥就会经由 ResolveRouteIn 拿到任务指向的模型，同时因为
+		// taskParams 仍为 nil 而**绕过任务的固定参数**——既不施加也不报冲突。那是
+		// 一条静默的越权路径，不是清单收窄。
+		if accessKey != nil {
+			h.logModelNotConfigured(path, requestedModelID, "", workspace, "access_key_task_not_allowed")
+			writeJSON(w, http.StatusForbidden, jsonErrorResponse(
+				"访问密钥 "+accessKey.Name+" 无权使用任务: "+requestedModelName))
+			return nil
+		}
+		if requestedKey != nil {
+			writeJSON(w, http.StatusBadRequest, jsonErrorResponse(
+				"任务 "+requestedModelName+" 的参数由 AMKR 固定，不能指定 Key"))
+			return nil
+		}
+		// 尚未指定模型的任务（允许先建出来占位）在这里就止住：继续往下走只会
+		// 拿到一个空模型名，最终报出「模型  未配置」这种既看不出是任务、也指不
+		// 出哪个任务的错。明确说清是哪个任务没选模型，用户才知道去哪里修。
+		if plan.Primary.Model == "" {
+			h.logModelNotConfigured(path, requestedModelName, "", workspace, "task_model_unset")
+			writeJSON(w, http.StatusNotFound, jsonErrorResponse(
+				"任务 "+requestedModelName+" 尚未指定模型；请先在 AMKR 的任务路由中为该任务选择模型"))
+			return nil
+		}
+		taskParams = pool.TaskParamsIn(workspace, requestedModelName)
+		name := requestedModelName
+		taskName = &name
+		if conflicts := proxysupport.TaskParamConflicts(payload, taskParams); len(conflicts) > 0 {
+			message := "任务 " + requestedModelName + " 已固定参数 " +
+				joinChineseEnumeration(conflicts) + "，调用方不能再传这些参数"
+			writeJSON(w, http.StatusBadRequest, jsonErrorResponse(message))
+			return nil
 		}
 	}
 
-	var modelID string
-	if visitorOnly {
-		resolved, ok := pool.ResolveVisitorModelID(requestedModelName)
-		if !ok {
-			writeJSON(w, http.StatusForbidden,
-				jsonErrorResponse("访客 key 无权访问模型: "+requestedModelName))
+	// 访问密钥的**模型名清单**在这里生效，且刻意比在别名解析**之前**：调用方写什么
+	// 名字就按什么名字授权（清单里可以写别名），而只要清单限制了模型，未列出的写法
+	// 一律拒绝。任务名不走这条路——任务由访问密钥禁用，见上面的分支。
+	if accessKey != nil && !accessKey.AllowsModel(requestedModelName) {
+		h.logModelNotConfigured(path, requestedModelID, "", workspace, "access_key_model_not_allowed")
+		writeJSON(w, http.StatusForbidden, jsonErrorResponse(
+			"访问密钥 "+accessKey.Name+" 无权访问模型: "+requestedModelName))
+		return nil
+	}
+
+	modelID, key, err := pool.ResolveRouteIn(workspace, requestedModelName, requestedKey, path)
+	if err != nil {
+		h.writeRouteError(w, path, requestedModelID, workspace, err)
+		return nil
+	}
+	// 作用域凭据的模型白名单：任务名不查（任务自己固定的模型就是该空间被授权用的），
+	// 直呼真实模型名时才判。放在解析**之后**，这样别名也按它解析到的真实模型算，
+	// 而不是拿别名去比对清单——否则同一个模型写成别名就绕过了。
+	if scopedWorkspace != "" && taskName == nil {
+		if allowed, restricted := resources.Config.WorkspaceAllowedModels(scopedWorkspace); restricted && !allowed[modelID] {
+			h.logModelNotConfigured(path, requestedModelID, modelID, workspace, "workspace_model_not_allowed")
+			writeJSON(w, http.StatusForbidden, jsonErrorResponse(
+				"工作空间 "+scopedWorkspace+" 无权访问模型: "+requestedModelName))
 			return nil
 		}
-		modelID = resolved
+	}
+	if requestedKey != nil {
+		value := key
+		requestedKey = &value
 	} else {
-		resolved, key, err := pool.ResolveRouteIn(workspace, requestedModelName, requestedKey, path)
-		if err != nil {
-			h.writeRouteError(w, path, requestedModelID, workspace, err)
-			return nil
-		}
-		modelID = resolved
-		// 作用域凭据的模型白名单：任务名不查（任务自己固定的模型就是该空间被授权用的），
-		// 直呼真实模型名时才判。放在解析**之后**，这样别名也按它解析到的真实模型算，
-		// 而不是拿别名去比对清单——否则同一个模型写成别名就绕过了。
-		if scopedWorkspace != "" && taskName == nil {
-			if allowed, restricted := resources.Config.WorkspaceAllowedModels(scopedWorkspace); restricted && !allowed[modelID] {
-				h.logModelNotConfigured(path, requestedModelID, modelID, workspace, "workspace_model_not_allowed")
-				writeJSON(w, http.StatusForbidden, jsonErrorResponse(
-					"工作空间 "+scopedWorkspace+" 无权访问模型: "+requestedModelName))
-				return nil
-			}
-		}
-		if requestedKey != nil {
-			value := key
-			requestedKey = &value
-		} else {
-			requestedKey = nil
-		}
+		requestedKey = nil
 	}
 
 	configuredKeyCount := pool.KeyCount(modelID)
+	// keyCount 是**本请求作用域内**可用的 key 数。访问密钥的供应商清单在选 key 之前
+	// 就把无关的上游 key 排除了，因此它的可用数可能小于模型的总数——那正是「这把 key
+	// 能用哪些供应商」的落点。完整权限与工作空间凭据不受影响（两者都为总数）。
 	keyCount := configuredKeyCount
-	if visitorOnly {
-		keyCount = pool.VisitorKeyCount(modelID)
+	if accessKey != nil {
+		keyCount = pool.KeyCountFor(modelID, accessKey)
 	}
 	if configuredKeyCount == 0 {
 		h.logModelNotConfigured(path, requestedModelID, modelID, workspace, "no_configured_keys")
@@ -301,8 +323,20 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		return nil
 	}
 	if keyCount == 0 {
-		writeJSON(w, http.StatusForbidden,
-			jsonErrorResponse("访客 key 无权访问模型: "+requestedModelName))
+		// 走到这里只可能是访问密钥：它的供应商清单与这个模型的上游全都不相交。
+		// 说清是**供应商**维度被拒（而不是笼统的「无权」），运维才知道该改哪一份清单。
+		//
+		// accessKey 为 nil 时上面那个分支已经返回（keyCount 恒等于 configuredKeyCount），
+		// 因此这里的兜底措辞只是防御：将来若有人改动 KeyCountFor 的语义，也不至于
+		// 在一条 403 上 panic。
+		h.logModelNotConfigured(path, requestedModelID, modelID, workspace, "access_key_provider_not_allowed")
+		if accessKey != nil {
+			writeJSON(w, http.StatusForbidden, jsonErrorResponse(
+				"访问密钥 "+accessKey.Name+" 无权访问模型: "+requestedModelName))
+			return nil
+		}
+		writeJSON(w, http.StatusForbidden, jsonErrorResponse(
+			"无权访问模型: "+requestedModelName))
 		return nil
 	}
 	if path == "messages/count_tokens" {
@@ -322,7 +356,7 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 		Path:               path,
 		Request:            request,
 		Runtime:            resources,
-		VisitorOnly:        visitorOnly,
+		AccessKey:          accessKey,
 		CallerType:         callerType,
 		Payload:            payload,
 		IsStream:           isStream,
@@ -351,21 +385,26 @@ func (h *Handler) prepare(w http.ResponseWriter, request *http.Request, path str
 // 默认实现直接转 internal/auth（hmac.Equal 的恒定时间比较）；Options.Authorizer
 // 非空时整体替换，对应参照实现的 create_app(authenticator=...)。
 //
-// 作用域推理凭据的识别刻意放在这里而不是塞进 internal/auth：auth 是被逐字节语料
-// 锁定的纯函数（已退役的 Python 参照实现没有工作空间这个概念），往它里面加分支会
-// 让那份对拍证据的含义变模糊。这与面板 key 在 api 层的处置相同——那条路径同样
-// 「从不构造 ModeFull」。
+// 受限凭据（访问密钥、工作空间推理 key）的识别刻意放在这里而不是塞进 internal/auth：
+// auth 是被语料锁定的纯函数，而这两条通道要读配置清单。顺序也不能反——本地主凭据
+// 必须**先**判，否则一把受限 key 可能被当成管理员凭据用。
 func (h *Handler) authorize(request *http.Request, cfg *config.RouterConfig) *AuthorizerResult {
 	if h.authorizer != nil {
 		return h.authorizer(request, cfg.LocalAPIKey)
 	}
-	context := auth.Authenticate(nil, request, cfg.LocalAPIKey)
-	if context != nil {
-		return &AuthorizerResult{VisitorOnly: context.VisitorOnly()}
+	if context := auth.Authenticate(nil, request, cfg.LocalAPIKey); context != nil {
+		return &AuthorizerResult{}
 	}
-	// 完整权限与访客都没通过，再看是不是某个空间的推理 key。顺序不能反：推理 key
-	// 必须先排除在完整权限之外，否则一把空间的 key 就能当管理员用。
-	if workspace := cfg.WorkspaceForInferenceKey(auth.RequestAPIKey(request.Header)); workspace != "" {
+	apiKey := auth.RequestAPIKey(request.Header)
+	// 访问密钥：命中但被停用时回报 Denied（403 + 原因），而不是当成错误凭据。
+	if accessKey := cfg.AccessKeyFor(apiKey); accessKey != nil {
+		if !accessKey.Enabled {
+			return &AuthorizerResult{Denied: "访问密钥已被停用: " + accessKey.Name}
+		}
+		return &AuthorizerResult{AccessKey: accessKey}
+	}
+	// 完整权限与访问密钥都没通过，再看是不是某个空间的推理 key。
+	if workspace := cfg.WorkspaceForInferenceKey(apiKey); workspace != "" {
 		return &AuthorizerResult{Workspace: workspace}
 	}
 	return nil
