@@ -18,6 +18,7 @@ import { renderProviders } from "./pages/providers.js";
 import { renderRouting } from "./pages/routing.js";
 import { renderUnified } from "./pages/unified.js";
 import { renderTasks } from "./pages/tasks.js";
+import { renderAccessKeys } from "./pages/accesskeys.js";
 import { renderIntegrations } from "./pages/integrations.js";
 import { renderSettings } from "./pages/settings.js";
 
@@ -34,6 +35,7 @@ export const PAGES = [
     { id: "routing", label: "模型路由", icon: "routing", render: renderRouting },
     { id: "unified", label: "统一模型", icon: "unified", render: renderUnified },
     { id: "tasks", label: "任务路由", icon: "task", render: renderTasks },
+    { id: "access-keys", label: "访问密钥", icon: "key", render: renderAccessKeys },
     { id: "integrations", label: "集成", icon: "integrations", render: renderIntegrations },
   ]},
   { group: "系统", items: [{ id: "settings", label: "设置", icon: "settings", render: renderSettings }] },

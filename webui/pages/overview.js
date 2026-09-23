@@ -38,16 +38,19 @@ const HEATMAP_TTL_MS = 60000;
 
 // CALLER_TYPE_LABELS 把 caller_type 取值翻成中文。
 //
-// 三档：local（本机主 key）、visitor（amkr-visitor）、workspace（工作空间推理凭据，
-// Go 侧新增，见 server/query.go 的 callerTypes）。**必须用查表而不是三元表达式**：
-// 原先写的是 `=== "visitor" ? "访客" : "本机"`，多一档之后工作空间流量会被显示成
-// 「本机」——那正好是权限最高的一档，看板上混淆这两者会让人误判谁在用这个实例。
+// 三档：local（本机主 key）、workspace（工作空间推理凭据）、access_key（访问密钥）。
+// 后两者是 Go 侧新增的（见 server/query.go 的 callerTypes）；原先的 visitor 档已随
+// 访客模式删除，由 access_key 取代。
+//
+// **必须用查表而不是三元表达式**：原先写的是 `=== "visitor" ? "访客" : "本机"`，多一档
+// 之后工作空间流量会被显示成「本机」——那正好是权限最高的一档，看板上混淆这两者会让
+// 人误判谁在用这个实例。
 //
 // 兜底回显原始值：将来再加档时宁可看到 "unknown" 这种生词，也不要被悄悄归进某一档。
 const CALLER_TYPE_LABELS = {
   local: "本机",
-  visitor: "访客",
   workspace: "工作空间",
+  access_key: "访问密钥",
 };
 
 // 页面级状态：时间范围与主图指标是用户选择，需在轮询重绘间保持。
@@ -499,7 +502,6 @@ function runtimeCard() {
     ["版本", health.version ? `v${health.version}` : "—"],
     ["配置路径", health.config_path || "—"],
     ["本地鉴权", health.local_auth_enabled ? "已启用" : "未启用"],
-    ["访客访问", health.visitor_access_enabled ? `已启用 · ${health.visitor_key_count} 个 Key` : "未启用"],
   ];
   return card(
     cardHead("运行状态",

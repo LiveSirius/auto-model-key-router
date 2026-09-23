@@ -238,7 +238,6 @@ function providerForm(provider) {
 function openCreateKey(provider) {
   const nameInput = input({ placeholder: "例如 primary", required: true });
   const secretInput = input({ type: "password", required: true, autocomplete: "new-password" });
-  const visitorInput = h("input", { type: "checkbox" });
   const statusHost = h("div");
   const errorHost = h("div");
   let ref = null;
@@ -257,7 +256,7 @@ function openCreateKey(provider) {
     setStatus("saving", "正在保存 Key…");
     let revision = state.revision;
     try {
-      await api.createProviderKey(revision, provider.id, name, secret, visitorInput.checked);
+      await api.createProviderKey(revision, provider.id, name, secret);
       revision = (await reloadProviders()).config_revision;
     } catch (error) {
       render(errorHost, notice("Key 保存失败。", "error"));
@@ -287,7 +286,6 @@ function openCreateKey(provider) {
   const body = h("div.stack", {},
     field("Key 名称", nameInput),
     field("API Key", secretInput),
-    h("label.check", visitorInput, "访客访问"),
     h("p.muted", "保存后会自动探测此 Key 的可用模型与路由能力。密钥只写入服务端，不会被回显。"),
     statusHost,
     errorHost,
@@ -314,7 +312,7 @@ function keyRow(provider, key) {
         h("div.btn-row", {},
           buttonNode("保存", {
             onClick: async () => {
-              const patch = { name: nameInput.value.trim(), enabled: key.enabled, allow_visitor: key.allow_visitor };
+              const patch = { name: nameInput.value.trim(), enabled: key.enabled };
               if (secretInput.value.trim()) patch.api_key = secretInput.value.trim();
               try {
                 await api.updateProviderKey(state.revision, provider.id, key.name, patch);
@@ -347,7 +345,6 @@ function keyRow(provider, key) {
       h("code.mono", key.api_key_fingerprint || "-"))),
     h("td", {}, h("div.btn-row", {},
       toggle(key.enabled ? "已启用" : "已停用", key.enabled, () => patchKey(provider, key, { enabled: !key.enabled })),
-      toggle(key.allow_visitor ? "允许访客" : "仅本地", key.allow_visitor, () => patchKey(provider, key, { allow_visitor: !key.allow_visitor })),
     )),
     h("td", {}, h("div.btn-row", {},
       buttonNode(probeLabel, {
@@ -384,7 +381,7 @@ function keyRow(provider, key) {
 async function patchKey(provider, key, patch) {
   try {
     await api.updateProviderKey(state.revision, provider.id, key.name, {
-      enabled: key.enabled, allow_visitor: key.allow_visitor, ...patch,
+      enabled: key.enabled, ...patch,
     });
     await reloadProviders();
     draw();

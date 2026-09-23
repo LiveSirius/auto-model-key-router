@@ -63,7 +63,6 @@ function editor() {
       if (!primaryKey) routing = "auto";
     }
     const model = state.models.find((item) => item.id === primaryModel);
-    const visitorAvailable = (model?.keys || []).some((key) => key.enabled && key.allow_visitor);
 
     const modelSelect = select(modelOptions(), {
       value: primaryModel,
@@ -113,7 +112,6 @@ function editor() {
       h("div", { style: { marginTop: "8px" } }, kv([
         ["路由策略", model?.routing_mode || "round_robin"],
         ["推理强度", effort || "默认"],
-        ["访客可用", visitorAvailable ? "是" : "仅本地 Key"],
         ["启用 Key", String(primaryKeys.length)],
         ["别名", (model?.aliases || []).join(", ") || "无"],
       ])),

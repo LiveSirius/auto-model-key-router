@@ -163,10 +163,10 @@ export const api = {
       body: { config_revision: revision },
     }),
 
-  createProviderKey: (revision, providerId, name, apiKey, allowVisitor) =>
+  createProviderKey: (revision, providerId, name, apiKey) =>
     request(`/api/providers/${encodeURIComponent(providerId)}/keys`, {
       method: "POST",
-      body: { config_revision: revision, name, api_key: apiKey, allow_visitor: allowVisitor },
+      body: { config_revision: revision, name, api_key: apiKey },
     }),
   updateProviderKey: (revision, providerId, keyName, patch) =>
     request(`/api/providers/${encodeURIComponent(providerId)}/keys/${encodeURIComponent(keyName)}`, {
@@ -287,5 +287,46 @@ export const api = {
     request(`/api/workspaces/${encodeURIComponent(workspace)}/models`, {
       method: "PUT",
       body: { config_revision: revision, models },
+    }),
+
+  // —— 访问密钥：分发给外部使用者的受限推理凭据（取代已删除的访客模式）——
+  //
+  // 每把 key 带两份清单：providers（能用哪些上游）与 models（能调哪些模型名）。
+  // 清单的**三态**是这套接口最容易出错的地方，前端必须原样传递而不能折叠：
+  //   字段不传 / null = 本次不动这份清单；`[]` = 一个都不许；`[...]` = 限定为这些。
+  // 「清除限制、回到不限制」= 显式传 null（见下面的 scope 参数）。
+  accessKeys: () => request("/api/access-keys"),
+  // 响应是**唯一**出现明文 key 的两个时机之一（另一个是轮换）。
+  createAccessKey: (revision, name, options = {}) =>
+    request("/api/access-keys", {
+      method: "POST",
+      body: {
+        config_revision: revision,
+        name,
+        ...(options.key ? { key: options.key } : {}),
+        ...(options.enabled === undefined ? {} : { enabled: options.enabled }),
+        ...(options.providers === undefined ? {} : { providers: options.providers }),
+        ...(options.models === undefined ? {} : { models: options.models }),
+      },
+    }),
+  // 改名字 / 启停 / 两份清单。**不换 key**：换 key 是下面那个独立动作。
+  updateAccessKey: (revision, keyId, options = {}) =>
+    request(`/api/access-keys/${encodeURIComponent(keyId)}`, {
+      method: "PUT",
+      body: {
+        config_revision: revision,
+        ...options,
+      },
+    }),
+  // 换一把新 key。旧 key 立刻失效，新明文只在这条响应里出现一次。
+  rotateAccessKey: (revision, keyId) =>
+    request(`/api/access-keys/${encodeURIComponent(keyId)}/rotate`, {
+      method: "POST",
+      body: { config_revision: revision },
+    }),
+  deleteAccessKey: (revision, keyId) =>
+    request(`/api/access-keys/${encodeURIComponent(keyId)}`, {
+      method: "DELETE",
+      body: { config_revision: revision },
     }),
 };
