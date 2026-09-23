@@ -3,8 +3,8 @@
 // Python 版直接读模块级全局（platform.system / shutil.which / os.environ /
 // sys.stdout / subprocess.run），因此在 Linux 上无法覆盖 Windows/macOS 分支。
 // Go 侧把这些全局收进一个 Env 结构体**注入**进来：环境是唯一的外部输入，
-// 语料就能在任何平台上把三个系统分支、命令回退顺序、失败文案全部跑一遍
-// （见 testdata/clipboard_corpus.json）。真实调用方用 Native() 拿到接系统的 Env。
+// 测试就能在任何平台上把三个系统分支、命令回退顺序、失败文案全部跑一遍。
+// 真实调用方用 Native() 拿到接系统的 Env。
 package clipboard
 
 import (
@@ -276,8 +276,8 @@ func nativeSystemName() string {
 // 分别捕获 stdout/stderr、5 秒超时、非零退出码不算错误。
 //
 // 错误文案与 Python 不逐字对齐：Python 抛 OSError 时带的是平台错误文本
-// （Windows 上是 WinError 文案），无法在 Go 里复现；语料里的失败分支全部
-// 由注入的 Runner 提供两侧一致的合成消息，因此不受影响。
+// （Windows 上是 WinError 文案），无法在 Go 里复现；测试里的失败分支全部
+// 由注入的 Runner 提供合成消息，因此不受影响。
 func runNative(command []string, stdin string) CommandResult {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
