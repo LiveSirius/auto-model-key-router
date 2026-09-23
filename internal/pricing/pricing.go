@@ -76,7 +76,7 @@ type FetchResult struct {
 // Fetcher 取回原始目录。etag 为空表示无条件请求。
 //
 // 做成函数类型而不是直接用 http.Client，理由与 internal/updatecheck 的同名接缝
-// 一致：测试与语料回放必须能不联网。
+// 一致：测试必须能不联网。
 type Fetcher func(url, etag string, timeout time.Duration) (FetchResult, error)
 
 // HTTPFetcher 返回真实实现。client 为 nil 时用 http.DefaultClient。
