@@ -4,7 +4,6 @@ package main
 //
 // 与 main.go（进程装配与监听）分开是为了让「选哪条分支、配置被改成了什么」可以脱离
 // 副作用单独断言：parseOptions / selectCommand 都是纯函数，可直接喂参数断言。
-// （原先还有一层 cmd/amkr/testdata/cli_corpus.json 对拍，该语料已随对拍语料一并退役。）
 //
 // # 24 个 flag 的处置
 //
@@ -30,7 +29,7 @@ package main
 //
 // 注意 `--update` 曾经也是被砍的一员（产品决策 8「取消自更新」）。该决策已被**推翻**：
 // 现在恢复 `--update`，并补上 WebUI/API 入口。恢复的理由与实现见 docs/CLI.md 的
-// 「版本检查与更新」一节；语料里的对应条目也一并改了（原本标注为 update-dropped）。
+// 「版本检查与更新」一节。
 //
 // # 刻意保留的差异
 //
@@ -44,8 +43,8 @@ package main
 //     （这是一个**待产品确认**的开放决策）。
 //  3. **没有 --print-config**。参照实现用 --show-config；Go 保持同名，行为也一致，
 //     只是不再经过 dashboard 的富文本渲染。
-//  4. **错误文案**。argparse 的用法/错误文本与 Go 的 flag 包不同，语料只对拍**退出码**
-//     （两边都是 2）。
+//  4. **错误文案**。argparse 的用法/错误文本与 Go 的 flag 包不同，因此只保证**退出码**
+//     一致（两边都是 2）。
 
 import (
 	"flag"
@@ -112,7 +111,7 @@ const (
 	commandManageService
 )
 
-// String 返回与语料一致的命令名，便于对拍与失败信息。
+// String 返回动作短名，便于失败信息可读。
 func (c command) String() string {
 	switch c {
 	case commandForeground:
@@ -155,8 +154,7 @@ type options struct {
 	host   string
 	port   int
 	// hostSet / portSet 对应 Python 的 `if args.host:` / `if args.port:`：**假值不覆盖**
-	// （因此 `--port 0` 与 `--host ""` 都不会生效，main.py:129-132）。这个反直觉行为
-	// 由语料锁定。
+	// （因此 `--port 0` 与 `--host ""` 都不会生效，main.py:129-132）。
 	hostSet bool
 	portSet bool
 
@@ -371,7 +369,7 @@ func (o *options) configOverrides(cfg *config.RouterConfig) *config.RouterConfig
 	return &updated
 }
 
-// —— 纯渲染（可对拍部分） ——
+// —— 纯渲染（可脱离副作用比较的部分） ——
 
 // routerAddressText 对应 main.py:20 的 router_address_text。
 //
@@ -455,7 +453,7 @@ func configSummaryLine(cfg *config.RouterConfig, healthy bool, width int) string
 // configModelRows 对应 dashboard.py:912-944 的「模型配置」表行。
 //
 // 只产出**行数据**：Go 的表格用固定列宽，与 rich 的 expand 列宽分配不同（internal/tui
-// 的既定差异），因此语料只对拍单元格内容。
+// 的既定差异），因此只保证单元格内容一致，版式由渲染层自行决定。
 func configModelRows(cfg *config.RouterConfig) [][]string {
 	rows := [][]string{}
 	for _, model := range cfg.Models {

@@ -1,6 +1,6 @@
 // Command amkr 是 AMKR 的入口：完整 CLI + 前台服务。
 //
-// 参数解析与分支决策在 cli.go（可脱离副作用对拍），本文件负责装配与执行：
+// 参数解析与分支决策在 cli.go（可脱离副作用测试），本文件负责装配与执行：
 // 载入配置、装配 internal/server、监听并在中断时干净退出；以及把 CLI 动作分派给
 // internal/service（后台启停、系统服务注册）与 internal/unifiedmodel（统一模型切换）。
 //
@@ -11,10 +11,9 @@
 //
 //   - **--check-update 的可手动更新命令**。参照实现给的是 pip/uv 命令（update.py），
 //     Go 版给的是本平台的安装脚本一行命令（Windows 是 install.ps1，其余是
-//     install.sh）。渲染函数把命令作为参数，语料用参照实现的命令文本喂进去逐行对拍
-//     （见 versionCheckLines 与 defaultManualUpdateCommand）。
-//     自更新恢复（`--update`）后这条提示仍然成立——重跑安装脚本能装到同一份最新产物；
-//     面板文案与语料一并冻结，为免再改一次兼容性凭证，没有把它改成推荐 `amkr --update`。
+//     install.sh）。渲染函数把命令作为参数（见 versionCheckLines 与
+//     defaultManualUpdateCommand）。自更新恢复（`--update`）后这条提示仍然成立——
+//     重跑安装脚本能装到同一份最新产物；面板文案保持原样，以免无谓地改变用户可见输出。
 //   - **--show-config 不含 quick_metrics_items**（要直查 metrics.db 的原始 SQL，
 //     internal/metrics 没有等价接口），见 cli.go 的说明。
 //
@@ -76,7 +75,7 @@ const checkUpdateTimeout = 10 * time.Second
 const pricingTimeout = 90 * time.Second
 
 // defaultUsage 是参数错误时打印的简短用法（argparse 的完整用法文本无法复刻，
-// 语料只对拍退出码，见 cli.go 的差异 4）。
+// 因此只保证退出码一致，见 cli.go 的差异 4）。
 const defaultUsage = `用法: amkr [选项]
 
 不带任何选项时：启动服务并自动打开 WebUI（若服务已在运行，则只打开 WebUI）。
@@ -192,8 +191,8 @@ func waitForHealth(cfg *config.RouterConfig, timeout time.Duration) bool {
 // 与 README 的安装一节一致。仍然用 `go install` 的源码用户可以直接照做，只是不再
 // 由面板提示——让大多数二进制安装的用户看到一条不需要 Go 工具链的命令更重要。
 //
-// 自更新（`--update`）恢复后这条命令依然有效，因此没有改掉它；改它会动到被逐字节
-// 冻结的版本检查语料（cmd/amkr/testdata/cli_corpus.json 的 version_check 段）。
+// 自更新（`--update`）恢复后这条命令依然有效，因此没有改掉它：重跑安装脚本能装到同一
+// 份最新产物，用的也是 README 安装一节展示的那个脚本。
 func defaultManualUpdateCommand() string {
 	if runtime.GOOS == "windows" {
 		return "irm https://raw.githubusercontent.com/Sparrived/auto-model-key-router/master/scripts/install.ps1 | iex"
@@ -465,8 +464,8 @@ func versionCheckPanel(result updatecheck.Result, manualCommand string) tui.Rend
 
 // versionCheckLines 是版本检查面板的纯行文本。
 //
-// manualCommand 作为参数：参照实现给的是 pip/uv 命令，Go 版给的是 go install 命令
-// （决策 8），对拍时用参照实现的命令文本喂入即可逐行比较其余内容。
+// manualCommand 作为参数：具体命令按平台决定（见 defaultManualUpdateCommand），渲染层
+// 只负责排版，不关心命令来自哪里。
 func versionCheckLines(result updatecheck.Result, manualCommand string) ([]string, string) {
 	if result.Error != nil {
 		return []string{
