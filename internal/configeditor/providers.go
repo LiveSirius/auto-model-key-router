@@ -261,12 +261,13 @@ func (e *Editor) ManageProviderKeysInteractively(providerID string) error {
 			return err
 		}
 		key := keys.Lookup(keyName)
-		// Go 侧访客功能常驻，「访客访问」选项总是存在（见 doc.go）。
+		// 「访客访问」选项已随访客模式删除：上游 key 不再有 allow_visitor 开关，受限
+		// 凭据的授权改由访问密钥自己的 providers/models 清单决定（管理面在 WebUI 的
+		// 访问密钥页，TUI 不提供编辑入口）。
 		options := []tui.Option{
 			{Value: "1", Label: "开关"},
 			{Value: "2", Label: "重命名"},
-			{Value: "3", Label: "访客访问"},
-			{Value: "4", Label: "删除"},
+			{Value: "3", Label: "删除"},
 			{Value: "0", Label: "返回"},
 		}
 		boundModels, err := boundModelIDs(data, providerID, keyName)
@@ -286,7 +287,6 @@ func (e *Editor) ManageProviderKeysInteractively(providerID string) error {
 			"Key: [bold]" + keyName + "[/bold]",
 			"状态: [bold]" + enabledText + "[/bold]",
 			"服务模型: [bold]" + serviceModels + "[/bold]",
-			"访客: " + FormatVisitorStatusText(key.Lookup("allow_visitor").Truthy(), true),
 			"指纹: [bold]" + keyFingerprint(stringOrEmpty(key, "api_key")) + "[/bold]",
 		}
 		choice := e.selectOption(
@@ -359,19 +359,7 @@ func (e *Editor) UpdateProviderKeyInteractively(providerID, keyName, choice stri
 			return nil, err
 		}
 		message = "已重命名 " + providerID + "/" + keyName + " → " + newName + "。"
-	case choice == "3" && visitorAvailable():
-		allowed := !key.Lookup("allow_visitor").Truthy()
-		if _, err := configops.UpdateProviderKey(data, providerID, keyName, configops.UpdateProviderKeyOptions{
-			AllowVisitor: configops.BoolPtr(allowed),
-		}); err != nil {
-			return nil, err
-		}
-		state := "禁止"
-		if allowed {
-			state = "允许"
-		}
-		message = "已" + state + "访客访问 " + providerID + "/" + keyName + "。"
-	case choice == "4":
+	case choice == "3":
 		usedBy, err := boundModelIDs(data, providerID, keyName)
 		if err != nil {
 			return nil, err

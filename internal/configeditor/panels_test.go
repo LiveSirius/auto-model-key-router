@@ -55,43 +55,6 @@ func renderTokens(panel tui.Renderable) map[string]bool {
 	return out
 }
 
-// TestCorpusPanels 比较三个面板的**信息**（不是版式）。
-func TestCorpusPanels(t *testing.T) {
-	corpus := loadCorpus(t)
-	for _, item := range section(t, corpus, "panels") {
-		item := item
-		t.Run(item.Lookup("name").StringValue(), func(t *testing.T) {
-			data := item.Lookup("config").Clone()
-			editor := New(filepath.Join(t.TempDir(), "router-config.json"))
-			var panel tui.Renderable
-			var err error
-			switch item.Lookup("panel").StringValue() {
-			case "v2_summary":
-				panel, err = editor.V2SummaryPanel(data)
-			case "provider_capabilities":
-				providers, providerErr := rawProviders(data)
-				if providerErr != nil {
-					t.Fatalf("取供应商失败: %v", providerErr)
-				}
-				panel, err = editor.ProviderCapabilitiesPanel(providers.Lookup(item.Lookup("provider_id").StringValue()))
-			case "model_key_targets":
-				panel, err = editor.ModelKeyTargetsPanel(data, item.Lookup("model_id").StringValue())
-			default:
-				t.Fatalf("未知面板: %q", item.Lookup("panel").StringValue())
-			}
-			if err != nil {
-				t.Fatalf("渲染失败: %v", err)
-			}
-			tokens := renderTokens(panel)
-			for _, want := range item.Lookup("tokens").Items() {
-				if !tokens[want.StringValue()] {
-					t.Errorf("面板缺少内容 %q", want.StringValue())
-				}
-			}
-		})
-	}
-}
-
 // TestProberSatisfiesAPISeams 用编译期赋值钉死三个探测方法与 api.Server 接缝的签名。
 //
 // 这不是形式主义：internal/api 的三条探测路由在生产里就靠这三个接缝工作，签名一旦漂移，
@@ -189,20 +152,21 @@ func writeConfig(t *testing.T, path, raw string) {
 // 刻意差异（具名测试）
 // --------------------------------------------------------------------------- #
 
-// TestVisitorFeatureIsAlwaysAvailable 记录 Go 侧的**有意差异**：参照实现用「能否
-// import itsdangerous」当访客功能的运行期标记（visitor.py:9-17），Go 侧已按产品决策
-// 取消该开关（见 internal/auth/visitor_test.go）。因此：
+// TestVisitorFeatureIsGone 记录 Go 侧已**整体删除**的访客模式。
 //
-//   - v2 汇总面板总是带「访客」列，供应商 Key 菜单总是带「访客访问」；
-//   - FormatVisitorStatusText 的「未安装」两条文案只作为纯函数分支保留，界面不可达。
-func TestVisitorFeatureIsAlwaysAvailable(t *testing.T) {
-	if !visitorAvailable() {
-		t.Fatal("Go 侧访客功能应常驻可用")
-	}
+// 参照实现用「能否 import itsdangerous」当访客功能的运行期标记（visitor.py:9-17），
+// 并据此在 v2 汇总面板上挂一列「访客」、在供应商 Key 菜单里挂一项「访客访问」。这条
+// 能力已被访问密钥取代（见 internal/config 的 AccessKeyConfig），因此：
+//
+//   - 汇总面板不再有「访客」列；
+//   - visitorAvailable 与 FormatVisitorStatusText 都已删除，不存在「未安装」分支。
+//
+// 面板列数是这条删除最容易悄悄回流的地方（列数与分隔线必须对齐），因此显式钉住。
+func TestVisitorFeatureIsGone(t *testing.T) {
 	data := canonicalFromRaw(`{
 		"config_version": 4,
 		"providers": {"gateway": {"base_url": "https://gateway.example.test",
-			"keys": {"main": {"api_key": "sk-main", "allow_visitor": true}}}},
+			"keys": {"main": {"api_key": "sk-main"}}}},
 		"models": {}
 	}`)
 	editor := New("unused")
@@ -211,15 +175,15 @@ func TestVisitorFeatureIsAlwaysAvailable(t *testing.T) {
 		t.Fatalf("渲染失败: %v", err)
 	}
 	tokens := renderTokens(panel)
-	if !tokens["访客"] || !tokens["允许"] {
-		t.Fatalf("访客列应始终存在且显示允许，实际 tokens=%v", tokens)
+	if tokens["访客"] || tokens["允许"] {
+		t.Fatalf("访客列应已删除，实际 tokens=%v", tokens)
 	}
-	// 「未安装」分支仍然是参照实现的文案（纯函数层面无差异）。
-	if got := FormatVisitorStatusText(true, false); got != "[bold bright_magenta]已配置，但 visitor extra 未安装[/]" {
-		t.Fatalf("未安装分支文案 = %q", got)
-	}
-	if got := FormatVisitorStatusText(false, false); got != "[dim]功能未安装[/dim]" {
-		t.Fatalf("未安装分支文案 = %q", got)
+	// 供应商表格的四列仍应齐全（删列时最容易顺手删错）。renderTokens 按空白切词，
+	// 因此 "Base URL" 这种带空格的列名要按切出来的两个词分别断言。
+	for _, column := range []string{"供应商", "Base", "URL", "Keys", "路由"} {
+		if !tokens[column] {
+			t.Errorf("供应商表格缺少 %q 列: %v", column, tokens)
+		}
 	}
 }
 

@@ -55,23 +55,6 @@ func ServiceManagementBaseURL(data *canonical.Value) (string, error) {
 	return "http://" + connectHost + ":" + strconv.FormatInt(port, 10), nil
 }
 
-// FormatVisitorStatusText 对应 config_editor.py:154 的 format_visitor_status_text。
-//
-// Go 侧访客功能常驻（见 doc.go），因此 visitor_installed 为假的两条分支在界面上
-// 不可达；函数本身仍按参照实现保留全部分支，便于用纯函数测试锁定文案。
-func FormatVisitorStatusText(visitorAllowed bool, visitorInstalled bool) string {
-	if visitorInstalled {
-		if visitorAllowed {
-			return "[bold bright_magenta]允许[/]"
-		}
-		return "[dim]禁止[/dim]"
-	}
-	if visitorAllowed {
-		return "[bold bright_magenta]已配置，但 visitor extra 未安装[/]"
-	}
-	return "[dim]功能未安装[/dim]"
-}
-
 // NativeEndpointSupportText 对应 config_editor.py:193 的 native_endpoint_support_text。
 func NativeEndpointSupportText(state *canonical.Value) string {
 	if !state.Truthy() {

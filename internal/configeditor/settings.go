@@ -54,8 +54,8 @@ func (e *Editor) ManageConfigTransferInteractively() error {
 }
 
 // TransferableKeyConfig 对应 config_editor.py:1455 的 transferable_key_config。
-func TransferableKeyConfig(data *canonical.Value, includeVisitor bool) (*canonical.Value, error) {
-	return configops.TransferableConfig(data, includeVisitor)
+func TransferableKeyConfig(data *canonical.Value) (*canonical.Value, error) {
+	return configops.TransferableConfig(data)
 }
 
 // MergeTransferableKeyConfig 对应 config_editor.py:1463 的
@@ -71,8 +71,7 @@ func (e *Editor) ExportConfigInteractively() (tui.ResultPage, error) {
 	if err != nil {
 		return tui.ResultPage{}, err
 	}
-	visitorInstalled := visitorAvailable()
-	transferData, err := TransferableKeyConfig(data, visitorInstalled)
+	transferData, err := TransferableKeyConfig(data)
 	if err != nil {
 		return tui.ResultPage{}, err
 	}
@@ -90,14 +89,10 @@ func (e *Editor) ExportConfigInteractively() (tui.ResultPage, error) {
 			keyCount += keys.Obj.Len()
 		}
 	}
-	visitorMessage := ""
-	if visitorInstalled {
-		visitorMessage = "包含访客访问权限。"
-	}
 	content := tui.SectionPanel(
 		"配置文件: [bold]"+absolutePath(e.Path)+"[/bold]\n模型数量: [bold]"+strconv.Itoa(modelCount)+"[/bold]\n"+
 			"Key 数量: [bold]"+strconv.Itoa(keyCount)+"[/bold]\n\n"+
-			"[bold yellow]复制内容仅包含模型与上游 API key，"+visitorMessage+"请仅粘贴到可信终端。[/bold yellow]\n\n"+
+			"[bold yellow]复制内容仅包含模型与上游 API key，请仅粘贴到可信终端。[/bold yellow]\n\n"+
 			"复制内容为单行 JSON。本地鉴权、监听地址、端口及其他 CLI 设置不会复制。\n\n"+
 			"在另一台机器或另一个 TUI 中进入“CLI 设置 → 配置迁移 → 粘贴并应用”即可导入。",
 		"复制 Key 配置", "green",
@@ -176,7 +171,7 @@ func (e *Editor) mergePasted(pasted *canonical.Value) (
 	mergeResult configops.MergeResult,
 	err error,
 ) {
-	transferData, err = TransferableKeyConfig(pasted, visitorAvailable())
+	transferData, err = TransferableKeyConfig(pasted)
 	if err != nil {
 		return nil, nil, nil, nil, mergeResult, err
 	}

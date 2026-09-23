@@ -266,11 +266,6 @@ func (e *Editor) dropFormDraft(name string) {
 	delete(e.drafts, name)
 }
 
-// visitorAvailable 对应 visitor.visitor_feature_available()。
-//
-// Go 侧访客功能常驻（见 doc.go 与 internal/auth），因此恒为真。
-func visitorAvailable() bool { return true }
-
 // stringOrEmpty 返回对象的字符串成员，等价于 `str(value.get(key) or "")`。
 func stringOrEmpty(value *canonical.Value, key string) string {
 	return value.Lookup(key).StringValue()

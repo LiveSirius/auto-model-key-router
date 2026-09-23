@@ -88,27 +88,16 @@ func (e *Editor) V2SummaryPanel(data *canonical.Value) (tui.Renderable, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Go 侧访客功能常驻（visitorAvailable 恒为真），因此「访客」列总是存在；
-	// FormatVisitorStatusText 的「未安装」分支只作为纯函数保留。
-	visitorInstalled := visitorAvailable()
-
+	// 「访客」列已随访客模式删除（见 doc.go）：上游 key 不再有 allow_visitor 开关。
 	providerTable := tui.Table{Columns: []tui.TableColumn{
 		{Width: 18},
 		{Width: 42},
 		{Width: 6, Align: "right"},
+		{Width: 28},
 	}}
-	if visitorInstalled {
-		providerTable.Columns = append(providerTable.Columns, tui.TableColumn{Width: 6, Align: "right"})
-	}
-	providerTable.Columns = append(providerTable.Columns, tui.TableColumn{Width: 28})
 	// rich 的表头是 add_column(header)+样式+分隔线；internal/tui 的 Table 没有表头概念，
 	// 这里用一行普通文本表头保住**信息**（列名），样式与分隔线不复刻（见 doc.go）。
-	providerHeader := []string{"供应商", "Base URL", "Keys"}
-	if visitorInstalled {
-		providerHeader = append(providerHeader, "访客")
-	}
-	providerHeader = append(providerHeader, "路由")
-	providerTable.Rows = append(providerTable.Rows, providerHeader)
+	providerTable.Rows = append(providerTable.Rows, []string{"供应商", "Base URL", "Keys", "路由"})
 	providerRowCount := 0
 
 	for _, providerID := range sortedKeysOf(providers) {
@@ -116,12 +105,6 @@ func (e *Editor) V2SummaryPanel(data *canonical.Value) (tui.Renderable, error) {
 		keys, err := providerKeys(provider)
 		if err != nil {
 			return nil, err
-		}
-		visitorKeys := 0
-		for _, keyName := range keys.Obj.Keys() {
-			if keys.Lookup(keyName).Lookup("allow_visitor").Truthy() {
-				visitorKeys++
-			}
 		}
 		routeText := "默认"
 		if routes := provider.Lookup("routes"); routes.IsObject() && routes.Obj.Len() > 0 {
@@ -131,21 +114,13 @@ func (e *Editor) V2SummaryPanel(data *canonical.Value) (tui.Renderable, error) {
 			shortText(providerID, 18),
 			compactURL(stringOrEmpty(provider, "base_url"), 42),
 			strconv.Itoa(keys.Obj.Len()),
+			shortText(routeText, 28),
 		}
-		if visitorInstalled {
-			row = append(row, FormatVisitorStatusText(visitorKeys > 0, visitorInstalled))
-		}
-		row = append(row, shortText(routeText, 28))
 		providerTable.Rows = append(providerTable.Rows, row)
 		providerRowCount++
 	}
 	if providerRowCount == 0 {
-		row := []string{"-", "[yellow]暂无供应商[/yellow]", "0"}
-		if visitorInstalled {
-			row = append(row, "-")
-		}
-		row = append(row, "-")
-		providerTable.Rows = append(providerTable.Rows, row)
+		providerTable.Rows = append(providerTable.Rows, []string{"-", "[yellow]暂无供应商[/yellow]", "0", "-"})
 	}
 
 	modelTable := tui.Table{Columns: []tui.TableColumn{

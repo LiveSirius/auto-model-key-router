@@ -42,10 +42,11 @@
 //
 // # 刻意保留的差异（每条都有具名测试）
 //
-//   - **访客功能常驻**。参照实现用「能否 import itsdangerous」当运行期标记
-//     （visitor.py:9-17），Go 侧已按产品决策取消该开关（见 internal/auth/visitor_test.go）。
-//     因此 config_editor 里所有 `if visitor_installed` 分支在 Go 里恒为真；「功能未安装」
-//     的两条文案只作为纯函数 FormatVisitorStatusText 的分支保留，界面上不可达。
+//   - **访客功能已整体删除**。参照实现用「能否 import itsdangerous」当运行期标记
+//     （visitor.py:9-17）并在界面上挂「访客」列与「访客访问」菜单项；访客模式连同
+//     那把固定 key 一并取消，改由访问密钥（internal/config 的 AccessKeyConfig）
+//     按人分发。上游 key 不再有 allow_visitor 开关，FormatVisitorStatusText 与
+//     visitorAvailable 都已删除。
 //   - **渲染不追求与 rich 逐格一致**。所有面板/表格都用 internal/tui 的等价节点，
 //     信息等价、间距与颜色不同（迁移方案已把富文本降级定为非目标）。其中表格的**表头**
 //     用一行普通文本行实现（rich 的 add_column(header) 带样式与分隔线），列名信息保留；
