@@ -18,7 +18,7 @@ var ErrBinaryFrame = errors.New("eventbus: 需要文本帧")
 // CoderConn 把 github.com/coder/websocket 的连接适配成 Conn。
 //
 // 适配层是刻意薄的一层：总线只依赖 Conn 的三个方法，因此换 WebSocket 库、或在测试
-// 里用假连接对拍，都不需要改总线逻辑。
+// 里用假连接驱动，都不需要改总线逻辑。
 type CoderConn struct {
 	conn *websocket.Conn
 }

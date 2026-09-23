@@ -54,8 +54,8 @@ var ErrUnsupportedAuthFrame = errors.New("eventbus: 首帧 JSON 不是对象")
 // Conn 是事件总线需要的最小 WebSocket 能力面。
 //
 // 只暴露三个方法（而不是直接用 *websocket.Conn）有两个理由：一是总线逻辑
-// （鉴权握手、成帧、剔除失效连接）可以脱离真实连接对拍；二是后续装配时替换实现
-// 不需要改这个包。CoderConn 是 github.com/coder/websocket 的适配器。
+// （鉴权握手、成帧、剔除失效连接）可以在测试里脱离真实连接驱动；二是后续装配时
+// 替换实现不需要改这个包。CoderConn 是 github.com/coder/websocket 的适配器。
 type Conn interface {
 	// ReadText 读取下一帧的**文本**内容，对应 starlette 的 receive_text()。
 	//

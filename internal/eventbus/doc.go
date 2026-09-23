@@ -1,7 +1,7 @@
 // Package eventbus 实现 /ws/events 的事件总线，移植 auto_model_key_router/event_bus.py；
 // 并移植 app.py:101-135 里与它配套的 metrics_snapshot 节流策略。
 //
-// # 冻结契约（迁移计划 §4.6，逐条对拍）
+// # 冻结契约（迁移计划 §4.6）
 //
 //  1. **鉴权握手**：首帧必须是 {"type":"auth","token":...}，等待上限 **10 秒**
 //     （event_bus.py:37 的 timeout=10.0）。超时或消息非法关 **4001**
@@ -35,7 +35,7 @@
 //     （read.go 的 setupReadTimeout → c.close()），客户端只会看到 1006 而不是 4001。
 //   - **Conn 抽象**：参照实现直接用 starlette 的 WebSocket；Go 侧用只含三个方法的
 //     Conn 接口（CoderConn 适配 github.com/coder/websocket），这样总线逻辑可以在
-//     不启真连接的情况下对拍，也便于后续装配时替换。
+//     测试里用假连接驱动，也便于后续装配时替换。
 //   - **回调时机**：参照实现在 async with self._lock 之后 await 回调；Go 的 sync.Mutex
 //     不可重入，回调同样在**锁外**调用（回调会反过来 Broadcast，锁内调用会死锁）。
 package eventbus

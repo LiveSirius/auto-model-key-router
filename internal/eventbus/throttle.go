@@ -31,7 +31,8 @@ const BroadcastMinInterval = time.Second
 //	if client_count > 0: await _broadcast_metrics_snapshot()      # 零开销门禁
 //	await asyncio.sleep(1.0)                                      # ≤1 次/秒
 //
-// 这三条正好是迁移计划 §4.6 frozen 的节流规则。为了能对拍，这里把它写成状态机：
+// 这三条正好是迁移计划 §4.6 frozen 的节流规则。为了能确定性地测试，这里把它写成
+// 状态机：
 // 时间由调用方以「虚拟时钟」推进（Advance），等待与睡眠变成可判定的唤醒时刻。
 //
 // 使用方式（未来的装配任务照此写生产驱动器）：
