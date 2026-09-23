@@ -39,7 +39,7 @@ func writePid(path string, pid int) error {
 
 // IsProcessRunning 对应 service.py:335 的 is_process_running。
 //
-// Windows 走 tasklist 的 CSV 匹配（可用语料逐条对拍），其余平台走 signal 0。
+// Windows 走 tasklist 的 CSV 匹配（见 windowsRunning），其余平台走 signal 0。
 func (e *Env) IsProcessRunning(pid int) bool {
 	if e.Running == nil {
 		return false
@@ -51,7 +51,7 @@ func (e *Env) IsProcessRunning(pid int) bool {
 // 的输出里含有 `"N"` 或 `,N,` 就算存活（service.py:337-342）。
 //
 // 这个匹配规则很松（例如 PID 12 会被 `"123"` 误判），但它是参照实现的行为，
-// 语料逐条锁定，不做「修正」。
+// 刻意保留，不做「修正」。
 func (e *Env) windowsRunning(pid int) bool {
 	result := e.Run([]string{"tasklist", "/FI", "PID eq " + strconv.Itoa(pid), "/FO", "CSV", "/NH"})
 	text := result.Stdout
@@ -147,7 +147,7 @@ func isShlexSafe(char rune) bool {
 //
 // 空串返回两个单引号；含不安全字符时用单引号包裹，并把内部的单引号写成
 // `'"'"'`。systemd unit 的 ExecStart 用 shlex.join 生成，因此这个函数必须与
-// Python 逐字一致（语料覆盖 Windows 路径、空格、中文与引号）。
+// Python 逐字一致（Windows 路径、空格、中文与引号都要保持同样的引号形态）。
 func ShlexQuote(value string) string {
 	if value == "" {
 		return "''"

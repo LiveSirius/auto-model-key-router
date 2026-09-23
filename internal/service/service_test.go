@@ -12,8 +12,8 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/servicestatus"
 )
 
-// 本文件覆盖语料无法表达的部分：与 internal/api 接缝的契约、平台常量、以及
-// 「只有 fake 覆盖」的路径的决策部分。
+// 本文件覆盖与 internal/api 接缝的契约、平台常量、以及「只有 fake 覆盖」的
+// 路径的决策部分。
 
 // TestRunServiceActionCoversEveryOpsServiceTarget 锁定接缝覆盖了 api 的**全部**动作名。
 //

@@ -16,9 +16,8 @@ import (
 // 后台服务状态面板，以及 api 接缝需要的「渲染成纯文本」。
 //
 // 渲染策略：面板统一走 internal/tui 的富文本降级模型，宽度 100（与
-// ops_api._render_text 同值；语料生成脚本用同一套受控 Console 设置，因此可以逐字节
-// 对拍）。唯一不对拍版式的是系统服务状态表（tui.Table 固定列宽 vs rich 的 expand
-// 列宽分配，已在 internal/tui 里声明为差异）。
+// ops_api._render_text 同值）。唯一版式不同的是系统服务状态表（tui.Table 固定列宽
+// vs rich 的 expand 列宽分配，已在 internal/tui 里声明为差异）。
 
 // renderWidth 是面板渲染宽度，对应 ops_api.py:83 的 Console(width=100)。
 const renderWidth = 100
@@ -83,8 +82,8 @@ func userServiceRegistrationNotePanel() tui.Renderable {
 
 // StatusRows 返回「注册状态」行已按 registered 填好文案的行数据。
 //
-// 单独导出是为了让对拍只比较**语义数据**：Go 的状态表用固定列宽，与 rich 的
-// expand 列宽分配不同（internal/tui 的既定差异），因此版式不对拍、行数据对拍。
+// 单独导出是为了让测试只比较**语义数据**：Go 的状态表用固定列宽，与 rich 的
+// expand 列宽分配不同（internal/tui 的既定差异），因此只比较行数据、不比较版式。
 func StatusRows(status servicestatus.SystemServiceStatus) []servicestatus.Row {
 	registration := "[yellow]未注册[/yellow]"
 	if status.Registered {
@@ -205,7 +204,7 @@ func normalizeSlashes(path string) string { return strings.ReplaceAll(path, "\\"
 
 // isWindowsGOOS 报告当前平台是否为 Windows。
 //
-// 单独一层是为了让语料在非 Windows 上也能覆盖 windows 分支（服务注册分支由
+// 单独一层是为了让测试在非 Windows 上也能覆盖 windows 分支（服务注册分支由
 // Env.GOOS 决定，而这里只影响路径比较的大小写策略）。
 func isWindowsGOOS() bool { return defaultGOOS == "windows" }
 
@@ -216,7 +215,7 @@ const defaultGOOS = runtime.GOOS
 //
 // 只覆盖三个主流平台：其余平台按首字母大写处理，与 platform.system() 的实际返回值
 // 可能不同（例如 freebsd → Freebsd vs FreeBSD）。该文案只出现在「暂不支持」面板里，
-// 语料只锁定这三个平台。
+// 实际只在这三个平台上验证过。
 func displaySystemName(goos string) string {
 	switch goos {
 	case "windows":

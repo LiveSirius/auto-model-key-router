@@ -51,7 +51,7 @@ func RunServiceAction(action string, configPath string, cfg *config.RouterConfig
 	return DefaultEnv().RunServiceAction(action, configPath, cfg)
 }
 
-// RunServiceAction 是 Env 上的实现体（可注入接缝，便于测试与语料回放）。
+// RunServiceAction 是 Env 上的实现体（可注入接缝，便于测试）。
 func (e *Env) RunServiceAction(action string, configPath string, cfg *config.RouterConfig) (string, error) {
 	target, supported := api.OpsServiceTargets[action]
 	if !supported {

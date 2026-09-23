@@ -15,9 +15,9 @@ const (
 
 // detachedProcessFlags 是后台服务启动时传给 CreateProcess 的标志组合。
 //
-// 单独抽成常量是为了让「与 Python 同值」这件事可以被具名测试锁定：语料里记录了
-// Python 侧 `subprocess.DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
-// CREATE_NO_WINDOW` 的实际数值 0x08000208。
+// 单独抽成常量是为了让「与 Python 同值」这件事显式可见：取值来自 CPython 的
+// `subprocess.DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW`
+// = 0x08000208。
 const detachedProcessFlags = detachedProcess | createNewProcessGroup | createNoWindow
 
 // sysProcAttr 在 Windows 上把 Detached 翻译成 CreationFlags。

@@ -59,19 +59,21 @@ func (e *Env) SystemdServiceCommand(configPath string) []string {
 	return []string{e.Executable, "--config", configPath, "--serve-foreground"}
 }
 
-// pythonSystemdServiceCommand 是参照实现的回退形态，只用于对拍断言。
+// pythonSystemdServiceCommand 是参照实现的回退形态，生产路径不会调用它：
+// TestSystemdServiceCommandDivergence 用它对照 Go 侧去掉解释器后的命令。
 func pythonSystemdServiceCommand(executable, configPath string) []string {
 	return []string{executable, "-m", "auto_model_key_router.main", "--config", configPath, "--serve-foreground"}
 }
 
 // SystemdUnitText 生成 unit 文件内容（service.py:570-590）。
 //
-// `shlex.join(command)` 必须与 Python 逐字一致：语料覆盖含空格/中文/单引号的路径。
+// `shlex.join(command)` 必须与 Python 逐字一致：含空格、中文与单引号的路径
+// 都要生成同样的引号形态。
 func (e *Env) SystemdUnitText(configPath string) string {
 	return UnitText(e.Cwd, e.SystemdServiceCommand(configPath))
 }
 
-// UnitText 是 unit 文本的纯函数形式（工作目录与命令都由参数给出），便于对拍。
+// UnitText 是 unit 文本的纯函数形式（工作目录与命令都由参数给出），便于测试。
 func UnitText(workingDirectory string, command []string) string {
 	lines := []string{
 		"[Unit]",

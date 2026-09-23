@@ -60,13 +60,13 @@ func WindowsTaskSettingsCommand() []string {
 // 参照实现是 `"{python}" -m auto_model_key_router.main --config "{config}" --serve-foreground`
 // （service.py:397 与 431）；Go 版没有解释器与模块入口，因此是
 // `"{exe}" --config "{config}" --serve-foreground`。差异由
-// TestWindowsTaskCommandLineDivergence 具名锁定，任务命令列表的其余部分与语料一致。
+// TestWindowsTaskCommandLineDivergence 具名锁定，任务命令列表的其余部分与参照实现一致。
 func TaskActionCommandLine(executable, configPath string) string {
 	return fmt.Sprintf(`"%s" --config "%s" --serve-foreground`, executable, configPath)
 }
 
-// pythonTaskActionCommandLine 是参照实现那一版命令行，只用于对拍断言
-// （语料里记录的 /TR 元素应当等于它）。
+// pythonTaskActionCommandLine 是参照实现那一版命令行，生产路径不会调用它：
+// TestWindowsTaskCommandLineDivergence 用它对照 Go 侧的 /TR 文本。
 func pythonTaskActionCommandLine(executable, configPath string) string {
 	return fmt.Sprintf(`"%s" -m auto_model_key_router.main --config "%s" --serve-foreground`,
 		executable, configPath)
@@ -176,7 +176,7 @@ func ElevationArguments(configPath, action string) []string {
 
 // elevationScript 是提权用的 PowerShell 脚本模板（service.py:482-488）。
 //
-// 抽成纯函数是为了让「模板 + powershell_quote」可以拿参照实现记录的脚本文本逐字对拍。
+// 抽成纯函数是为了让「模板 + powershell_quote」可以被单独断言，不必真的弹 UAC。
 func elevationScript(executable string, arguments []string) string {
 	quoted := make([]string, 0, len(arguments))
 	for _, argument := range arguments {

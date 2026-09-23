@@ -13,8 +13,8 @@ import (
 // 本文件移植 service.py:44-147 的后台服务启停与 104-119 的前台启动准备。
 //
 // 全部真实 OS 副作用都在 Env 的注入点后面：进程创建走 Spawn（只有 fake 覆盖）、
-// 存活判定走 Running、终止走 Terminate、日志归档走 ArchiveLog。语料里这些接缝被
-// 换成脚本化桩，因此「启动了哪条命令、写了什么 PID 文件、轮询了几次」都能对拍。
+// 存活判定走 Running、终止走 Terminate、日志归档走 ArchiveLog。测试里这些接缝被
+// 换成脚本化桩，因此「启动了哪条命令、写了什么 PID 文件、轮询了几次」都能逐条断言。
 
 // backgroundStopPollCount / backgroundStopPollInterval 对应 service.py:138-144 的
 // `for _ in range(20)` 与 `time.sleep(0.1)`。
@@ -35,7 +35,7 @@ func (e *Env) StartBackground(configPath string, cfg *config.RouterConfig) (tui.
 
 	pidFile := PidFilePath(cfg)
 	// 注意这里刻意保留参照实现的反直觉分支：**进程还活着**时才删 PID 文件
-	// （service.py:54-55）。它是遗留写法，但改掉会让行为偏离 oracle。
+	// （service.py:54-55）。它是遗留写法，但改掉就偏离了参照实现的行为。
 	if pid, ok := ReadPid(pidFile); ok && e.IsProcessRunning(pid) {
 		_ = os.Remove(pidFile)
 	}

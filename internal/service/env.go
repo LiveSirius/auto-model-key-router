@@ -19,7 +19,7 @@ import (
 //
 // 类型直接复用 servicestatus.CommandRunner（同样的
 // `Callable[[list[str]], CompletedProcess]` 形状），这样状态采集与动作执行共用同一个
-// 注入点：语料里一次替换就能同时驱动两边。
+// 注入点：测试里一次替换就能同时驱动两边。
 type Runner = servicestatus.CommandRunner
 
 // SpawnSpec 描述一次后台进程启动，对应 service.py:80 的 subprocess.Popen 参数。
@@ -199,7 +199,7 @@ func hasEnvPrefix(entry, prefix string) bool {
 	return len(entry) >= len(prefix) && entry[:len(prefix)] == prefix
 }
 
-// pidFilePathIn 是 PidFilePath 的实现体，单独抽出来便于语料直接喂路径。
+// pidFilePathIn 是 PidFilePath 的实现体，单独抽出来便于测试直接喂路径。
 func pidFilePathIn(logFilePath string) string {
 	return filepath.Join(filepath.Dir(logFilePath), "server.pid")
 }

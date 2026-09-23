@@ -7,8 +7,8 @@
 //   - 运行状态面板（本地 /health + 系统服务注册状态）；
 //   - api.Server.RunServiceAction 接缝的实现（见 RunServiceAction）。
 //
-// 状态**解析**那一半在 internal/servicestatus 里已经移植并语料锁定（schtasks XML、
-// systemd unit、systemctl show 属性），本包只调用它、绝不重写。
+// 状态**解析**那一半在 internal/servicestatus 里已经移植，并由该包的具名测试锁定
+// （schtasks XML、systemd unit、systemctl show 属性），本包只调用它、绝不重写。
 //
 // # OS 接缝（为什么必须存在）
 //
@@ -24,14 +24,14 @@
 //	Env.LookPath  PATH 查找（console script）
 //	Env.Sleep/Now 轮询与缓存时钟
 //
-// 只有 fake 覆盖的路径（无法对拍、也无法在真机上安全执行）：
+// 只有 fake 覆盖的路径（无法在测试里真实执行，也无法在真机上安全执行）：
 //
 //   - defaultSpawn 真正拉起分离进程（spawn_windows.go / spawn_posix.go 的平台标志）；
 //   - posixRunning / posixTerminate（真实 syscall.Kill）；
 //   - isUserAnAdminWindows（真实 shell32!IsUserAnAdmin）；
 //   - Env.Terminate 在 Windows 分支真正执行的 taskkill。
 //
-// 它们的**决策部分**（命令、参数、标志位取值、CSV 匹配规则）都有对拍语料或具名测试。
+// 它们的**决策部分**（命令、参数、标志位取值、CSV 匹配规则）都有具名测试锁定。
 //
 // # 与参照实现的结构化差异（逐条在对应位置说明）
 //
@@ -51,7 +51,7 @@
 //     与 UnitText 都不设），因此这两条路径下的日志完全由服务进程自己写入——这正是
 //     迁移时漏掉 file handler 会让 server.log 恒为空的原因。
 //  3. **rich 渲染降级为等价纯文本**。面板统一由 internal/tui 渲染（宽度 100、
-//     safe_box=False，与 gen_tui_corpus.py（已随 Python 退役移除） 同一套设置），因此语料可以逐字节
-//     对拍；唯一例外是系统服务状态表——Go 用固定列宽（tui.Table 已声明的差异），
-//     语料只对拍**行数据**，不对拍表格版式。
+//     safe_box=False，与参照实现生成面板时同一套设置），文本内容因此与参照实现
+//     一致；唯一例外是系统服务状态表——Go 用固定列宽（tui.Table 已声明的差异），
+//     只比较**行数据**，不比较表格版式。
 package service
