@@ -408,69 +408,27 @@ func (s *Store) snapshotSync(hours *float64, since *time.Time, now time.Time) (*
 	}
 
 	untilStr := formatISO(now)
-	total, err := s.queryStats(nil, sinceStr, &untilStr, true)
+	// 窗口内的 9 个分组由一次最细粒度扫描上卷得到（见 rollup.go 的成本说明）：
+	// 归属维度只统计三个归属列全非空、未归属统计其余的行，这两种互补口径都在
+	// 那一层表达，这里不再逐个拼 WHERE。
+	groups, err := s.snapshotRollup(sinceStr, &untilStr)
 	if err != nil {
 		return nil, err
 	}
-	totalStats := total.get(dimKey{})
+	totalStats := groups.total.get(dimKey{})
 
 	rateStart := formatISO(addSeconds(now, RateWindowSeconds))
+	// rate 窗口只有几分钟，行数极少；这里继续用参照实现的 queryStats，一分钱不省，
+	// 但让那份实现留在链路上（它也是上卷结果的对照物）。
 	recent, err := s.queryStats(nil, &rateStart, &untilStr, true)
 	if err != nil {
 		return nil, err
 	}
 	recentStats := recent.get(dimKey{})
 
-	callerTypes, err := s.queryStats([]string{"caller_type"}, sinceStr, &untilStr, true)
-	if err != nil {
-		return nil, err
-	}
 	// 即使窗口内没有访客流量也要出现这两个键，前端据此渲染固定分组。
-	callerTypes.setDefault(dimKey{N: 1, A: "local"})
-	callerTypes.setDefault(dimKey{N: 1, A: "visitor"})
-
-	models, err := s.queryStats([]string{"model_id"}, sinceStr, &untilStr, true)
-	if err != nil {
-		return nil, err
-	}
-	requestedModels, err := s.queryStats([]string{"requested_model_id"}, sinceStr, &untilStr, true)
-	if err != nil {
-		return nil, err
-	}
-	modelRequested, err := s.queryStats([]string{"model_id", "requested_model_id"}, sinceStr, &untilStr, true)
-	if err != nil {
-		return nil, err
-	}
-	keys, err := s.queryStats([]string{"model_id", "key_name"}, sinceStr, &untilStr, true)
-	if err != nil {
-		return nil, err
-	}
-	// 三个归属维度排除 NULL：未归属的记录单独在 unattributed 里统计，否则
-	// "None" 这个假 provider 会污染列表。
-	providers, err := s.queryStats([]string{"provider_id"}, sinceStr, &untilStr, false)
-	if err != nil {
-		return nil, err
-	}
-	providerPools, err := s.queryStats([]string{"provider_id", "pool_name"}, sinceStr, &untilStr, false)
-	if err != nil {
-		return nil, err
-	}
-	upstreamModels, err := s.queryStats([]string{"upstream_model_id"}, sinceStr, &untilStr, false)
-	if err != nil {
-		return nil, err
-	}
-
-	attributedFalse := false
-	unattributedFilter := metricFilter{
-		SinceCreatedAt: sinceStr,
-		UntilCreatedAt: &untilStr,
-		Attributed:     &attributedFalse,
-	}
-	unattributedWhere, unattributedParams := unattributedFilter.sql()
-	unattributed, err := s.queryFilteredStats(unattributedWhere, unattributedParams)
-	if err != nil {
-		return nil, err
-	}
+	groups.callerTypes.setDefault(dimKey{N: 1, A: "local"})
+	groups.callerTypes.setDefault(dimKey{N: 1, A: "visitor"})
 
 	return canonical.NewObjectOf(
 		canonical.ObjectPair{Key: "count_semantics", Value: canonical.NewString(CountSemantics)},
@@ -487,15 +445,15 @@ func (s *Store) snapshotSync(hours *float64, since *time.Time, now time.Time) (*
 		canonical.ObjectPair{Key: "router_status", Value: canonical.NewString(routerStatus(recentStats))},
 		canonical.ObjectPair{Key: "active_requests", Value: canonical.NewIntValue(int64(s.ActiveCount()))},
 		canonical.ObjectPair{Key: "total", Value: totalStats.dict()},
-		canonical.ObjectPair{Key: "caller_types", Value: flatStats(callerTypes)},
-		canonical.ObjectPair{Key: "models", Value: flatStats(models)},
-		canonical.ObjectPair{Key: "requested_models", Value: flatStats(requestedModels)},
-		canonical.ObjectPair{Key: "model_requested_models", Value: nestedStats(modelRequested)},
-		canonical.ObjectPair{Key: "keys", Value: nestedStats(keys)},
-		canonical.ObjectPair{Key: "providers", Value: flatStats(providers)},
-		canonical.ObjectPair{Key: "provider_pools", Value: nestedStats(providerPools)},
-		canonical.ObjectPair{Key: "upstream_models", Value: flatStats(upstreamModels)},
-		canonical.ObjectPair{Key: "unattributed", Value: unattributed.dict()},
+		canonical.ObjectPair{Key: "caller_types", Value: flatStats(groups.callerTypes)},
+		canonical.ObjectPair{Key: "models", Value: flatStats(groups.models)},
+		canonical.ObjectPair{Key: "requested_models", Value: flatStats(groups.requestedModels)},
+		canonical.ObjectPair{Key: "model_requested_models", Value: nestedStats(groups.modelRequested)},
+		canonical.ObjectPair{Key: "keys", Value: nestedStats(groups.keys)},
+		canonical.ObjectPair{Key: "providers", Value: flatStats(groups.providers)},
+		canonical.ObjectPair{Key: "provider_pools", Value: nestedStats(groups.providerPools)},
+		canonical.ObjectPair{Key: "upstream_models", Value: flatStats(groups.upstreamModels)},
+		canonical.ObjectPair{Key: "unattributed", Value: groups.unattributed.get(dimKey{}).dict()},
 	), nil
 }
 

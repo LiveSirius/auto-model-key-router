@@ -305,6 +305,11 @@ func (s *statsScan) stats() *UsageStats {
 //
 // dimensions 为空时不分组的聚合恒返回一行，Python 的 `if not dimensions and not
 // result` 因此是死分支，这里照抄以保持结构一致。
+//
+// 调用方只剩 snapshot 的 rate 窗口（几分钟、行数极少）与
+// TestSnapshotRollupMatchesGroupedQueries：snapshot 的 9 个分组已经改走
+// snapshotRollup（一次扫描 + 上卷，见 rollup.go），但**别删这里**——它是参照实现
+// 那份取数口径的落点，既是上卷的对照物，也是语料之外唯一覆盖维度分支的路径。
 func (s *Store) queryStats(
 	dimensions []string,
 	sinceCreatedAt, untilCreatedAt *string,
@@ -433,19 +438,24 @@ func (s *Store) queryStats(
 // 显式取 "None" 以复刻 str(None)。
 func dimensionKey(values []sql.NullString) dimKey {
 	key := dimKey{N: len(values)}
-	render := func(value sql.NullString) string {
-		if !value.Valid {
-			return "None"
-		}
-		return value.String
-	}
 	if len(values) > 0 {
-		key.A = render(values[0])
+		key.A = renderDimension(values[0])
 	}
 	if len(values) > 1 {
-		key.B = render(values[1])
+		key.B = renderDimension(values[1])
 	}
 	return key
+}
+
+// renderDimension 渲染单个维度值：NULL 渲染成 "None"（复刻 str(None)）。
+//
+// 与 rollup.go 的上卷共用：两处的键必须由同一条规则产生，否则同一份数据会得到
+// 两份不同的响应。
+func renderDimension(value sql.NullString) string {
+	if !value.Valid {
+		return "None"
+	}
+	return value.String
 }
 
 // nullStringString 复刻 str(row["status_code"])；SQLite 的 INTEGER 在 Go 侧以
