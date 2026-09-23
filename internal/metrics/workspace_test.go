@@ -7,7 +7,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
 
-// beijingTime 解析一个固定时刻，复用语料用的 Python isoformat 解析器。
+// beijingTime 解析一个固定时刻。
 func beijingTime(t *testing.T, text string) time.Time {
 	t.Helper()
 	return parsePythonISO(t, text)
@@ -184,7 +184,7 @@ func TestWorkspaceUsageRejectsNonPositiveHours(t *testing.T) {
 
 // TestRecordKeepsWorkspaceCallerType 固化 caller_type 的第三档 'workspace' 能落库。
 //
-// Go 侧新增（参照实现只有 local / visitor）。store.Record 里有一个白名单，未列的取值
+// Go 侧新增（参照实现只有 local / visitor，后者已随访客模式删除）。store.Record 里有一个白名单，未列的取值
 // 会被**静默改写成 'local'**——那会让工作空间流量在看板上算成本机（权限最高的一档），
 // 归因彻底失真。因此这一档必须显式被接受。
 func TestRecordKeepsWorkspaceCallerType(t *testing.T) {

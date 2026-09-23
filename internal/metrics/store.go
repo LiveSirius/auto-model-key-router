@@ -287,7 +287,10 @@ func (s *Store) Record(params RecordParams) error {
 		requestModelID = *params.RequestedModelID
 	}
 	callerType := "local"
-	if params.CallerType == "local" || params.CallerType == "visitor" || params.CallerType == "workspace" {
+	// 白名单：不在列的取值会被静默改写成 local（那是权限最高的一档）。新增档位时
+	// **必须**同步这里与 schema.go 的回填合法值表，漏一档会让看板把受限流量显示成
+	// 主凭据流量。
+	if params.CallerType == "local" || params.CallerType == "workspace" || params.CallerType == "access_key" {
 		callerType = params.CallerType
 	}
 	failure := params.Failed || params.StatusCode == nil || *params.StatusCode >= 400
@@ -426,9 +429,13 @@ func (s *Store) snapshotSync(hours *float64, since *time.Time, now time.Time) (*
 	}
 	recentStats := recent.get(dimKey{})
 
-	// 即使窗口内没有访客流量也要出现这两个键，前端据此渲染固定分组。
+	// 即使窗口内没有该档流量也要出现这些键，前端据此渲染固定分组。
+	//
+	// visitor 档已随访客模式删除，新增 access_key 档（访问密钥的流量）。保留 local 与
+	// workspace：三档分别对应主凭据、工作空间推理凭据与访问密钥。
 	groups.callerTypes.setDefault(dimKey{N: 1, A: "local"})
-	groups.callerTypes.setDefault(dimKey{N: 1, A: "visitor"})
+	groups.callerTypes.setDefault(dimKey{N: 1, A: "workspace"})
+	groups.callerTypes.setDefault(dimKey{N: 1, A: "access_key"})
 
 	return canonical.NewObjectOf(
 		canonical.ObjectPair{Key: "count_semantics", Value: canonical.NewString(CountSemantics)},

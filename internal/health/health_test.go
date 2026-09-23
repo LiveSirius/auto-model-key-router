@@ -7,20 +7,14 @@ import (
 )
 
 // fakeKeyPool 是可控的 KeyPool 假实现，用来构造真实 pool 上难以出现的组合
-// （访客功能未安装、没有模型、unified 未配置等）。
+// （没有模型、unified 未配置等）。
 type fakeKeyPool struct {
-	publicModelIDs   []string
-	modelIDs         []string
-	visitorKeyCounts map[string]int
-	unifiedRoute     *canonical.Value
-	endpointStates   *canonical.Value
+	publicModelIDs []string
+	unifiedRoute   *canonical.Value
+	endpointStates *canonical.Value
 }
 
-func (f *fakeKeyPool) PublicModelIDs() []string { return f.publicModelIDs }
-func (f *fakeKeyPool) ModelIDs() []string       { return f.modelIDs }
-func (f *fakeKeyPool) VisitorKeyCount(modelID string) int {
-	return f.visitorKeyCounts[modelID]
-}
+func (f *fakeKeyPool) PublicModelIDs() []string       { return f.publicModelIDs }
 func (f *fakeKeyPool) UnifiedRoute() *canonical.Value { return f.unifiedRoute }
 func (f *fakeKeyPool) EndpointCapabilityStates() *canonical.Value {
 	if f.endpointStates == nil {
@@ -35,69 +29,37 @@ func (f *fakeKeyPool) EndpointCapabilityStates() *canonical.Value {
 // 构造方式，用相同输入在真实 Python 里 dump（ensure_ascii=False,
 // separators=(",", ":")）。字段顺序是契约的一部分——canonical 按插入顺序输出，
 // 重排会改变响应字节，而调用方按字段名解析、缓存与比对。
+//
+// 与参照实现相比少了三个 visitor 字段（随访客模式一并删除，见 Build 的说明）；
+// 其余字段的字面值仍然逐字节一致。
 func TestBuildFieldOrderMatchesPython(t *testing.T) {
 	got := canonical.DumpsOrdered(Build(Inputs{
 		Version:     "4.1.0",
 		ConfigPath:  "/tmp/c.json",
 		LocalAPIKey: "amkr_abc",
-		// 各模型都没有 visitor key。
-		OpsEnabled: false,
+		OpsEnabled:  false,
 		KeyPool: &fakeKeyPool{
-			publicModelIDs:   []string{"gpt-4"},
-			modelIDs:         []string{"gpt-4"},
-			visitorKeyCounts: map[string]int{"gpt-4": 0},
-			unifiedRoute:     nil,
+			publicModelIDs: []string{"gpt-4"},
+			unifiedRoute:   nil,
 		},
 		WebUI: WebUI{Available: false, Enabled: false, Mounted: false},
 	}))
-	want := `{"status":"ok","version":"4.1.0","models":["gpt-4"],"config_path":"/tmp/c.json","local_auth_enabled":true,"local_api_key_fingerprint":"63c833584280","visitor_access_enabled":false,"visitor_key_count":0,"unified_model":null,"native_endpoint_states":{},"ops_enabled":false,"webui_available":false,"webui_enabled":false,"webui_mounted":false,"webui_path":null}`
+	want := `{"status":"ok","version":"4.1.0","models":["gpt-4"],"config_path":"/tmp/c.json","local_auth_enabled":true,"local_api_key_fingerprint":"63c833584280","unified_model":null,"native_endpoint_states":{},"ops_enabled":false,"webui_available":false,"webui_enabled":false,"webui_mounted":false,"webui_path":null}`
 	if got != want {
 		t.Errorf("/health 响应不符\n实际 %s\n期望 %s", got, want)
 	}
 }
 
-// TestBuildVisitorCountersMatchDecidedSemantics 锁定 visitor 的两个计数字段。
+// TestBuildDropsVisitorFields 断言三个 visitor 字段**不再出现**在响应里。
 //
-// 与参照实现相比，这里锁的是**已决策的新语义**：访客功能取消开关、常驻，因此
-//   - visitor_key_count 不再在「功能未安装」时归零，恒为各模型之和；
-//   - visitor_access_enabled 退化为单纯的「数量 > 0」。
-//
-// 参照实现原本是 sum(...) if installed else 0 与 installed and count > 0（app.py:174）。
-func TestBuildVisitorCountersMatchDecidedSemantics(t *testing.T) {
-	cases := []struct {
-		name       string
-		counts     map[string]int
-		modelIDs   []string
-		wantAccess bool
-		wantCount  int
-	}{
-		{"多个模型求和", map[string]int{"a": 2, "b": 3}, []string{"a", "b"}, true, 5},
-		{"全为零则访问不启用", map[string]int{"a": 0, "b": 0}, []string{"a", "b"}, false, 0},
-		{"没有任何模型", map[string]int{}, []string{}, false, 0},
-		{"单个模型有 key", map[string]int{"a": 1}, []string{"a"}, true, 1},
-		// 模型 ID 未出现在计数表里时按 0 计，不应 panic。
-		{"缺计数按零计", map[string]int{}, []string{"a", "b"}, false, 0},
-	}
-	for _, item := range cases {
-		t.Run(item.name, func(t *testing.T) {
-			got := Build(Inputs{
-				KeyPool: &fakeKeyPool{
-					publicModelIDs:   item.modelIDs,
-					modelIDs:         item.modelIDs,
-					visitorKeyCounts: item.counts,
-				},
-			})
-			access, _ := got.Lookup("visitor_access_enabled").AsBool()
-			count, _ := got.Lookup("visitor_key_count").AsInt()
-			if access != item.wantAccess || count != int64(item.wantCount) {
-				t.Errorf("counts=%v\n实际 access=%v count=%d\n期望 access=%v count=%d",
-					item.counts, access, count, item.wantAccess, item.wantCount)
-			}
-		})
-	}
-	// 字段本身必须**不再出现**在响应里。
-	if _, exists := Build(Inputs{KeyPool: &fakeKeyPool{}}).LookupOK("visitor_feature_installed"); exists {
-		t.Error("visitor_feature_installed 应已从 /health 删除")
+// 这是那条「删干净」的回归线：字段名是外部契约的一部分，只要有人把它们加回来，
+// 这里就会红。/health 无鉴权，报出「本实例发了几把受限 key」本来就是没必要的泄漏面。
+func TestBuildDropsVisitorFields(t *testing.T) {
+	got := Build(Inputs{KeyPool: &fakeKeyPool{}})
+	for _, field := range []string{"visitor_feature_installed", "visitor_access_enabled", "visitor_key_count"} {
+		if _, exists := got.LookupOK(field); exists {
+			t.Errorf("%s 应已从 /health 删除", field)
+		}
 	}
 }
 

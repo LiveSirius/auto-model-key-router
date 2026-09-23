@@ -42,10 +42,13 @@ const createTableSQL = `
 //
 // 合法值表在这里必须与 server/query.go 的 callerTypes 一致：这条 UPDATE 只在
 // caller_type 列**不存在**时才执行（ensureColumn 里 `if exists { return nil }`），
-// 因此它不会碰到新写入的 'workspace' 行；但漏掉一档会让一次老库升级把那种行
-// 静默改写成 'local'，指标永久失真。
+// 因此它不会碰到新写入的 'workspace' / 'access_key' 行；但漏掉一档会让一次老库升级
+// 把那种行静默改写成 'local'，指标永久失真。
+//
+// visitor 档已随访客模式删除：老库里残留的 'visitor' 行会在下一次缺列升级时被收敛到
+// 'local'。这是可接受的——那些流量来自一把已不存在的凭据，没有更强的归属可还原。
 var backfillStatements = [...]string{
-	"UPDATE request_metrics SET caller_type = 'local' WHERE caller_type IS NULL OR caller_type NOT IN ('local', 'visitor', 'workspace')",
+	"UPDATE request_metrics SET caller_type = 'local' WHERE caller_type IS NULL OR caller_type NOT IN ('local', 'workspace', 'access_key')",
 	"UPDATE request_metrics SET requested_model_id = model_id WHERE requested_model_id = ''",
 }
 
