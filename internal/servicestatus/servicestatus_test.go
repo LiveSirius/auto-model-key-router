@@ -147,7 +147,7 @@ func TestParseWindowsTaskXMLIgnoresDoctypeEntities(t *testing.T) {
 //
 // Python 的 Path.read_text(encoding="utf-8") 抛 UnicodeDecodeError；Go 不会自动
 // 校验，这里显式检查并返回 ErrUnitFileNotUTF8。异常类型名不同，但「必须失败」
-// 这一点一致（语料按 want_error_kind 断言）。
+// 这一点一致。
 func TestCollectSystemdUserStatusRejectsNonUTF8UnitFile(t *testing.T) {
 	root := t.TempDir()
 	servicePath := filepath.Join(root, "unit.service")

@@ -4,8 +4,8 @@
 // 两层结构：
 //
 //   - 采集层（CollectWindowsTaskStatus / CollectSystemdUserStatus）把外部命令
-//     执行器作为参数注入，语料因此能在任何平台上覆盖 Windows / systemd 两条分支；
-//     真正读文件的地方（systemd unit 文件）由语料把路径钉进临时目录。
+//     执行器作为参数注入，测试因此能在任何平台上覆盖 Windows / systemd 两条分支；
+//     真正读文件的地方（systemd unit 文件）由测试把路径钉进临时目录。
 //   - 解析层（Parse* 系列）是纯函数，直接吃命令输出文本。
 //
 // 与 Python 的已知差异都在具名测试里锁定，主要是 Go 的 encoding/xml 不做 NFKC
@@ -572,8 +572,8 @@ func pySplitLines(text string) []string {
 				boundary = 2
 			}
 		case char == 0x85:
-			// 裸 U+0085 不是合法 UTF-8，但 Python 的 str 里仍会遇到（语料不会），
-			// 这里按单字节处理以保持行为一致。
+			// 裸 U+0085 不是合法 UTF-8，但 Python 的 str 里仍会遇到（合法 UTF-8
+			// 输入不会），这里按单字节处理以保持行为一致。
 			boundary = 1
 		case char == 0xc2 && index+1 < len(text) && text[index+1] == 0x85:
 			boundary = 2
