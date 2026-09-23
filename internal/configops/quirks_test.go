@@ -81,8 +81,9 @@ func TestUnbalancedBracketIsNotConfigOperationError(t *testing.T) {
 	if errors.As(err, &opErr) {
 		t.Fatal("unbalanced bracket 不该是 ConfigOperationError")
 	}
-	if pythonErrorType(err) != "ValueError" {
-		t.Fatalf("期望 ValueError 语义，实际 %s", pythonErrorType(err))
+	var pyErr *PyError
+	if !errors.As(err, &pyErr) || pyErr.TypeName != "ValueError" {
+		t.Fatalf("期望 ValueError 语义，实际 %T: %v", err, err)
 	}
 }
 
@@ -294,9 +295,9 @@ func TestSetKeyServiceModelsCreatesModelsInCallerOrder(t *testing.T) {
 func TestTransferableConfigOmitsMachineSettings(t *testing.T) {
 	data := mustParse(t, `{"config_version":4,"local_api_key":"sk-local","host":"0.0.0.0","port":9000,`+
 		`"providers":{"p":{"base_url":"https://a.example","_amkr_model_key_clone":true,`+
-		`"keys":{"k":{"api_key":"1","capabilities":{"models":["x"]},"allow_visitor":true}}}},`+
+		`"keys":{"k":{"api_key":"1","capabilities":{"models":["x"]}}}}},`+
 		`"models":{"m":{"targets":[{"provider":"p","key":"k","upstream_model":"u"}]}}}`)
-	exported, err := TransferableConfig(data, true)
+	exported, err := TransferableConfig(data)
 	if err != nil {
 		t.Fatalf("导出失败: %v", err)
 	}
@@ -308,17 +309,6 @@ func TestTransferableConfigOmitsMachineSettings(t *testing.T) {
 		if strings.Contains(text, forbidden) {
 			t.Errorf("导出内容不应包含 %q: %s", forbidden, text)
 		}
-	}
-	if !strings.Contains(text, "allow_visitor") {
-		t.Error("include_visitor=true 时应保留 allow_visitor")
-	}
-
-	withoutVisitor, err := TransferableConfig(data, false)
-	if err != nil {
-		t.Fatalf("导出失败: %v", err)
-	}
-	if strings.Contains(canonical.DumpsOrdered(withoutVisitor), "allow_visitor") {
-		t.Error("include_visitor=false 时应去掉 allow_visitor")
 	}
 }
 
@@ -336,7 +326,7 @@ func TestTransferableConfigStripsWorkspaceCredentials(t *testing.T) {
 		`"models":{"m":{"targets":[{"provider":"p","key":"k"}]}},`+
 		`"workspaces":{"teamA":{"api_key":"amkr_ws_secret","inference_key":"amkr_ik_secret",`+
 		`"models":["m"],"tasks":{"t":{"model":"m"}}}}}`)
-	exported, err := TransferableConfig(data, false)
+	exported, err := TransferableConfig(data)
 	if err != nil {
 		t.Fatalf("导出失败: %v", err)
 	}

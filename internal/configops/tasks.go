@@ -581,18 +581,22 @@ func configuredModelNames(data *canonical.Value) map[string]bool {
 //
 // 两类 key 共用这一份判定，且**互相视为占用**（kind 只影响错误文本）：它们的判定
 // 发生在不同调用点（面板面与 /v1 面），同一个字符串两处都命中会让权限边界取决于
-// 走到哪条路由。与 config.Validate 的最终防线保持一致。
+// 走到哪条路由。访问密钥同样在占用表里（见 secretOwnerOutside）。与 config.Validate
+// 的最终防线保持一致。
 func checkWorkspaceSecret(data *canonical.Value, target, kind, secret string) error {
 	if secret == "" {
 		return nil
 	}
-	if secret == config.VISITOR_API_KEY {
-		return opErrf(422, "工作空间 %s 的 %s 不能使用保留的访客 key: %s", target, kind, config.VISITOR_API_KEY)
-	}
 	if local := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); local != "" && secret == local {
 		return opErrf(422, "工作空间 %s 的 %s 不能与 local_api_key 相同", target, kind)
 	}
-	if owner := secretOwnerOutside(data, secret, target); owner != "" {
+	if owner, isAccessKey := secretOwnerOutside(data, secret, target, ""); owner != "" {
+		// 占用者是工作空间时沿用既有紧凑句式（`工作空间 a 与 b 的 api_key 重复`），
+		// 是访问密钥时用 owner 的自足描述（`访问密钥 t 的 key`）——后者没有裸名字，
+		// 直接套前一句式会把它说成工作空间。
+		if isAccessKey {
+			return opErrf(422, "工作空间 %s 的 %s 与%s重复", target, kind, owner)
+		}
 		return opErrf(422, "工作空间 %s 与 %s 的 %s 重复", owner, target, kind)
 	}
 	return nil

@@ -272,9 +272,9 @@ func ImportWorkspaces(
 //     "让导入成功"，实际藏起了用户必须知道的事：那把 key 通常已经嵌在别人的页面里，
 //     换掉之后旧 key 会指向别人**别的**空间，而响应里没有任何字段能说明这件事。
 //
-// 保留 key（`amkr-visitor`）与本地主凭据（`local_api_key`）在任何情况下都是错误：它们
-// 是配置层明令禁止的入站凭据，静默改写等于把坏包藏起来。措辞与 config.Validate 一致
-// （那边是最终防线，这里是为了在**写盘前**给出同一个结论）。
+// 本地主凭据（`local_api_key`）在任何情况下都是错误：它是配置层明令禁止的入站凭据，
+// 静默改写等于把坏包藏起来。措辞与 config.Validate 一致（那边是最终防线，这里是为了
+// 在**写盘前**给出同一个结论）。
 //
 // `target` 是本次要写入的位置：prefix 为空时它是被覆盖的那个空间（连同旧 key 一起消失），
 // 因此它与自己重复不算冲突。
@@ -283,15 +283,17 @@ func resolveImportKey(data *canonical.Value, target string, incoming *canonical.
 	if key == "" {
 		return false, nil
 	}
-	if key == config.VISITOR_API_KEY {
-		return false, opErrf(422, "工作空间 %s 的 api_key 不能使用保留的访客 key: %s", target, config.VISITOR_API_KEY)
-	}
 	if local := strings.TrimSpace(lookup(data, "local_api_key").StringValue()); local != "" && key == local {
 		return false, opErrf(422, "工作空间 %s 的 api_key 不能与 local_api_key 相同", target)
 	}
-	if owner := keyOwnerOutside(data, key, target); owner != "" {
+	if owner, isAccessKey := secretOwnerOutside(data, key, target, ""); owner != "" {
 		if !cloned {
-			return false, opErrf(422, "工作空间 %s 的 api_key 与 %s 重复", target, owner)
+			// 占用者是工作空间时沿用既有紧凑句式（既有测试逐字锁定），是访问密钥时用
+			// owner 的自足描述——否则会拼出「工作空间 访问密钥 t 与 x 重复」。
+			if isAccessKey {
+				return false, opErrf(422, "工作空间 %s 的 api_key 与%s重复", target, owner)
+			}
+			return false, opErrf(422, "工作空间 %s 与 %s 的 api_key 重复", target, owner)
 		}
 		// 克隆：生成一把新的。本次导入中更早写入的空间已经落在 data 里，因此同一个
 		// 扫描就能覆盖它们，无需另记一份。
@@ -305,31 +307,48 @@ func resolveImportKey(data *canonical.Value, target string, incoming *canonical.
 	return false, nil
 }
 
-// keyOwnerOutside 返回占用该**面板** key 的那个空间名（`except` 自身除外），没有则空串。
-func keyOwnerOutside(data *canonical.Value, key, except string) string {
-	return secretOwnerOutside(data, key, except)
-}
-
-// secretOwnerOutside 返回占用该凭据的空间名（`except` 自身除外），没有则空串。
+// secretOwnerOutside 返回占用该凭据的资源，以及它是不是一把访问密钥。
 //
-// 面板 key 与推理 key **一起扫**：两者都不允许在实例内重复出现，且跨类型重复同样
-// 有害（同一个字符串会在面板面与 /v1 面各命中一个空间）。判定与 config.Validate
-// 的占用表一致。
-func secretOwnerOutside(data *canonical.Value, secret, except string) string {
+// 面板 key、推理 key 与访问密钥的明文**一起扫**：三者都不允许在实例内重复出现。工作
+// 空间的两把 key 跨类型重复同样有害（同一个字符串会在面板面与 /v1 面各命中一个空间），
+// 访问密钥更是如此——它与推理 key 的判定彼此独立，撞车会让同一把 key 的权限取决于先
+// 命中哪张清单。判定与 config.Validate 的占用表一致。
+//
+// exceptWorkspace 与 exceptAccessKey 各自排除「本次正要写入的那一处」：改一个已存在
+// 的资源时它自己的旧值还躺在配置里，不该被算成与别人冲突。两个例外分开传而不是合成
+// 一个名字，因为工作空间名与访问密钥 ID 是两个命名空间——撞名时合成一个会**误跳过**
+// 一个真实冲突。
+//
+// 返回的 owner 有两种形态，由 bool 区分，因为两种占用者该配的句式不同：
+//   - 工作空间（bool 为假）：owner 是**裸空间名**，调用方沿用既有的紧凑句式
+//     （`工作空间 a 与 b 的 api_key 重复`）——同类型撞车是常见形态，读者不必把
+//     「工作空间」看两遍；
+//   - 访问密钥（bool 为真）：owner 是**自足描述**（`访问密钥 trial 的 key`），因为调用
+//     方的句式里没有位置能补上「哪种资源」这一层，只给名字会拼出「工作空间 访问密钥
+//     trial 与 x 重复」这种把访问密钥说成工作空间的病句。
+func secretOwnerOutside(data *canonical.Value, secret, exceptWorkspace, exceptAccessKey string) (string, bool) {
 	if secret == "" {
-		return ""
+		return "", false
 	}
 	for _, pair := range objectItems(lookup(data, "workspaces")) {
-		if pair.Key == except || !pair.Value.IsObject() {
+		if pair.Key == exceptWorkspace || !pair.Value.IsObject() {
 			continue
 		}
 		for _, field := range []string{"api_key", "inference_key"} {
 			if existing := strings.TrimSpace(pair.Value.Lookup(field).StringValue()); existing == secret {
-				return pair.Key
+				return pair.Key, false
 			}
 		}
 	}
-	return ""
+	for _, pair := range objectItems(lookup(data, "access_keys")) {
+		if pair.Key == exceptAccessKey || !pair.Value.IsObject() {
+			continue
+		}
+		if existing := strings.TrimSpace(pair.Value.Lookup("key").StringValue()); existing == secret {
+			return "访问密钥 " + pair.Key + " 的 key", true
+		}
+	}
+	return "", false
 }
 
 // availableWorkspaceName 在 base 已被占用时依次尝试 `base-2`、`base-3`……。

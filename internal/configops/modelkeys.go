@@ -15,7 +15,6 @@ import (
 type CreateModelKeyOptions struct {
 	BaseURL              *string
 	Enabled              *bool
-	AllowVisitor         bool
 	UpstreamModel        *string
 	UpstreamRoutes       *canonical.Value
 	UpdateUpstreamRoutes bool
@@ -69,8 +68,7 @@ func CreateModelKey(data *canonical.Value, modelID, keyName, apiKey string, opti
 		enabled = *options.Enabled
 	}
 	if _, err := CreateProviderKey(data, providerID, name, apiKey, CreateProviderKeyOptions{
-		Enabled:      &enabled,
-		AllowVisitor: options.AllowVisitor,
+		Enabled: &enabled,
 	}); err != nil {
 		return err
 	}
@@ -125,10 +123,6 @@ func CreateModelWithKeys(data *canonical.Value, modelID string, options CreateMo
 		if value, ok := getOr(key, "enabled"); ok {
 			enabled = value.Truthy()
 		}
-		allowVisitor := false
-		if value, ok := getOr(key, "allow_visitor"); ok {
-			allowVisitor = value.Truthy()
-		}
 		upstream := modelID
 		if value := lookup(key, "upstream_model").StringValue(); value != "" {
 			upstream = value
@@ -137,7 +131,6 @@ func CreateModelWithKeys(data *canonical.Value, modelID string, options CreateMo
 		if err := CreateModelKey(data, modelID, name, secret, CreateModelKeyOptions{
 			BaseURL:              baseURL,
 			Enabled:              &enabled,
-			AllowVisitor:         allowVisitor,
 			UpstreamModel:        &upstream,
 			UpstreamRoutes:       upstreamRoutes,
 			UpdateUpstreamRoutes: key.Obj.Has("upstream_routes"),
@@ -158,7 +151,6 @@ type UpdateModelKeyOptions struct {
 	BaseURL              *string
 	UpdateBaseURL        bool
 	Enabled              *bool
-	AllowVisitor         *bool
 	UpstreamRoutes       *canonical.Value
 	UpdateUpstreamRoutes bool
 }
@@ -223,9 +215,6 @@ func UpdateModelKey(data *canonical.Value, modelID, keyName string, options Upda
 	}
 	if options.Enabled != nil {
 		key.SetKey("enabled", canonical.NewBool(*options.Enabled))
-	}
-	if options.AllowVisitor != nil {
-		key.SetKey("allow_visitor", canonical.NewBool(*options.AllowVisitor))
 	}
 	if actual != rawName {
 		keys, err := ProviderKeys(provider)

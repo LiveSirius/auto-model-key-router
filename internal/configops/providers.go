@@ -139,8 +139,7 @@ func UpdateProvider(data *canonical.Value, providerID string, options UpdateProv
 // Enabled 为 nil 表示 Python 默认值 true（不能用 Go 的零值 false 代替，否则
 // 默认行为会反过来）。
 type CreateProviderKeyOptions struct {
-	Enabled      *bool
-	AllowVisitor bool
+	Enabled *bool
 }
 
 // CreateProviderKey 在供应商下新建一个 key 并返回它。
@@ -174,7 +173,6 @@ func CreateProviderKey(data *canonical.Value, providerID, keyName, apiKey string
 	key := canonical.NewObjectOf(
 		canonical.ObjectPair{Key: "api_key", Value: canonical.NewString(secret)},
 		canonical.ObjectPair{Key: "enabled", Value: canonical.NewBool(enabled)},
-		canonical.ObjectPair{Key: "allow_visitor", Value: canonical.NewBool(options.AllowVisitor)},
 	)
 	keys.SetKey(name, key)
 	return key, nil
@@ -182,10 +180,9 @@ func CreateProviderKey(data *canonical.Value, providerID, keyName, apiKey string
 
 // UpdateProviderKeyOptions 是 UpdateProviderKey 的可选参数。
 type UpdateProviderKeyOptions struct {
-	NewName      *string
-	APIKey       *string
-	Enabled      *bool
-	AllowVisitor *bool
+	NewName *string
+	APIKey  *string
+	Enabled *bool
 }
 
 // UpdateProviderKey 修改供应商 key，返回最终名字（改名时是新名字）。
@@ -226,9 +223,6 @@ func UpdateProviderKey(data *canonical.Value, providerID, keyName string, option
 	}
 	if options.Enabled != nil {
 		key.SetKey("enabled", canonical.NewBool(*options.Enabled))
-	}
-	if options.AllowVisitor != nil {
-		key.SetKey("allow_visitor", canonical.NewBool(*options.AllowVisitor))
 	}
 	if options.Enabled != nil && !*options.Enabled {
 		if err := clearUnifiedKeysFromProvider(data, providerID, StringPtr(keyName)); err != nil {

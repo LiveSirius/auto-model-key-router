@@ -16,8 +16,12 @@ import (
 //     迁移到别的实例后应作为普通供应商存在；
 //   - capabilities 探测缓存：各 Key 看到的模型清单因机器而异。
 //
-// includeVisitor 为 false 时还会去掉每个 key 的 allow_visitor。
-func TransferableConfig(data *canonical.Value, includeVisitor bool) (*canonical.Value, error) {
+// 原先还有一个 include_visitor 参数（为假时清掉各 key 的 allow_visitor）：该字段已
+// 随访客模式删除，参数也随之取消——导出的形状从此与配置无关。
+//
+// **访问密钥不随这份导出走**：它和 local_api_key 同类，是本实例的入站凭据。导出文件
+// 会被贴到工单、聊天记录、文档里，带上 key 等于把凭据散出去。
+func TransferableConfig(data *canonical.Value) (*canonical.Value, error) {
 	// Python 先 deepcopy(providers(data))，因此这里的 setdefault 会落到 data 上。
 	allProviders, err := Providers(data)
 	if err != nil {
@@ -44,22 +48,6 @@ func TransferableConfig(data *canonical.Value, includeVisitor bool) (*canonical.
 		return nil, err
 	}
 	resultModels := allModels.Clone()
-	if !includeVisitor {
-		for _, provider := range objectItems(resultProviders) {
-			if !provider.Value.IsObject() {
-				continue
-			}
-			keys, err := ProviderKeys(provider.Value)
-			if err != nil {
-				return nil, err
-			}
-			for _, key := range objectItems(keys) {
-				if key.Value.IsObject() {
-					key.Value.DeleteKey("allow_visitor")
-				}
-			}
-		}
-	}
 	result := canonical.NewObjectOf(
 		canonical.ObjectPair{Key: "config_version", Value: canonical.NewInt(strconv.Itoa(config.CONFIG_VERSION))},
 		canonical.ObjectPair{Key: "providers", Value: resultProviders},

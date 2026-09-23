@@ -213,7 +213,7 @@ func TestRepairTasksKeepsValidSiblingWorkspace(t *testing.T) {
 // TestTransferCarriesWorkspaces 固化导出/导入带着命名空间一起走。
 func TestTransferCarriesWorkspaces(t *testing.T) {
 	data := workspaceData(t)
-	exported, err := TransferableConfig(data, true)
+	exported, err := TransferableConfig(data)
 	if err != nil {
 		t.Fatalf("导出失败: %v", err)
 	}
