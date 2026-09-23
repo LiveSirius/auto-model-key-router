@@ -51,11 +51,17 @@ const MaxAccessKeyRecentLimit = 200
 
 // accessKeyDimensions 是看板上要按维度拆分的列，与响应里的键名一一对应。
 //
-// 只按 model_id 与 provider_id 拆：这两列在看板上要回答「用了哪些模型」「打到哪些
-// 供应商」，而 requested_model_id（任务名/别名）对访问密钥没有意义——访问密钥不能
-// 使用任务（见 internal/proxy/handler.go 的任务拦截），别名也已经由 model_id 归一。
-// upstream_model_id 属于排障信息，留在管理面。
-var accessKeyDimensions = []string{"model_id", "provider_id"}
+// 三个维度的分工：
+//   - model_id：本地路由名，回答「用了哪些模型」——这是调用方自己配的名字；
+//   - provider_id：回答「打到哪些供应商」；
+//   - upstream_model_id：真正发给上游的模型名，**唯一能与价格目录对上的字段**
+//     （见 webui/pricing.js 的 requestCost 注释）。看板的「花费」必须按它分组求和，
+//     否则只能拿本地路由名去猜单价。代价是这一维通常比前两维多几项，但那是真实
+//     数据，而把成本算错更糟。
+//
+// 不含 requested_model_id（任务名/别名）：访问密钥不能使用任务，别名也已经由
+// model_id 归一，这一维对访问密钥恒等于 model_id 或为空。
+var accessKeyDimensions = []string{"model_id", "provider_id", "upstream_model_id"}
 
 // AccessKeyUsage 返回一把访问密钥的用量统计、按维度拆分与最近调用明细。
 //
