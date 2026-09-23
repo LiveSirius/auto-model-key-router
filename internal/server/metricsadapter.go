@@ -93,6 +93,9 @@ func recordParams(record proxy.MetricRecord) metrics.RecordParams {
 		// None 落库等价。工作空间不落 request_metrics，空串在这里有独立含义：
 		// 「这次请求没有归属」，落库时表现为不写旁挂表。
 		Workspace: record.Workspace,
+		// AccessKeyID 同理原样传递（有意增补，见 metrics.RecordParams）：空串表示
+		// 这次请求不出自访问密钥，落库时不写 request_access_key 旁挂表。
+		AccessKeyID: record.AccessKeyID,
 	}
 }
 

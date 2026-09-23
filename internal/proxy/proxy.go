@@ -161,6 +161,17 @@ type MetricRecord struct {
 	PoolName         *string
 	UpstreamModelID  *string
 	Workspace        string
+	// AccessKeyID 是发起请求的访问密钥的 key_id（配置里的稳定标识符），空串表示
+	// 这次请求不出自访问密钥。
+	//
+	// 与 Workspace 同样是**有意增补**，同样不进入 request_metrics 的列，而是落到
+	// request_access_key 旁挂表（见 internal/metrics/schema.go）。CallerType 只说
+	// 「来自访问密钥」，说不出**哪一把**，而访问密钥是按人分发的——没有这个字段，
+	// 访问密钥看板就答不出「这个人用了多少」。
+	//
+	// 注意不要拿 KeyName 顶替：那是**被选中的上游 Provider key 名**（见 internal/proxy
+	// 的 recordMetric），与调用方身份无关。
+	AccessKeyID string
 }
 
 // Options 是 Handler 的可选配置。零值即「按产品决策的默认档」。

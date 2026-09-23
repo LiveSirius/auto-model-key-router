@@ -711,6 +711,11 @@ func (h *Handler) recordMetric(context *RequestContext, key config.KeyConfig, re
 	record.UpstreamModelID = &upstreamModel
 	// 工作空间已在读请求头时归一化（handler.go），这里直接沿用，不再判空。
 	record.Workspace = context.Workspace
+	// 访问密钥身份同样只在解析鉴权时确定（handler.go 的 authorize）。非访问密钥的
+	// 请求保持空串，落库时不写 request_access_key 旁挂表。
+	if context.AccessKey != nil {
+		record.AccessKeyID = context.AccessKey.ID
+	}
 	_ = h.metrics.Record(contextOf(context.Request), record)
 }
 
