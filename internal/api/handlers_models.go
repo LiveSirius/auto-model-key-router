@@ -216,14 +216,12 @@ func (s *Server) handleCreateModelKey(w http.ResponseWriter, r *http.Request) {
 		keyName := keyData.Lookup("name").PyStr()
 		apiKey := keyData.Lookup("api_key").PyStr()
 		enabled := boolOr(keyData, "enabled", true)
-		allowVisitor := boolOr(keyData, "allow_visitor", false)
 		hasRoutes := upstreamRoutes.Kind != canonical.KindNull
 
 		cfg, err := s.updateConfig(r, func(data *canonical.Value) error {
 			return configops.CreateModelKey(data, modelID, keyName, apiKey, configops.CreateModelKeyOptions{
 				BaseURL:              optString(keyData, "base_url"),
 				Enabled:              &enabled,
-				AllowVisitor:         allowVisitor,
 				UpstreamRoutes:       upstreamRoutes,
 				UpdateUpstreamRoutes: hasRoutes,
 			})
@@ -346,7 +344,6 @@ func (s *Server) handleUpdateModelKey(w http.ResponseWriter, r *http.Request) {
 				BaseURL:              optString(updates, "base_url"),
 				UpdateBaseURL:        hasKey(updates, "base_url"),
 				Enabled:              optBool(updates, "enabled"),
-				AllowVisitor:         optBool(updates, "allow_visitor"),
 				UpstreamRoutes:       upstreamRoutes,
 				UpdateUpstreamRoutes: hasRoutes,
 			})

@@ -392,18 +392,16 @@ func workspaceBundleRaw(bundle workspaceBundle) *canonical.Value {
 	return canonical.NewObjectOf(canonical.ObjectPair{Key: "spaces", Value: spaces})
 }
 
-// TestWorkspaceImportRejectsReservedVisitorKey 固化：包里带保留的访客 key 或本地主凭据时
-// **报错**，而不是悄悄改写。
+// TestWorkspaceImportRejectsReservedKey 固化：包里带本地主凭据时**报错**，而不是悄悄改写。
 //
-// 这两把 key 与「撞上别的空间」是同一种结论（都报错），但理由不同：撞车可以靠加前缀克隆
-// 绕开（那种情况由 rekeyed 回报），而包里写着 amkr-visitor 或 local_api_key 说明这份包
-// 本身坏了——那是配置层明令禁止的入站凭据，静默改写会把它藏起来。
-func TestWorkspaceImportRejectsReservedVisitorKey(t *testing.T) {
+// 它与「撞上别的空间」是同一种结论（都报错），但理由不同：撞车可以靠加前缀克隆绕开
+// （那种情况由 rekeyed 回报），而包里写着 local_api_key 说明这份包本身坏了——那是
+// 配置层明令禁止的入站凭据，静默改写会把它藏起来。
+func TestWorkspaceImportRejectsReservedKey(t *testing.T) {
 	server, path := workspaceServer(t)
 
 	for _, bundleJSON := range []string{
-		`{"spaces":{"a":{"api_key":"amkr-visitor","tasks":{"t":{"model":"model-a"}}}}}`,
-		// 与目标实例的 local_api_key 相同同理：那是全量权限的主凭据。
+		// 与目标实例的 local_api_key 相同：那是全量权限的主凭据。
 		`{"spaces":{"a":{"api_key":"local-key","tasks":{"t":{"model":"model-a"}}}}}`,
 	} {
 		revision := currentRevision(t, path)

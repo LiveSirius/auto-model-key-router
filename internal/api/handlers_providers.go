@@ -213,12 +213,10 @@ func (s *Server) handleCreateProviderKey(w http.ResponseWriter, r *http.Request)
 		keyName := payload.Lookup("name").PyStr()
 		apiKey := payload.Lookup("api_key").PyStr()
 		enabled := boolOr(payload, "enabled", true)
-		allowVisitor := boolOr(payload, "allow_visitor", false)
 
 		data, err := s.v3Update(r, func(current *canonical.Value) error {
 			_, err := configops.CreateProviderKey(current, providerID, keyName, apiKey, configops.CreateProviderKeyOptions{
-				Enabled:      &enabled,
-				AllowVisitor: allowVisitor,
+				Enabled: &enabled,
 			})
 			return err
 		}, optString(payload, "config_revision"))
@@ -279,10 +277,9 @@ func (s *Server) handleUpdateProviderKey(w http.ResponseWriter, r *http.Request)
 
 		data, err := s.v3Update(r, func(current *canonical.Value) error {
 			_, err := configops.UpdateProviderKey(current, providerID, keyName, configops.UpdateProviderKeyOptions{
-				NewName:      optString(updates, "name"),
-				APIKey:       optString(updates, "api_key"),
-				Enabled:      optBool(updates, "enabled"),
-				AllowVisitor: optBool(updates, "allow_visitor"),
+				NewName: optString(updates, "name"),
+				APIKey:  optString(updates, "api_key"),
+				Enabled: optBool(updates, "enabled"),
 			})
 			return err
 		}, optString(payload, "config_revision"))

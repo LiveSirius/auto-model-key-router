@@ -604,9 +604,7 @@ func (s *Server) handleExportConfig(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		// include_visitor 在参照实现里取 visitor_feature_available()；Go 侧访客
-		// 功能常驻（见 internal/auth 的说明），因此恒为 true。
-		exported, err := configops.TransferableConfig(data, true)
+		exported, err := configops.TransferableConfig(data)
 		if err != nil {
 			return nil, err
 		}
@@ -629,7 +627,7 @@ func (s *Server) handleImportConfig(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil, err
 		}
-		imported, err := configops.TransferableConfig(migrated, true)
+		imported, err := configops.TransferableConfig(migrated)
 		if err != nil {
 			return nil, err
 		}

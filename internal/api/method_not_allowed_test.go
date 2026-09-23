@@ -23,7 +23,7 @@ type methodContractCase struct {
 	// method/path 是请求本身。
 	method string
 	path   string
-	// auth 取 "full" / "visitor" / "none"，对应 opsRequest 的第三个参数。
+	// auth 取 "full" / "invalid" / "none"，对应 opsRequest 的第三个参数。
 	auth string
 	// body 为空表示不带请求体。
 	body string

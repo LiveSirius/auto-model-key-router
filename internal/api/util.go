@@ -112,7 +112,7 @@ func normalizeModelUpdates(data *canonical.Value) error {
 // 空 key 名与空 api_key 在这里被 400 拒掉——注意它们是 **HTTPException**，发生在
 // _update_config 之外，所以是规整的 400 JSON 而不是 500。
 func normalizeKeyUpdates(data *canonical.Value) error {
-	if err := rejectNullFields(data, "name", "api_key", "enabled", "allow_visitor"); err != nil {
+	if err := rejectNullFields(data, "name", "api_key", "enabled"); err != nil {
 		return err
 	}
 	if value, present := data.LookupOK("name"); present && value != nil && !value.IsNull() {

@@ -111,13 +111,6 @@ func modelResponse(model config.ModelConfig) *canonical.Value {
 	}
 	autoHidden := sortedKeys(seen)
 
-	visitorAvailable := false
-	for _, key := range model.Keys {
-		if key.Enabled && key.AllowVisitor {
-			visitorAvailable = true
-			break
-		}
-	}
 	keys := canonical.NewArray()
 	for _, key := range model.Keys {
 		keys.Arr = append(keys.Arr, keyResponse(key))
@@ -129,7 +122,6 @@ func modelResponse(model config.ModelConfig) *canonical.Value {
 		canonical.ObjectPair{Key: "auto_hidden_aliases", Value: stringArray(autoHidden)},
 		canonical.ObjectPair{Key: "routing_mode", Value: canonical.NewString(model.RoutingMode)},
 		canonical.ObjectPair{Key: "reasoning_effort", Value: nullableString(model.ReasoningEffort)},
-		canonical.ObjectPair{Key: "visitor_available", Value: canonical.NewBool(visitorAvailable)},
 		canonical.ObjectPair{Key: "keys", Value: keys},
 	)
 }
@@ -139,12 +131,14 @@ func modelResponse(model config.ModelConfig) *canonical.Value {
 // 与 _raw_key_response 的关键差异：这里**带 base_url**，且 base_url 来自
 // KeyConfig（可能为空串），不返回 capabilities。参照实现的两个 key 响应形状不同
 // 是历史遗留，不能统一。
+//
+// allow_visitor 已随访客模式删除：上游 key 不再带「是否允许访客」的开关，受限凭据的
+// 授权改成访问密钥自己的 providers/models 清单（见 config.AccessKeyConfig）。
 func keyResponse(key config.KeyConfig) *canonical.Value {
 	return objectOf(
 		canonical.ObjectPair{Key: "name", Value: canonical.NewString(key.Name)},
 		canonical.ObjectPair{Key: "base_url", Value: canonical.NewString(key.BaseURL)},
 		canonical.ObjectPair{Key: "enabled", Value: canonical.NewBool(key.Enabled)},
-		canonical.ObjectPair{Key: "allow_visitor", Value: canonical.NewBool(key.AllowVisitor)},
 		canonical.ObjectPair{Key: "api_key_fingerprint", Value: canonical.NewString(formatting.KeyFingerprint(key.APIKey))},
 	)
 }
@@ -163,7 +157,6 @@ func providerResponse(provider config.ProviderConfig, routeOrder []string) *cano
 		keys.Arr = append(keys.Arr, objectOf(
 			canonical.ObjectPair{Key: "name", Value: canonical.NewString(key.Name)},
 			canonical.ObjectPair{Key: "enabled", Value: canonical.NewBool(key.Enabled)},
-			canonical.ObjectPair{Key: "allow_visitor", Value: canonical.NewBool(key.AllowVisitor)},
 			canonical.ObjectPair{Key: "api_key_fingerprint", Value: canonical.NewString(formatting.KeyFingerprint(key.APIKey))},
 			canonical.ObjectPair{Key: "capabilities", Value: capabilitiesField(key.Capabilities)},
 		))
@@ -207,18 +200,16 @@ func capabilitiesField(capabilities *canonical.Value) *canonical.Value {
 
 // rawKeyResponse 对应 management_api.py:1545 的 _raw_key_response。
 //
-// 注意三点与 keyResponse 的差异，都是参照实现的原样行为：
+// 注意两点与 keyResponse 的差异，都是参照实现的原样行为：
 //   - **没有** base_url；
-//   - enabled/allow_visitor 用 bool(x.get(...)) 的默认值语义（缺失算 true/false）；
+//   - enabled 用 bool(x.get(...)) 的默认值语义（缺失算 true）；
 //   - fingerprint 取 str(key.get("api_key", ""))，非字符串会被 str() 渲染。
+//
+// allow_visitor 已随访客模式删除（见 keyResponse 的说明）。
 func rawKeyResponse(name string, key *canonical.Value) *canonical.Value {
 	enabled := canonical.NewBool(true)
 	if raw, present := key.LookupOK("enabled"); present {
 		enabled = canonical.NewBool(raw.Truthy())
-	}
-	allowVisitor := canonical.NewBool(false)
-	if raw, present := key.LookupOK("allow_visitor"); present {
-		allowVisitor = canonical.NewBool(raw.Truthy())
 	}
 	apiKey := ""
 	if raw, present := key.LookupOK("api_key"); present && raw != nil {
@@ -227,7 +218,6 @@ func rawKeyResponse(name string, key *canonical.Value) *canonical.Value {
 	return objectOf(
 		canonical.ObjectPair{Key: "name", Value: canonical.NewString(name)},
 		canonical.ObjectPair{Key: "enabled", Value: enabled},
-		canonical.ObjectPair{Key: "allow_visitor", Value: allowVisitor},
 		canonical.ObjectPair{Key: "api_key_fingerprint", Value: canonical.NewString(formatting.KeyFingerprint(apiKey))},
 		canonical.ObjectPair{Key: "capabilities", Value: capabilitiesField(key.Lookup("capabilities"))},
 	)

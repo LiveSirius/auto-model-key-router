@@ -263,8 +263,8 @@ func TestDeleteWorkspaceRejectsDefaultAndMissing(t *testing.T) {
 func TestWorkspacesRequireAuthAndRejectMethods(t *testing.T) {
 	server, _ := workspaceServer(t)
 
-	// 访客与无凭据都拿不到（工作空间会暴露配置结构）。
-	for _, auth := range []string{"none", "visitor"} {
+	// 非法凭据与无凭据都拿不到（工作空间会暴露配置结构）。
+	for _, auth := range []string{"none", "invalid"} {
 		recorder := opsRequest(t, server, http.MethodGet, "/api/workspaces", nil, auth)
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("凭据 %q 的状态码 = %d，期望 401", auth, recorder.Code)
@@ -411,7 +411,8 @@ func TestCreateWorkspaceRejectsBadInput(t *testing.T) {
 	}{
 		{"与默认空间重名", `"name":"default"`, http.StatusConflict, "工作空间名重复: default"},
 		{"已存在", `"name":"teamA"`, http.StatusConflict, "工作空间已存在: teamA"},
-		{"占用访客 key", `"name":"x","api_key":"amkr-visitor"`, http.StatusUnprocessableEntity, "不能使用保留的访客 key"},
+		// 访问密钥并入同一张占用表：撞车会让同一把 key 的权限取决于先命中哪张清单。
+		{"占用访问密钥", `"name":"x","api_key":"amkr_ak_taken"`, http.StatusUnprocessableEntity, "的 api_key 与访问密钥 trial 的 key重复"},
 		{"与本地 key 相同", `"name":"x","api_key":"local-key"`, http.StatusUnprocessableEntity, "不能与 local_api_key 相同"},
 	}
 	for _, testCase := range cases {

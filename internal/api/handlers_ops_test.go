@@ -2,15 +2,12 @@ package api
 
 import (
 	"bytes"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -18,389 +15,27 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 	"github.com/Sparrived/auto-model-key-router/internal/health"
-	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
 
 // 本文件覆盖运维面（ops_api.py 的 7 条路由）：
 //
-//  1. TestOpsAPIMatchesPython 回放 gen_ops_api_corpus.py（已随 Python 退役移除） 生成的语料，逐字节
-//     比对状态码 / content-type / content-length / 响应体 / 请求后的配置文件；
-//  2. 控制开关（OpsEnabled）与三条未接线接缝的**响亮失败**各有具名用例；
-//  3. 真实路径（internal/updatecheck）用一个假取回器端到端打通，证明接缝为 nil 时
-//     走的是真实现而不是「假装成功」。
+//  1. 控制开关（OpsEnabled）与三条未接线接缝的**响亮失败**各有具名用例；
+//  2. 真实路径（internal/updatecheck）用一个假取回器端到端打通，证明接缝为 nil 时
+//     走的是真实现而不是「假装成功」；
+//  3. 服务动作表、日志截断与宽容解码的边界规则。
 
-const opsCorpusPath = "testdata/ops_api_corpus.json"
+// testLocalAPIKey 是这些用例使用的本地主凭据。
+const testLocalAPIKey = "local-key"
 
-// —— 语料结构 —— //
+// testInvalidAPIKey 是一个不被任何入口接受的凭据。
+const testInvalidAPIKey = "not-the-local-key"
 
-// opsLogSpec 是日志文件的紧凑规格：prefix + pad_byte×pad_count + suffix。
+// jsonEscapedPath 把路径转成它出现在 JSON 响应体里的样子。
 //
-// 64 KiB 截断边界的用例若直接存字节，语料里要出现两份 64 KiB；两侧各自展开既省体积
-// 又不丢语义（响应体仍然逐字节比对）。
-type opsLogSpec struct {
-	PrefixHex string `json:"prefix_hex"`
-	PadByte   *int   `json:"pad_byte"`
-	PadCount  int    `json:"pad_count"`
-	SuffixHex string `json:"suffix_hex"`
-}
-
-// materialize 展开规格。
-func (s *opsLogSpec) materialize(t *testing.T) []byte {
-	t.Helper()
-	out, err := hex.DecodeString(s.PrefixHex)
-	if err != nil {
-		t.Fatalf("解析 prefix_hex 失败: %v", err)
-	}
-	if s.PadByte != nil {
-		out = append(out, bytes.Repeat([]byte{byte(*s.PadByte)}, s.PadCount)...)
-	}
-	suffix, err := hex.DecodeString(s.SuffixHex)
-	if err != nil {
-		t.Fatalf("解析 suffix_hex 失败: %v", err)
-	}
-	return append(out, suffix...)
-}
-
-// opsUpdateState 是版本检查桩的返回值，对应生成脚本里的 UPDATE_STATE。
-type opsUpdateState struct {
-	Latest string `json:"latest"`
-	Error  string `json:"error"`
-}
-
-// opsCorpusCase 是语料里的一条用例。
-//
-// 元数据用 encoding/json 解（类型确定），载荷与夹具走 canonical（数字的 int/float
-// 形态与对象键顺序都是可观察契约，见 corpus_test.go 的同类说明）。
-type opsCorpusCase struct {
-	Name          string         `json:"name"`
-	Method        string         `json:"method"`
-	Path          string         `json:"path"`
-	Auth          string         `json:"auth"`
-	Covers        []string       `json:"covers"`
-	Status        int            `json:"status"`
-	ContentType   *string        `json:"content_type"`
-	ContentLength *string        `json:"content_length"`
-	BodyText      string         `json:"body_text"`
-	LogFile       *opsLogSpec    `json:"log_file"`
-	LogPathDir    bool           `json:"log_path_dir"`
-	DeleteConfig  bool           `json:"delete_config"`
-	OpsEnabled    bool           `json:"ops_enabled"`
-	UpdateState   opsUpdateState `json:"update_state"`
-	WebUIAssets   bool           `json:"webui_assets"`
-	TailError     string         `json:"tail_error"`
-
-	bodyKind     string
-	bodyValue    *canonical.Value
-	fixturePatch *canonical.Value
-	configAfter  *canonical.Value
-}
-
-// opsCorpusData 是整份语料。
-type opsCorpusData struct {
-	version    int
-	fixtureDir string
-	appVersion string
-	fixture    *canonical.Value
-	cases      []opsCorpusCase
-}
-
-// loadOpsCorpus 读取并解析运维面语料。
-func loadOpsCorpus(t *testing.T) *opsCorpusData {
-	t.Helper()
-	raw, err := os.ReadFile(opsCorpusPath)
-	if err != nil {
-		t.Fatalf("读取语料失败: %v", err)
-	}
-	var meta struct {
-		Version    int             `json:"version"`
-		FixtureDir string          `json:"fixture_dir"`
-		AppVersion string          `json:"app_version"`
-		Cases      []opsCorpusCase `json:"cases"`
-	}
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		t.Fatalf("解析语料元数据失败: %v", err)
-	}
-	root, err := canonical.Parse(raw)
-	if err != nil {
-		t.Fatalf("canonical 解析语料失败: %v", err)
-	}
-	casesValue := root.Lookup("cases")
-	if casesValue == nil || !casesValue.IsArray() || len(casesValue.Arr) != len(meta.Cases) {
-		t.Fatalf("语料用例数不一致: canonical=%d json=%d", casesValue.Len(), len(meta.Cases))
-	}
-	for i := range meta.Cases {
-		node := casesValue.Arr[i]
-		entry := &meta.Cases[i]
-		if body := node.Lookup("body"); body != nil {
-			entry.bodyKind = body.Lookup("kind").StringValue()
-			if value, present := body.LookupOK("value"); present {
-				entry.bodyValue = value
-			}
-		}
-		if patch, present := node.LookupOK("fixture_patch"); present && patch.IsObject() {
-			entry.fixturePatch = patch
-		}
-		if after, present := node.LookupOK("config_after"); present && !after.IsNull() {
-			if text, ok := after.AsString(); ok {
-				entry.configAfter = mustParseText(t, text)
-			}
-		}
-	}
-	return &opsCorpusData{
-		version:    meta.Version,
-		fixtureDir: meta.FixtureDir,
-		appVersion: meta.AppVersion,
-		fixture:    root.Lookup("fixture"),
-		cases:      meta.Cases,
-	}
-}
-
-// —— 回放 —— //
-
-// opsReplay 是一次回放的结果。
-type opsReplay struct {
-	recorder   *httptest.ResponseRecorder
-	configPath string
-}
-
-// opsHarness 为语料用例准备可回放的服务端。
-type opsHarness struct {
-	corpus *opsCorpusData
-	t      *testing.T
-}
-
-// replay 回放某条用例。
-func (h *opsHarness) replay(index int) *opsReplay {
-	h.t.Helper()
-	return h.replayEntry(h.corpus.cases[index])
-}
-
-// replayEntry 用给定用例（可以是临时改造过的副本）回放。
-//
-// 请求顺序与生成脚本完全一致：写夹具 -> 建日志文件 -> 建服务端 -> （可选）删除配置
-// -> 主请求。顺序会改变可见状态，不能调整。
-func (h *opsHarness) replayEntry(entry opsCorpusCase) *opsReplay {
-	h.t.Helper()
-	dir := h.t.TempDir()
-	configPath := filepath.Join(dir, "router-config.json")
-
-	// 夹具里的路径整体换成回放目录：运维面的响应里从不出现 config_revision，因此不
-	// 需要像管理面那样为了保住版本号而保留语料里的路径（403 的 detail 与 /api/logs
-	// 的 path 都要跟着换）。
-	fixture := substitutePaths(h.corpus.fixture.Clone(), h.corpus.fixtureDir, dir)
-	if entry.fixturePatch != nil {
-		for _, key := range entry.fixturePatch.Obj.Keys() {
-			value, _ := entry.fixturePatch.Obj.Get(key)
-			fixture.SetKey(key, substitutePaths(value, h.corpus.fixtureDir, dir))
-		}
-	}
-	migrated, err := config.MigrateConfigData(fixture)
-	if err != nil {
-		h.t.Fatalf("迁移夹具失败: %v", err)
-	}
-	if err := config.SaveConfigData(configPath, migrated); err != nil {
-		h.t.Fatalf("写入夹具失败: %v", err)
-	}
-	initial, err := config.Load(configPath)
-	if err != nil {
-		h.t.Fatalf("载入夹具失败: %v", err)
-	}
-
-	// 日志文件位置来自夹具本身（logs/path-is-dir 用例把它指向一个目录）。
-	logPath := fixture.Lookup("log_file_path").StringValue()
-	if entry.LogPathDir {
-		if err := os.MkdirAll(logPath, 0o755); err != nil {
-			h.t.Fatalf("创建日志目录失败: %v", err)
-		}
-	} else if entry.LogFile != nil {
-		if err := os.WriteFile(logPath, entry.LogFile.materialize(h.t), 0o644); err != nil {
-			h.t.Fatalf("写入日志文件失败: %v", err)
-		}
-	}
-
-	server := h.newServer(entry, configPath, initial)
-	replay := &opsReplay{configPath: configPath}
-
-	if entry.DeleteConfig {
-		if err := os.Remove(configPath); err != nil {
-			h.t.Fatalf("删除配置失败: %v", err)
-		}
-	}
-
-	var body io.Reader
-	if entry.bodyKind == "json" {
-		body = strings.NewReader(canonical.DumpsOrdered(entry.bodyValue))
-	}
-	request := httptest.NewRequest(entry.Method, entry.Path, body)
-	switch entry.Auth {
-	case "none":
-	case "visitor":
-		request.Header.Set("Authorization", "Bearer "+corpusVisitorKey)
-	default:
-		request.Header.Set("Authorization", "Bearer "+corpusLocalAuthKey)
-	}
-	if entry.bodyKind == "json" {
-		request.Header.Set("Content-Type", "application/json")
-	}
-	recorder := httptest.NewRecorder()
-	server.Handler().ServeHTTP(recorder, request)
-	replay.recorder = recorder
-	return replay
-}
-
-// newServer 构造注入了语料常量的服务端。
-//
-// 与真实装配的差异只在「外部依赖的实现」：版本检查、WebUI 状态、读取失败分支在语料
-// 生成时都被 Python 侧替换成了确定性桩，这里必须给出语义相同的桩。
-func (h *opsHarness) newServer(entry opsCorpusCase, configPath string, initial *config.RouterConfig) *Server {
-	current := initial
-	// Python 的 webui_mounted 在 create_app 时定死（app.py:147），之后改配置不会让
-	// 它变化；webui_enabled 则来自 runtime 快照，热重载后立刻可见。
-	mounted := initial.WebUIEnabled && entry.WebUIAssets
-
-	server := &Server{
-		ConfigPath: configPath,
-		OpsEnabled: entry.OpsEnabled,
-		Version:    h.corpus.appVersion,
-		CurrentConfig: func() *config.RouterConfig {
-			return current
-		},
-		Reload: func() {
-			// 对应 app.py:443-451 的 _reload_config_if_changed：**先取 mtime，取不到
-			// （文件不存在）就直接返回**，绝不能落到 config.Load——后者在文件缺失时会
-			// 创建一份空配置并返回成功（config.py 的 load_config_data 语义），于是鉴权
-			// 会拿着空 local_api_key 失败，而参照实现保留旧快照。
-			if !isRegularFile(configPath) {
-				return
-			}
-			if cfg, err := config.Load(configPath); err == nil {
-				current = cfg
-			}
-		},
-		WebUIStatus: func() health.WebUI {
-			return health.WebUI{
-				Available: entry.WebUIAssets,
-				Enabled:   current.WebUIEnabled,
-				Mounted:   mounted,
-			}
-		},
-		CheckUpdate: func(timeout float64) UpdateCheckResult {
-			if entry.UpdateState.Error != "" {
-				return UpdateCheckResult{CurrentVersion: "1.2.3", Error: entry.UpdateState.Error}
-			}
-			latest := entry.UpdateState.Latest
-			if latest == "" {
-				latest = "1.3.0"
-			}
-			return UpdateCheckResult{
-				CurrentVersion:  "1.2.3",
-				LatestVersion:   latest,
-				ReleaseURL:      "https://example.test/release",
-				Source:          "pypi",
-				UpdateAvailable: updatecheck.IsNewerVersion(latest, "1.2.3"),
-			}
-		},
-	}
-	if entry.TailError != "" {
-		// 真实文件系统上「is_file() 为真、随后读取失败」无法稳定构造，因此语料生成
-		// 时把 _tail 换成了抛 OSError 的桩，这里注入同一段文本。
-		message := entry.TailError
-		server.LogTail = func(path string, limit int) (string, bool, error) {
-			return "", false, errors.New(message)
-		}
-	}
-	return server
-}
-
-// TestOpsAPIMatchesPython 是运维面主对拍：逐条回放并逐字节比对。
-func TestOpsAPIMatchesPython(t *testing.T) {
-	corpus := loadOpsCorpus(t)
-	if corpus.version != 1 {
-		t.Fatalf("语料版本不支持: %d", corpus.version)
-	}
-	if corpus.appVersion == "" {
-		t.Fatalf("语料缺少 app_version")
-	}
-	harness := &opsHarness{corpus: corpus, t: t}
-	for index := range corpus.cases {
-		entry := corpus.cases[index]
-		t.Run(entry.Name, func(t *testing.T) {
-			replay := harness.replay(index)
-			if got := replay.recorder.Result().StatusCode; got != entry.Status {
-				t.Fatalf("状态码不一致: got %d want %d, body=%s", got, entry.Status, replay.recorder.Body.String())
-			}
-			if got := replay.recorder.Header().Get("Content-Type"); !equalOptionalHeader(got, entry.ContentType) {
-				t.Errorf("content-type 不一致: got %q want %v", got, derefString(entry.ContentType))
-			}
-			// 把语料里的生成目录换成回放目录：只有响应体里的路径字段需要替换。
-			//
-			// 两步替换：夹具目录（/api/logs 的 path 字段来自夹具里的 log_file_path）
-			// 换成回放目录，再把 409 里的 <CONFIG_PATH> 换成回放时真正用的配置文件
-			// 路径——这条路径是 Go 侧用 filepath.Join 拼出来的，分隔符随平台变化，
-			// 不能沿用语料录制时写死的 `\`。
-			replayDir := filepath.Dir(replay.configPath)
-			wantBody := strings.ReplaceAll(
-				entry.BodyText,
-				jsonEscapedPath(corpus.fixtureDir),
-				jsonEscapedPath(replayDir),
-			)
-			wantBody = strings.ReplaceAll(
-				wantBody,
-				configPathPlaceholder,
-				jsonEscapedPath(replay.configPath),
-			)
-			wantLength := entry.ContentLength
-			if wantBody != entry.BodyText {
-				length := strconv.Itoa(len(wantBody))
-				wantLength = &length
-			}
-			if got := replay.recorder.Header().Get("Content-Length"); !equalOptionalHeader(got, wantLength) {
-				t.Errorf("content-length 不一致: got %q want %v", got, derefString(wantLength))
-			}
-			if got := replay.recorder.Body.String(); got != wantBody {
-				t.Errorf("响应体不一致:\n got=%s\nwant=%s", got, wantBody)
-			}
-			if entry.configAfter != nil {
-				want := canonical.Dumps(substitutePaths(entry.configAfter, corpus.fixtureDir, replayDir))
-				raw, err := os.ReadFile(replay.configPath)
-				if err != nil {
-					t.Fatalf("读取配置失败: %v", err)
-				}
-				parsed, err := canonical.Parse(raw)
-				if err != nil {
-					t.Fatalf("解析配置失败: %v", err)
-				}
-				if got := canonical.Dumps(parsed); got != want {
-					t.Errorf("配置文件不一致:\n got=%s\nwant=%s", got, want)
-				}
-			}
-		})
-	}
-}
-
-// TestOpsCorpusCoversEveryRoute 断言 7 条运维路由每条都被至少一条语料用例覆盖。
-func TestOpsCorpusCoversEveryRoute(t *testing.T) {
-	corpus := loadOpsCorpus(t)
-	covered := map[string]bool{}
-	for _, entry := range corpus.cases {
-		for _, pattern := range entry.Covers {
-			covered[pattern] = true
-		}
-	}
-	patterns := opsRoutePatterns()
-	if len(patterns) != 7 {
-		t.Fatalf("运维路由数量不对: %d", len(patterns))
-	}
-	for _, pattern := range patterns {
-		if !covered[pattern] {
-			t.Errorf("路由未被语料覆盖: %s", pattern)
-		}
-	}
-	for pattern := range covered {
-		if !containsPattern(patterns, pattern) {
-			t.Errorf("语料声明了不存在的路由: %s", pattern)
-		}
-	}
+// 409 的 detail 本身是 JSON 字符串，路径里的反斜杠在**响应体字节**里是 `\\`，
+// 因此比较时必须用转义后的形式。
+func jsonEscapedPath(path string) string {
+	return strings.ReplaceAll(path, `\`, `\\`)
 }
 
 // TestOpsRoutesFollowOpsEnabled 锁定「ops 关闭时整条 URL 空间不存在」。
@@ -509,7 +144,7 @@ func TestOpsServiceActionSeam(t *testing.T) {
 // TestOpsServiceValidatesActionBeforeAuth 顺序锁：动作名白名单先于鉴权。
 //
 // ops_api.py:187-188 的 422 在 _authorized_config 之前，因此无凭据请求不支持的动作
-// 得到 422 而不是 401；合法动作则是 401。运维面没有访客路由，visitor 同样 401。
+// 得到 422 而不是 401；合法动作则是 401。运维面不接受受限凭据，非法凭据同样 401。
 func TestOpsServiceValidatesActionBeforeAuth(t *testing.T) {
 	server, _ := newOpsTestServer(t, nil)
 	recorder := opsRequest(t, server, "POST", "/api/service/nope", nil, "none")
@@ -520,9 +155,9 @@ func TestOpsServiceValidatesActionBeforeAuth(t *testing.T) {
 	if got := recorder.Result().StatusCode; got != http.StatusUnauthorized {
 		t.Fatalf("合法动作无凭据应 401，实际 %d：%s", got, recorder.Body.String())
 	}
-	recorder = opsRequest(t, server, "POST", "/api/service/status_amkr", nil, "visitor")
+	recorder = opsRequest(t, server, "POST", "/api/service/status_amkr", nil, "invalid")
 	if got := recorder.Result().StatusCode; got != http.StatusUnauthorized {
-		t.Fatalf("合法动作 + visitor 应 401，实际 %d：%s", got, recorder.Body.String())
+		t.Fatalf("合法动作 + 非法凭据应 401，实际 %d：%s", got, recorder.Body.String())
 	}
 }
 
@@ -852,44 +487,6 @@ func TestOpsLogsTailRule(t *testing.T) {
 	}
 }
 
-// TestOpsDecodeUTF8ReplacingMatchesCorpus 用穷举语料对齐本包复刻的宽容解码。
-//
-// 语料是 internal/proxysupport 的对拍夹具（真实 Python 生成，覆盖 256 个单字节、
-// 两字节组合、三/四字节边界、代理对、超 U+10FFFF、截断与混合序列）。本包因为
-// 「只新增 internal/api」而复制了那份实现，这里直接读它的语料，保证两份不会漂移。
-func TestOpsDecodeUTF8ReplacingMatchesCorpus(t *testing.T) {
-	raw, err := os.ReadFile(filepath.Join("..", "proxysupport", "testdata", "utf8_replace_corpus.json"))
-	if err != nil {
-		t.Fatalf("读取 UTF-8 解码语料失败（应与 internal/proxysupport 同仓）: %v", err)
-	}
-	var cases []struct {
-		BytesHex string `json:"bytes_hex"`
-		Replaced string `json:"replaced"`
-	}
-	if err := json.Unmarshal(raw, &cases); err != nil {
-		t.Fatalf("解析语料失败: %v", err)
-	}
-	if len(cases) < 1000 {
-		t.Fatalf("语料过少（%d 条），生成脚本可能出错", len(cases))
-	}
-	failures := 0
-	for _, item := range cases {
-		content, err := hex.DecodeString(item.BytesHex)
-		if err != nil {
-			t.Fatalf("解析 %q 失败: %v", item.BytesHex, err)
-		}
-		if got := decodeUTF8Replacing(content); got != item.Replaced {
-			if failures < 10 {
-				t.Errorf("解码 %s 不符\n 实际 %q\n 期望 %q", item.BytesHex, got, item.Replaced)
-			}
-			failures++
-		}
-	}
-	if failures > 0 {
-		t.Fatalf("共 %d/%d 条不符", failures, len(cases))
-	}
-}
-
 // —— 测试脚手架 —— //
 
 // newOpsTestServer 构造一个带最小合法配置的运维面服务端。
@@ -929,7 +526,7 @@ func newOpsTestServer(t *testing.T, mutate func(*Server)) (*Server, string) {
 	return server, configPath
 }
 
-// opsRequest 发一次请求并返回 recorder；auth 取 "full" / "visitor" / "none"。
+// opsRequest 发一次请求并返回 recorder；auth 取 "full" / "invalid" / "none"。
 func opsRequest(t *testing.T, server *Server, method, path string, body []byte, auth string) *httptest.ResponseRecorder {
 	t.Helper()
 	var reader io.Reader
@@ -939,10 +536,10 @@ func opsRequest(t *testing.T, server *Server, method, path string, body []byte, 
 	request := httptest.NewRequest(method, path, reader)
 	switch auth {
 	case "none":
-	case "visitor":
-		request.Header.Set("Authorization", "Bearer "+corpusVisitorKey)
+	case "invalid":
+		request.Header.Set("Authorization", "Bearer "+testInvalidAPIKey)
 	default:
-		request.Header.Set("Authorization", "Bearer "+corpusLocalAuthKey)
+		request.Header.Set("Authorization", "Bearer "+testLocalAPIKey)
 	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")

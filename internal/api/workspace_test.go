@@ -38,7 +38,8 @@ const workspaceFixture = `{
     "model-b": {"targets": [{"provider": "prov-a", "key": "key-a", "upstream_model": "model-b"}]}
   },
   "tasks": {"shared": {"model": "model-a"}, "default-only": {"model": "model-b"}},
-  "workspaces": {"teamA": {"tasks": {"team-a-only": {"model": "model-b"}}}}
+  "workspaces": {"teamA": {"tasks": {"team-a-only": {"model": "model-b"}}}},
+  "access_keys": {"trial": {"name": "试用", "key": "amkr_ak_taken"}}
 }`
 
 // workspaceServer 装配一个指向临时配置文件的 Server，返回它与配置文件路径。
@@ -63,7 +64,7 @@ func callTasks(t *testing.T, server *Server, method, path, workspace, body strin
 		reader = strings.NewReader(body)
 	}
 	request := httptest.NewRequest(method, path, reader)
-	request.Header.Set("Authorization", "Bearer "+corpusLocalAuthKey)
+	request.Header.Set("Authorization", "Bearer "+testLocalAPIKey)
 	if body != "" {
 		request.Header.Set("Content-Type", "application/json")
 	}

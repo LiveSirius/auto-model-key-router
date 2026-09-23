@@ -118,7 +118,6 @@ var specKeyCreate = newModelSpec("KeyCreate",
 	req("api_key", kindStr).minLenOf(1),
 	nul("base_url", kindStr),
 	def("enabled", kindBool),
-	def("allow_visitor", kindBool),
 	nul("upstream_routes", kindStrOrNullMap),
 )
 
@@ -129,7 +128,6 @@ var specKeyUpdate = newModelSpec("KeyUpdate",
 	nul("api_key", kindStr).minLenOf(1),
 	nul("base_url", kindStr),
 	nul("enabled", kindBool),
-	nul("allow_visitor", kindBool),
 	nul("upstream_routes", kindStrOrNullMap),
 )
 
@@ -285,6 +283,40 @@ var specWorkspaceImport = newModelSpec("WorkspaceImport",
 	nul("prefix", kindStr).minLenOf(1),
 )
 
+// —— 访问密钥（Go 侧新增，取代已删除的访客模式）——
+
+// specAccessKeyCreate 是新建访问密钥请求体。
+//
+// name 必填（列表里要有个可读标签）；key 可选，不传由服务端生成。
+//
+// providers / models 用 kindStrList 而不是带 nullable 的必填字段：这里的「不传」与
+// 「传 null」都表示**本次不设这份清单**（不限制）。三态中的「清除限制」只出现在更新
+// 接口上（见 specAccessKeyUpdate），新建时没有「清除」可言。
+var specAccessKeyCreate = newModelSpec("AccessKeyCreate",
+	req("config_revision", kindStr).minLenOf(1),
+	req("name", kindStr).minLenOf(1),
+	nul("key", kindStr).minLenOf(1),
+	def("enabled", kindBool),
+	nul("providers", kindStrList),
+	nul("models", kindStrList),
+)
+
+// specAccessKeyUpdate 是修改访问密钥请求体。
+//
+// providers / models 必填但可为 null，与 specWorkspaceModels 同一套三态：
+//   - `[...]` 限定为这些；
+//   - `[]`  一个都不许；
+//   - `null` 清除清单，回到「不限制」。
+//
+// 必填是为了不让「漏传字段」被当成「清除限制」——那是把一条授权悄悄放宽。
+var specAccessKeyUpdate = newModelSpec("AccessKeyUpdate",
+	req("config_revision", kindStr).minLenOf(1),
+	nul("name", kindStr).minLenOf(1),
+	nul("enabled", kindBool),
+	fieldSpec{name: "providers", kind: kindStrList, required: true, nullable: true},
+	fieldSpec{name: "models", kind: kindStrList, required: true, nullable: true},
+)
+
 // specProviderCreate 对应 ProviderCreate。
 var specProviderCreate = newModelSpec("ProviderCreate",
 	req("config_revision", kindStr).minLenOf(1),
@@ -306,7 +338,6 @@ var specProviderKeyCreate = newModelSpec("ProviderKeyCreate",
 	req("name", kindStr).minLenOf(1),
 	req("api_key", kindStr).minLenOf(1),
 	def("enabled", kindBool),
-	def("allow_visitor", kindBool),
 )
 
 // specProviderKeyUpdate 对应 ProviderKeyUpdate。
@@ -315,7 +346,6 @@ var specProviderKeyUpdate = newModelSpec("ProviderKeyUpdate",
 	nul("name", kindStr).minLenOf(1),
 	nul("api_key", kindStr).minLenOf(1),
 	nul("enabled", kindBool),
-	nul("allow_visitor", kindBool),
 )
 
 // specProviderKeyProbeRequest 对应 ProviderKeyProbeRequest。

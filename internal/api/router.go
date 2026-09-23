@@ -43,6 +43,19 @@ func (s *Server) register(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/workspaces/export", s.handleExportWorkspaces)
 	mux.HandleFunc("POST /api/workspaces/import", s.handleImportWorkspaces)
 
+	// —— 访问密钥（Go 侧新增，取代已删除的访客模式）——
+	//
+	// 与工作空间同属「Go 侧新增能力」，因此同样登记在 workspacePatterns 里（那份清单
+	// 描述的是**参照实现没有的 /api 能力**，不只是工作空间）。
+	//
+	// rotate 是子资源动作，放在 /{key_id}/rotate：换 key 与改清单的后果不同（前者让
+	// 调用方手里那把立刻失效），必须是可单独调用的端点。
+	mux.HandleFunc("GET /api/access-keys", s.handleListAccessKeys)
+	mux.HandleFunc("POST /api/access-keys", s.handleCreateAccessKey)
+	mux.HandleFunc("PUT /api/access-keys/{key_id}", s.handleUpdateAccessKey)
+	mux.HandleFunc("DELETE /api/access-keys/{key_id}", s.handleDeleteAccessKey)
+	mux.HandleFunc("POST /api/access-keys/{key_id}/rotate", s.handleRotateAccessKey)
+
 	// —— 设置 ——
 	mux.HandleFunc("GET /api/settings", s.handleGetSettings)
 	mux.HandleFunc("PUT /api/settings", s.handleUpdateSettings)
@@ -140,20 +153,24 @@ func routePatterns() []string {
 	}
 }
 
-// workspacePatterns 列出 Go 侧新增的工作空间路由。
+// workspacePatterns 列出 Go 侧新增的 /api 路由（工作空间、访问密钥）。
+//
+// 名字保留 workspacePatterns 是因为工作空间是这批里最大的一块，且测试与文档都按这个
+// 名字引用它；它描述的是「参照实现没有的 /api 能力」，不只是工作空间。
 //
 // 与 routePatterns 分开的**唯一理由是语料**：那 47 条由已退役的参照实现产出，是
-// 本项目兼容性的凭证；工作空间在 Python 侧没有对应实现，因此没有可比对的 oracle，
-// 给它补一条 /api 语料等于伪造兼容性证据。分开之后 47 条那份仍然逐字节受锁，新增
-// 能力则由 workspace_test.go 自己钉形状。
+// 本项目兼容性的凭证；工作空间与访问密钥在 Python 侧没有对应实现，因此没有可比对的
+// oracle，给它补一条 /api 语料等于伪造兼容性证据。分开之后 47 条那份仍然逐字节受锁，
+// 新增能力则由各自的测试自己钉形状。
 //
-// 仍然注册在同一棵 mux 上（而不是像 /ui/pricing.json 那样挂到别处）：工作空间已经是
+// 仍然注册在同一棵 mux 上（而不是像 /ui/pricing.json 那样挂到别处）：这些已经是
 // 管理面的正式资源，与 /api/tasks 同级；挂在 /ui/ 下会让「管理面必须开 WebUI 才能
 // 用」——那是当初为了绕开语料冻结而付的代价，现在没有理由继续付。
 //
 // 有 POST：应用侧需要「先建空间拿 key、之后才填任务」，因此工作空间有了自己的显式
 // 创建入口（空分组本不进配置，见 configops.writeWorkspaceTasks）。POST 建出的空间
-// 带 api_key，任务删光了也留得住；不带 key 的空壳依然不存在。
+// 带 api_key，任务删光了也留得住；不带 key 的空壳依然不存在。访问密钥同理：POST 是
+// 唯一能拿到明文 key 的入口。
 //
 // 两条迁移路由也在这一批：它们**带**面板 key（与 /api/config/export 相反），是「把
 // 空间整体搬到另一个实例」的独立通道，见 configops/workspace_bundle.go。
@@ -170,5 +187,10 @@ func workspacePatterns() []string {
 		"PUT /api/workspaces/{workspace}/models",
 		"POST /api/workspaces/export",
 		"POST /api/workspaces/import",
+		"GET /api/access-keys",
+		"POST /api/access-keys",
+		"PUT /api/access-keys/{key_id}",
+		"DELETE /api/access-keys/{key_id}",
+		"POST /api/access-keys/{key_id}/rotate",
 	}
 }
