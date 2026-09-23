@@ -187,14 +187,9 @@ func migrateLegacyListLayout(migrated, models, raw *canonical.Value) error {
 			if value, ok := rawKey.LookupOK("enabled"); ok {
 				enabled = value.Truthy()
 			}
-			allowVisitor := false
-			if value, ok := rawKey.LookupOK("allow_visitor"); ok {
-				allowVisitor = value.Truthy()
-			}
 			providerKeys.SetKey(keyName, canonical.NewObjectOf(
 				canonical.ObjectPair{Key: "api_key", Value: canonical.NewString(apiKey)},
 				canonical.ObjectPair{Key: "enabled", Value: canonical.NewBool(enabled)},
-				canonical.ObjectPair{Key: "allow_visitor", Value: canonical.NewBool(allowVisitor)},
 			))
 
 			upstreamModel := strings.TrimSpace(rawKey.Lookup("upstream_model").StringValue())

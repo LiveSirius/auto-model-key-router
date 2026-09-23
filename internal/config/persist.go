@@ -62,6 +62,19 @@ func GenerateInferenceKey() (string, error) {
 	return "amkr_ik_" + base64.RawURLEncoding.EncodeToString(randomBytes), nil
 }
 
+// GenerateAccessKey 生成访问密钥，格式 "amkr_ak_" + 43 字符 base64url。
+//
+// 与 GenerateInferenceKey 同一套随机源与编码，只换前缀。访问密钥会被分发给实例外部
+// 的使用者，因此前缀必须让它一眼可辨——把一把受限密钥误当成 local_api_key 来对待
+// （或反过来）都是严重误配。
+func GenerateAccessKey() (string, error) {
+	randomBytes := make([]byte, 32)
+	if _, err := rand.Read(randomBytes); err != nil {
+		return "", err
+	}
+	return AccessKeyPrefix + base64.RawURLEncoding.EncodeToString(randomBytes), nil
+}
+
 // EmptyConfigDict 返回新建配置的默认内容。
 //
 // 字段顺序与参照实现一致：它决定落盘文件的键序（保存时用 indent=2 且不排序），

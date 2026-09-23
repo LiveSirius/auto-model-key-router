@@ -12,8 +12,15 @@ const CONFIG_VERSION = 4
 // UNIFIED_MODEL_ID 是 unified_model 伪模型的保留名称。
 const UNIFIED_MODEL_ID = "unified-model"
 
-// VISITOR_API_KEY 是访客模式的保留 key（见 visitor.go）。
-const VISITOR_API_KEY = "amkr-visitor"
+// AccessKeyPrefix 是访问密钥的前缀。
+//
+// 与工作空间的两把 key 同一套形状（前缀 + 43 字符 base64url），只换前缀：访问密钥
+// 会被到处分发（贴进项目环境变量、交给外部协作者），必须一眼能与「本机主凭据」区分
+// 开——它们泄漏的后果差一个数量级。
+const AccessKeyPrefix = "amkr_ak_"
+
+// DefaultAccessKeyName 是未指定名称时给访问密钥的兜底名。
+const DefaultAccessKeyName = "访问密钥"
 
 // reasoningEfforts 是允许的推理强度取值。
 var reasoningEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}

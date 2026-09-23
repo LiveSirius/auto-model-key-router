@@ -156,6 +156,3 @@ func DefaultLogFilePath() (string, error) {
 	}
 	return filepath.Join(cacheDir, "server.log"), nil
 }
-
-// VisitorAPIKey 是访客模式的保留 key。
-const VisitorAPIKey = VISITOR_API_KEY

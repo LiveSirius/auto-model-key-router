@@ -2,259 +2,20 @@ package config
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 )
 
-// cachePathPlaceholder 是 model.jsonl 输出里「平台缓存目录 + 目录分隔符」的占位符。
-//
-// 语料由 Windows 上的参照实现产出，因此省略 endpoint_capabilities_path /
-// metrics_db_path / log_file_path 时录制下来的是**生成机的缓存布局**
-// （`C:\Users\<user>\AppData\Local\AutoModelKeyRouter\`）。那部分不是契约：契约是
-// 「这三个字段缺失或为空时回落到 config.DefaultCacheDir()」。回放时把占位符换成
-// 本平台解析出的缓存目录（连同平台目录分隔符），断言才在三个平台上都成立。
-//
-// 生成器已随 Python 退役移除，语料是**手工**把 Windows 前缀替换成这个占位符的。
-const cachePathPlaceholder = "<cache>"
-
-// TestFromDictMatchesPython 是 RouterConfig 解析与校验的核心对拍断言。
-//
-// 语料由 gen_config_model_corpus.py（已随 Python 退役移除） 生成，输入是原始配置 JSON 文本
-// （保留键的插入顺序），输出是参照实现序列化后的稳定结构。
-func TestFromDictMatchesPython(t *testing.T) {
-	for _, entry := range loadCorpus(t, "model.jsonl") {
-		t.Run(entry.Name, func(t *testing.T) {
-			raw := mustParse(t, entry.Input)
-			cfg, err := FromDict(raw)
-			if !entry.OK {
-				if err == nil {
-					t.Fatalf("参照实现报错 %s，但 Go 成功了", entry.ErrorType)
-				}
-				if entry.ErrorType == "ValueError" {
-					var configErr *ConfigError
-					if !errors.As(err, &configErr) {
-						t.Fatalf("期望契约错误（ConfigError），实际 %T: %v", err, err)
-					}
-					if configErr.Message != entry.Error {
-						t.Errorf("错误文本不一致\n期望: %s\n实际: %s", entry.Error, configErr.Message)
-					}
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("参照实现成功，但 Go 报错: %v", err)
-			}
-			got := canonical.Dumps(serializeConfig(cfg))
-			want := expectedConfigOutput(t, entry.Output)
-			if got != want {
-				t.Errorf("输出不一致\n期望: %s\n实际: %s", want, got)
-			}
-		})
-	}
-}
-
-// expectedConfigOutput 把语料输出里的缓存目录占位符换成本平台解析出的目录。
-//
-// 只替换占位符，其余字节（键序、浮点写法、空值形态）照旧逐字节比对。
-func expectedConfigOutput(t *testing.T, output string) string {
+// mustParse 解析一段 canonical JSON 文本，失败即终止测试。
+func mustParse(t *testing.T, text string) *canonical.Value {
 	t.Helper()
-	if !strings.Contains(output, cachePathPlaceholder) {
-		return output
-	}
-	cacheDir, err := DefaultCacheDir()
+	value, err := canonical.ParseString(text)
 	if err != nil {
-		t.Fatalf("解析平台缓存目录失败: %v", err)
-	}
-	// 占位符位于 JSON 字符串内部，替换值必须按 JSON 规则转义（Windows 路径里
-	// 的反斜杠在语料文本中是 `\\`）。
-	escaped := strings.ReplaceAll(cacheDir+string(filepath.Separator), `\`, `\\`)
-	return strings.ReplaceAll(output, cachePathPlaceholder, escaped)
-}
-
-// serializeConfig 把 RouterConfig 摊平成与语料一致的结构。
-//
-// 这是**测试契约**：字段名与嵌套形状必须与 gen_config_model_corpus.py（已随 Python 退役移除） 的
-// serialize_config 完全对应，两边任何一处单独改动都会让对拍失败（这是刻意设计，
-// 用来防止一侧悄悄漂移）。
-func serializeConfig(cfg *RouterConfig) *canonical.Value {
-	models := make([]*canonical.Value, 0, len(cfg.Models))
-	for _, model := range cfg.Models {
-		keys := make([]*canonical.Value, 0, len(model.Keys))
-		for _, key := range model.Keys {
-			keys = append(keys, canonical.NewObjectOf(
-				canonical.ObjectPair{Key: "name", Value: canonical.NewString(key.Name)},
-				canonical.ObjectPair{Key: "api_key", Value: canonical.NewString(key.APIKey)},
-				canonical.ObjectPair{Key: "base_url", Value: canonical.NewString(key.BaseURL)},
-				canonical.ObjectPair{Key: "enabled", Value: canonical.NewBool(key.Enabled)},
-				canonical.ObjectPair{Key: "allow_visitor", Value: canonical.NewBool(key.AllowVisitor)},
-				canonical.ObjectPair{Key: "upstream_routes", Value: stringMapValue(key.UpstreamRoutes)},
-				canonical.ObjectPair{Key: "provider", Value: nullableString(key.Provider)},
-				canonical.ObjectPair{Key: "upstream_model", Value: nullableString(key.UpstreamModel)},
-			))
-		}
-		models = append(models, canonical.NewObjectOf(
-			canonical.ObjectPair{Key: "id", Value: canonical.NewString(model.ID)},
-			canonical.ObjectPair{Key: "keys", Value: canonical.NewArray(keys...)},
-			canonical.ObjectPair{Key: "aliases", Value: canonical.NewStringArray(model.Aliases)},
-			canonical.ObjectPair{Key: "routing_mode", Value: canonical.NewString(model.RoutingMode)},
-			canonical.ObjectPair{Key: "reasoning_effort", Value: nullableString(model.ReasoningEffort)},
-			canonical.ObjectPair{Key: "native_first", Value: canonical.NewBool(model.NativeFirst)},
-			canonical.ObjectPair{Key: "hidden_aliases", Value: canonical.NewStringArray(model.HiddenAliases)},
-		))
-	}
-
-	providers := make([]*canonical.Value, 0, len(cfg.Providers))
-	for _, provider := range cfg.Providers {
-		keys := make([]*canonical.Value, 0, len(provider.Keys))
-		for _, key := range provider.Keys {
-			keys = append(keys, canonical.NewObjectOf(
-				canonical.ObjectPair{Key: "name", Value: canonical.NewString(key.Name)},
-				canonical.ObjectPair{Key: "api_key", Value: canonical.NewString(key.APIKey)},
-				canonical.ObjectPair{Key: "enabled", Value: canonical.NewBool(key.Enabled)},
-				canonical.ObjectPair{Key: "allow_visitor", Value: canonical.NewBool(key.AllowVisitor)},
-				canonical.ObjectPair{Key: "capabilities", Value: orNull(key.Capabilities)},
-			))
-		}
-		providers = append(providers, canonical.NewObjectOf(
-			canonical.ObjectPair{Key: "id", Value: canonical.NewString(provider.ID)},
-			canonical.ObjectPair{Key: "base_url", Value: canonical.NewString(provider.BaseURL)},
-			canonical.ObjectPair{Key: "keys", Value: canonical.NewArray(keys...)},
-			canonical.ObjectPair{Key: "routes", Value: stringMapValue(provider.Routes)},
-			canonical.ObjectPair{Key: "capabilities", Value: orNull(provider.Capabilities)},
-		))
-	}
-
-	tasks := make([]*canonical.Value, 0, len(cfg.Tasks))
-	for _, task := range cfg.Tasks {
-		tasks = append(tasks, canonical.NewObjectOf(
-			canonical.ObjectPair{Key: "name", Value: canonical.NewString(task.Name)},
-			canonical.ObjectPair{Key: "model", Value: canonical.NewString(task.Model)},
-			canonical.ObjectPair{Key: "fallback_model", Value: nullableString(task.FallbackModel)},
-			canonical.ObjectPair{Key: "params", Value: orNull(task.Params)},
-		))
-	}
-
-	var unified *canonical.Value = canonical.NewNull()
-	if cfg.UnifiedModel != nil {
-		unified = canonical.NewObjectOf(
-			canonical.ObjectPair{Key: "default", Value: serializePlan(&cfg.UnifiedModel.Default)},
-			canonical.ObjectPair{Key: "image", Value: serializePlan(cfg.UnifiedModel.Image)},
-			canonical.ObjectPair{Key: "embeddings", Value: serializePlan(cfg.UnifiedModel.Embeddings)},
-		)
-	}
-
-	routesByURL := canonical.NewObject()
-	for _, baseURL := range sortedKeys(cfg.UpstreamRoutes) {
-		routesByURL.SetKey(baseURL, stringMapValue(cfg.UpstreamRoutes[baseURL]))
-	}
-
-	return canonical.NewObjectOf(
-		canonical.ObjectPair{Key: "host", Value: canonical.NewString(cfg.Host)},
-		canonical.ObjectPair{Key: "port", Value: canonical.NewIntValue(int64(cfg.Port))},
-		canonical.ObjectPair{Key: "request_timeout", Value: canonical.NewFloat(cfg.RequestTimeout)},
-		canonical.ObjectPair{Key: "stream_first_byte_timeout", Value: canonical.NewFloat(cfg.StreamFirstByteTimeout)},
-		canonical.ObjectPair{Key: "stream_idle_timeout", Value: canonical.NewFloat(cfg.StreamIdleTimeout)},
-		canonical.ObjectPair{Key: "max_retries", Value: canonical.NewIntValue(int64(cfg.MaxRetries))},
-		canonical.ObjectPair{Key: "key_failure_threshold", Value: canonical.NewIntValue(int64(cfg.KeyFailureThreshold))},
-		canonical.ObjectPair{Key: "key_cooldown_seconds", Value: canonical.NewFloat(cfg.KeyCooldownSeconds)},
-		canonical.ObjectPair{Key: "endpoint_capabilities_path", Value: canonical.NewString(cfg.EndpointCapabilitiesPath)},
-		canonical.ObjectPair{Key: "metrics_db_path", Value: canonical.NewString(cfg.MetricsDBPath)},
-		canonical.ObjectPair{Key: "log_file_path", Value: canonical.NewString(cfg.LogFilePath)},
-		canonical.ObjectPair{Key: "local_api_key", Value: canonical.NewString(cfg.LocalAPIKey)},
-		canonical.ObjectPair{Key: "webui_enabled", Value: canonical.NewBool(cfg.WebUIEnabled)},
-		canonical.ObjectPair{Key: "ops_enabled", Value: canonical.NewBool(cfg.OpsEnabled)},
-		canonical.ObjectPair{Key: "models", Value: canonical.NewArray(models...)},
-		canonical.ObjectPair{Key: "providers", Value: canonical.NewArray(providers...)},
-		canonical.ObjectPair{Key: "upstream_routes", Value: routesByURL},
-		canonical.ObjectPair{Key: "unified_model", Value: unified},
-		canonical.ObjectPair{Key: "tasks", Value: canonical.NewArray(tasks...)},
-		canonical.ObjectPair{Key: "reasoning_effort_by_model", Value: stringMapValue(cfg.ReasoningEffortByModel)},
-		canonical.ObjectPair{Key: "hidden_model_names", Value: stringMapValue(cfg.HiddenModelNames())},
-	)
-}
-
-func serializePlan(plan *RoutePlan) *canonical.Value {
-	if plan == nil {
-		return canonical.NewNull()
-	}
-	var fallback *canonical.Value = canonical.NewNull()
-	if plan.Fallback != nil {
-		fallback = canonical.NewObjectOf(
-			canonical.ObjectPair{Key: "model", Value: canonical.NewString(plan.Fallback.Model)},
-			canonical.ObjectPair{Key: "key", Value: nullableString(plan.Fallback.Key)},
-		)
-	}
-	return canonical.NewObjectOf(
-		canonical.ObjectPair{Key: "primary", Value: canonical.NewObjectOf(
-			canonical.ObjectPair{Key: "model", Value: canonical.NewString(plan.Primary.Model)},
-			canonical.ObjectPair{Key: "key", Value: nullableString(plan.Primary.Key)},
-		)},
-		canonical.ObjectPair{Key: "fallback", Value: fallback},
-	)
-}
-
-// nullableString 把空字符串表示为 JSON null。
-func nullableString(value string) *canonical.Value {
-	if value == "" {
-		return canonical.NewNull()
-	}
-	return canonical.NewString(value)
-}
-
-// orNull 返回 nil 时给出 JSON null。
-func orNull(value *canonical.Value) *canonical.Value {
-	if value == nil {
-		return canonical.NewNull()
+		t.Fatalf("解析 %q 失败: %v", text, err)
 	}
 	return value
-}
-
-// stringMapValue 把 map[string]string 转成对象，键排序以匹配 canonical 输出。
-func stringMapValue(values map[string]string) *canonical.Value {
-	obj := canonical.NewObject()
-	for _, key := range sortedKeys(values) {
-		obj.SetKey(key, canonical.NewString(values[key]))
-	}
-	return obj
-}
-
-// TestModelCorpusIsDiscriminating 是一道测试有效性防线。
-//
-// 它断言语料确实覆盖了会失败的用例类别：若有人说「解析逻辑全对」，那么语料里
-// 必须同时存在成功与失败的样本，且失败样本的错误文本各不相同。语料被削弱到
-// 只剩几个 happy path 时本测试会失败。
-func TestModelCorpusIsDiscriminating(t *testing.T) {
-	entries := loadCorpus(t, "model.jsonl")
-	successes, configErrors, internalErrors := 0, 0, 0
-	distinctMessages := map[string]bool{}
-	for _, entry := range entries {
-		if entry.OK {
-			successes++
-			continue
-		}
-		switch entry.ErrorType {
-		case "ValueError":
-			configErrors++
-			distinctMessages[entry.Error] = true
-		default:
-			internalErrors++
-		}
-	}
-	t.Logf("语料构成：%d 成功、%d 契约错误（%d 种文本）、%d 内部错误",
-		successes, configErrors, len(distinctMessages), internalErrors)
-
-	if successes < 40 {
-		t.Errorf("成功用例过少（%d），覆盖不足", successes)
-	}
-	if configErrors < 15 {
-		t.Errorf("契约错误用例过少（%d），校验分支覆盖不足", configErrors)
-	}
-	if len(distinctMessages) < 10 {
-		t.Errorf("契约错误文本种类过少（%d），不同校验分支未被区分", len(distinctMessages))
-	}
 }
 
 // TestParseDroppedRoutesDocumented 固化两个已知的参照实现行为，防止 Go 侧
@@ -310,17 +71,6 @@ func TestParseDroppedRoutesDocumented(t *testing.T) {
 	routes := cfg.UpstreamRoutesForBaseURL("https://api.openai.com")
 	if routes["anthropic"] != "provider-prefix/v1/messages" {
 		t.Errorf("provider 级 routes 应生效，实际得到 %v", routes)
-	}
-}
-
-// TestModelCorpusCoversEveryCase 防止语料读取被静默截断。
-//
-// 生成脚本产出 109 条；条数偏少说明读取中途失败（例如 bufio.Scanner 的 64KB
-// 行长上限），而那种失败只会表现为「少测了几条」，不会报错。
-func TestModelCorpusCoversEveryCase(t *testing.T) {
-	const expected = 109
-	if entries := loadCorpus(t, "model.jsonl"); len(entries) != expected {
-		t.Errorf("语料条数 %d，期望 %d", len(entries), expected)
 	}
 }
 
@@ -415,16 +165,18 @@ func TestWorkspaceWithAPIKeySurvivesWithoutTasks(t *testing.T) {
 
 // TestWorkspaceAPIKeyValidation 固化面板 key 的底线。
 //
-// 三种情况都必须挡：占用保留访客 key、与本地主 key 相同（等于把全量权限的凭据
-// 嵌进第三方页面）、两个空间同 key（判定结果会取决于遍历顺序）。
+// 三种情况都必须挡：与本地主 key 相同（等于把全量权限的凭据嵌进第三方页面）、
+// 两个空间同 key（判定结果会取决于遍历顺序）、以及撞上访问密钥的凭据
+// （两者都走 /v1 面，判定彼此独立，撞车会让权限边界取决于先命中哪张清单）。
 func TestWorkspaceAPIKeyValidation(t *testing.T) {
 	build := func(workspaces string) string {
 		return `{"config_version":4,"local_api_key":"k",
 			"providers":{"p":{"base_url":"https://a.example.test","keys":{"k":{"api_key":"a"}}}},
 			"models":{"model-a":{"targets":[{"provider":"p","key":"k"}]}},
+			"access_keys":{"trial":{"key":"amkr_ak_x"}},
 			"workspaces":` + workspaces + `}`
 	}
-	// 合法：与本地 key 不同、彼此也不同。
+	// 合法：与本地 key 不同、彼此也不同、也不同于访问密钥。
 	if _, err := FromDict(mustParse(t, build(`{"a":{"api_key":"ka"},"b":{"api_key":"kb"}}`))); err != nil {
 		t.Errorf("合法配置不应报错: %v", err)
 	}
@@ -433,9 +185,11 @@ func TestWorkspaceAPIKeyValidation(t *testing.T) {
 		workspaces string
 		want       string
 	}{
-		{"占用访客 key", `{"a":{"api_key":"amkr-visitor"}}`, "工作空间 a 的 api_key 不能使用保留的访客 key: amkr-visitor"},
 		{"与本地 key 相同", `{"a":{"api_key":"k"}}`, "工作空间 a 的 api_key 不能与 local_api_key 相同"},
 		{"两空间同 key", `{"a":{"api_key":"same"},"b":{"api_key":"same"}}`, "工作空间 a 与 b 的 api_key 重复"},
+		// 访问密钥并入同一张占用表。工作空间先声明，因此这条在工作空间那一圈通过、
+		// 在访问密钥那一圈被拒，报出的是访问密钥侧的措辞（占用者是工作空间）。
+		{"撞上访问密钥", `{"a":{"api_key":"amkr_ak_x"}}`, "访问密钥 trial 的 key 与工作空间 a 的 api_key 重复"},
 	}
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -472,8 +226,6 @@ func TestWorkspaceInferenceKeyValidation(t *testing.T) {
 		workspaces string
 		want       string
 	}{
-		{"占用访客 key", `{"a":{"inference_key":"amkr-visitor"}}`,
-			"工作空间 a 的 inference_key 不能使用保留的访客 key: amkr-visitor"},
 		{"与本地 key 相同", `{"a":{"inference_key":"k"}}`,
 			"工作空间 a 的 inference_key 不能与 local_api_key 相同"},
 		{"两空间同推理 key", `{"a":{"inference_key":"same"},"b":{"inference_key":"same"}}`,

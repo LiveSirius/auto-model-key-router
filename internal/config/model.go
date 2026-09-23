@@ -11,10 +11,9 @@ import (
 type KeyConfig struct {
 	Name string
 	// APIKey 是真实密钥。
-	APIKey       string
-	BaseURL      string
-	Enabled      bool
-	AllowVisitor bool
+	APIKey  string
+	BaseURL string
+	Enabled bool
 	// UpstreamRoutes 在 v4 里恒为空：见 RouterConfig 的说明。
 	UpstreamRoutes map[string]string
 	Provider       string
@@ -35,10 +34,9 @@ type ModelConfig struct {
 
 // ProviderKeyConfig 是 provider 下配置的一个 key。
 type ProviderKeyConfig struct {
-	Name         string
-	APIKey       string
-	Enabled      bool
-	AllowVisitor bool
+	Name    string
+	APIKey  string
+	Enabled bool
 	// Capabilities 是探测缓存（模型列表、各路由可用性等）。
 	Capabilities *canonical.Value
 }
@@ -124,6 +122,60 @@ type WorkspaceConfig struct {
 	Models []string
 }
 
+// AccessKeyConfig 是一把**访问密钥**：分发给外部使用者的受限推理凭据。
+//
+// 它取代了原先的固定访客 key（`amkr-visitor`）：那把 key 是全局共享、权限由每个上游
+// key 上的 allow_visitor 开关拼出来的，既不能一人一把，也不能按人收窄。访问密钥把
+// 这两件事都变成显式配置——每把 key 一份清单，它能把请求发到哪些供应商与哪些模型。
+type AccessKeyConfig struct {
+	// ID 是配置里的键（`access_keys.<id>`），是更新与轮换时的稳定定位符。
+	ID string
+	// Name 是给人看的标识（WebUI 列表与日志用），不参与鉴权。
+	Name string
+	// Key 是密钥明文，鉴权时按恒定时间比较。
+	Key string
+	// Enabled 为假时该 key 立即失效，但保留配置（便于临时停用而不丢清单）。
+	Enabled bool
+	// Providers 是本 key 允许使用的供应商 ID 清单；空表示不限制。
+	//
+	// nil 与空切片**语义不同**（与 workspaces.models 同一约定）：nil = 配置里没写这个
+	// 字段 = 不限制；非 nil 的空切片 = 显式写了 `[]` = 一个供应商都不许。
+	Providers []string
+	// Models 是本 key 允许使用的模型名（真实 ID 或别名）清单；空表示不限制。
+	// nil 与空切片的区别同 Providers。
+	Models []string
+}
+
+// AllowsProvider 报告本 key 是否可以使用某供应商。
+func (a AccessKeyConfig) AllowsProvider(providerID string) bool {
+	if a.Providers == nil {
+		return true
+	}
+	for _, allowed := range a.Providers {
+		if allowed == providerID {
+			return true
+		}
+	}
+	return false
+}
+
+// AllowsModel 报告本 key 是否可以使用某模型名（调用方传入的原始名字）。
+//
+// 比对发生在**别名解析之前**：调用方写什么名字就按什么名字授权。这既让清单里可以
+// 写别名（运维更愿意写自己认得的名字），也让「同一模型换个写法」不会绕过清单——
+// 因为只要清单限制了模型，未列出的写法一律拒绝。
+func (a AccessKeyConfig) AllowsModel(modelName string) bool {
+	if a.Models == nil {
+		return true
+	}
+	for _, allowed := range a.Models {
+		if allowed == modelName {
+			return true
+		}
+	}
+	return false
+}
+
 // TaskConfig 是任务名路由：model 传任务名时改用这里的模型与固定参数。
 type TaskConfig struct {
 	Name string
@@ -198,7 +250,12 @@ type RouterConfig struct {
 	// 不带 key 的空间不需要在这里留记录：它们完全由 Tasks 反映（见 WorkspaceNames）。
 	// 只收带 key 的那些，是为了让这份列表恰好等于「需要参与鉴权匹配的空间」，不多
 	// 不少——否则每次鉴权都要把一堆没有 key 的名字过一遍。
-	Workspaces   []WorkspaceConfig
+	Workspaces []WorkspaceConfig
+	// AccessKeys 是分发给外部使用者的受限推理凭据。
+	//
+	// 它取代了原先固定的访客 key：每把 key 自带供应商与模型清单，因此「谁能用哪些
+	// 上游」是一份显式、可审计的配置，而不是所有 key 共用一组 allow_visitor 开关。
+	AccessKeys   []AccessKeyConfig
 	WebUIEnabled bool
 	OpsEnabled   bool
 	// ReasoningEffortByModel 是 model.id -> reasoning_effort（仅非空项）。
@@ -319,6 +376,11 @@ func fromMigrated(raw *canonical.Value) (*RouterConfig, error) {
 	}
 	config.Tasks = tasks
 	config.Workspaces = workspaces
+	accessKeys, err := parseAccessKeys(raw, models)
+	if err != nil {
+		return nil, err
+	}
+	config.AccessKeys = accessKeys
 
 	// 顶层 upstream_routes 刻意不参与：参照实现从空字典起步。
 	for _, provider := range config.Providers {
@@ -397,7 +459,6 @@ func parseProviders(raw *canonical.Value) ([]ProviderConfig, map[[2]string]provi
 				Name:         keyName,
 				APIKey:       rawAPIKey.PyStr(),
 				Enabled:      boolOr(key.Lookup("enabled"), true),
-				AllowVisitor: boolOr(key.Lookup("allow_visitor"), false),
 				Capabilities: capabilities,
 			})
 		}
@@ -508,7 +569,6 @@ func parseModels(raw *canonical.Value, providerKeys map[[2]string]providerKeyRef
 				// target 的 enabled 与 provider key 的 enabled 是「与」关系：
 				// 任一方禁用该 key 都不可用。
 				Enabled:       providerKey.Key.Enabled && targetEnabled,
-				AllowVisitor:  providerKey.Key.AllowVisitor,
 				Provider:      providerID,
 				UpstreamModel: upstreamModel,
 				// 参照实现在此未传 upstream_routes（config.py:963），故恒为空。
@@ -801,10 +861,141 @@ func modelIDsByName(models []ModelConfig) map[string]string {
 	return out
 }
 
+// parseAccessKeys 解析顶层的 access_keys 段。
+//
+// 形状是 `{key_id: {name?, key, enabled?, providers?, models?}}`——用对象而不是数组，
+// 与 providers/models/workspaces 一致：key_id 是更新与轮换时的稳定定位符，而数组元素
+// 没有稳定身份（改个名就得靠下标，那是拿位置当 ID）。
+//
+// providers 与 models 都在这里逐个校验引用的目标确实存在。写错一个名字就让某把已经
+// 分发出去的 key 静默少一项权限，排查要同时翻配置与调用方两侧；宁可在这里直接报错，
+// 错误文本带上 key_id 与字段路径。
+func parseAccessKeys(raw *canonical.Value, models []ModelConfig) ([]AccessKeyConfig, error) {
+	rawKeys := raw.Lookup("access_keys")
+	if rawKeys == nil || rawKeys.IsNull() {
+		return nil, nil
+	}
+	if !rawKeys.IsObject() {
+		return nil, errf("access_keys 必须是对象")
+	}
+	idsByName := modelIDsByName(models)
+	providerIDs := map[string]bool{}
+	if rawProviders := raw.Lookup("providers"); rawProviders.IsObject() {
+		for _, providerID := range rawProviders.Obj.Keys() {
+			providerIDs[providerID] = true
+		}
+	}
+
+	var accessKeys []AccessKeyConfig
+	for _, rawID := range rawKeys.Obj.Keys() {
+		id := strings.TrimSpace(rawID)
+		if id == "" {
+			return nil, errf("访问密钥的 key_id 不能为空")
+		}
+		entry := rawKeys.Lookup(rawID)
+		if !entry.IsObject() {
+			return nil, errf("访问密钥 %s 必须是对象", id)
+		}
+		secret, present := entry.LookupOK("key")
+		if !present {
+			return nil, errInternal("'key'")
+		}
+		config := AccessKeyConfig{
+			ID:      id,
+			Name:    strings.TrimSpace(entry.Lookup("name").StringValue()),
+			Key:     secret.PyStr(),
+			Enabled: boolOr(entry.Lookup("enabled"), true),
+		}
+		if config.Name == "" {
+			config.Name = id
+		}
+		providers, err := parseAccessKeyProviders(entry.Lookup("providers"), id, providerIDs)
+		if err != nil {
+			return nil, err
+		}
+		config.Providers = providers
+		allowedModels, err := parseAccessKeyModels(entry.Lookup("models"), id, idsByName)
+		if err != nil {
+			return nil, err
+		}
+		config.Models = allowedModels
+		accessKeys = append(accessKeys, config)
+	}
+	return accessKeys, nil
+}
+
+// parseAccessKeyProviders 解析 `access_keys.<id>.providers`。
+//
+// 与 models 一样用 nil 表示「没有这个字段」（不限制）——空数组是「一个都不许」。
+func parseAccessKeyProviders(raw *canonical.Value, keyID string, providerIDs map[string]bool) ([]string, error) {
+	if raw == nil || raw.IsNull() {
+		return nil, nil
+	}
+	if !raw.IsArray() {
+		return nil, errf("access_keys.%s.providers 必须是数组", keyID)
+	}
+	out := make([]string, 0, len(raw.Arr))
+	for index, item := range raw.Arr {
+		providerID := strings.TrimSpace(item.StringValue())
+		if providerID == "" {
+			return nil, errf("access_keys.%s.providers[%d] 不能为空", keyID, index)
+		}
+		if !providerIDs[providerID] {
+			return nil, errf("access_keys.%s.providers[%d] 引用了未配置的供应商: %s", keyID, index, providerID)
+		}
+		out = append(out, providerID)
+	}
+	return out, nil
+}
+
+// parseAccessKeyModels 解析 `access_keys.<id>.models`。
+//
+// 允许写真实 ID 或别名（与 workspaces.models 同一口径），因为调用方就是用这些名字
+// 请求的，清单里写别名更贴合分发时的说法。这里只做存在性校验，不走别名归一——归一
+// 发生在运行时（keypool），配置保留调用方写的原样，编辑界面上回显的才是他自己写的东西。
+func parseAccessKeyModels(raw *canonical.Value, keyID string, idsByName map[string]string) ([]string, error) {
+	if raw == nil || raw.IsNull() {
+		return nil, nil
+	}
+	if !raw.IsArray() {
+		return nil, errf("access_keys.%s.models 必须是数组", keyID)
+	}
+	out := make([]string, 0, len(raw.Arr))
+	for index, item := range raw.Arr {
+		name := strings.TrimSpace(item.StringValue())
+		if name == "" {
+			return nil, errf("access_keys.%s.models[%d] 不能为空", keyID, index)
+		}
+		if _, ok := idsByName[name]; !ok {
+			return nil, errf("access_keys.%s.models[%d] 引用了未配置的模型: %s", keyID, index, name)
+		}
+		out = append(out, name)
+	}
+	return out, nil
+}
+
+// AccessKeyFor 按密钥找出访问密钥，没有则返回 nil。
+//
+// 比较用恒定时间（与 WorkspaceForInferenceKey 同一理由：避免按字节提前返回泄漏 key
+// 内容）。空 key 一律不匹配。
+//
+// 禁用的 key 也参与匹配并由调用方判 enabled：把它当成「不存在」会让「停用」与「删除」
+// 在错误文本上无法区分，而这两件事对调用方的含义完全不同（停用是可以恢复的）。
+func (c *RouterConfig) AccessKeyFor(apiKey string) *AccessKeyConfig {
+	if apiKey == "" {
+		return nil
+	}
+	for i := range c.AccessKeys {
+		if hmac.Equal([]byte(apiKey), []byte(c.AccessKeys[i].Key)) {
+			return &c.AccessKeys[i]
+		}
+	}
+	return nil
+}
+
 // Validate 校验配置的自洽性。
 //
-// 对齐 config.py:1108。错误文本会经 management API 回给用户，属对外契约，
-// 因此顺序与措辞都与参照实现保持一致。
+// 新增检查请追加在**末尾**：既有检查的顺序与措辞是对外契约（见 doc.go）。
 func (c *RouterConfig) Validate() error {
 	if c.StreamFirstByteTimeout <= 0 {
 		return errf("stream_first_byte_timeout 必须大于 0")
@@ -812,12 +1003,9 @@ func (c *RouterConfig) Validate() error {
 	if c.StreamIdleTimeout <= 0 {
 		return errf("stream_idle_timeout 必须大于 0")
 	}
-	if c.LocalAPIKey == VISITOR_API_KEY {
-		return errf("local_api_key 不能使用保留的访客 key: %s", VISITOR_API_KEY)
-	}
 
-	// 工作空间面板 key 是**入站凭据**，因此要满足与 local_api_key 同一组底线：不能
-	// 占用保留的访客 key，也不能与本地 key 相同。
+	// 工作空间面板 key 是**入站凭据**，因此要满足与 local_api_key 同一组底线：不能与
+	// 本地 key 相同。
 	//
 	// 与 local_api_key 相同是必须挡的：本地 key 给的是全量权限（含配置与 /v1 代理），
 	// 若某个空间的面板 key 恰好等于它，那么「嵌出去的 key」与「主凭据」就是同一个，
@@ -826,16 +1014,17 @@ func (c *RouterConfig) Validate() error {
 	// 推理 key 适用同一组底线，且**两种 key 共用一张占用表**：它们的判定发生在不同
 	// 调用点（面板面 vs /v1 面），若允许同一个字符串两处都命中，同一个 key 会在一条
 	// 路径上是面板、另一条上是推理，权限边界取决于走到哪条路由——这正是要避免的。
+	//
+	// 访问密钥（AccessKeys）同样并入这张表：它也走 /v1 面，与推理 key 的判定彼此独立，
+	// 撞车会让同一把 key 的权限取决于先命中哪张清单。
 	keyOwner := map[string]string{}
-	// name 是空间名；错误文本里的「工作空间」前缀在这里拼，既有的三条错误文本
-	// （`工作空间 a 的 api_key 不能…` / `工作空间 a 与 b 的 api_key 重复`）因此
-	// 逐字不变。kind 区分同一空间的两把 key。
+	// ownerLabel 是同一张表的可读描述，只用于跨类型冲突时的错误文本——既有那三条
+	// 工作空间错误（`工作空间 a 的 api_key 不能…` / `工作空间 a 与 b 的 api_key 重复`）
+	// 因此逐字不变。kind 区分同一空间的两把 key。
+	ownerLabel := map[string]string{}
 	claim := func(secret, kind, name string) error {
 		if secret == "" {
 			return nil
-		}
-		if secret == VISITOR_API_KEY {
-			return errf("工作空间 %s 的 %s 不能使用保留的访客 key: %s", name, kind, VISITOR_API_KEY)
 		}
 		if c.LocalAPIKey != "" && secret == c.LocalAPIKey {
 			return errf("工作空间 %s 的 %s 不能与 local_api_key 相同", name, kind)
@@ -846,6 +1035,7 @@ func (c *RouterConfig) Validate() error {
 			return errf("工作空间 %s 与 %s 的 %s 重复", previous, name, kind)
 		}
 		keyOwner[secret] = name
+		ownerLabel[secret] = "工作空间 " + name + " 的 " + kind
 		return nil
 	}
 	for _, workspace := range c.Workspaces {
@@ -855,6 +1045,24 @@ func (c *RouterConfig) Validate() error {
 		if err := claim(workspace.InferenceKey, "inference_key", workspace.Name); err != nil {
 			return err
 		}
+	}
+	for i := range c.AccessKeys {
+		accessKey := &c.AccessKeys[i]
+		label := "访问密钥 " + accessKey.Name
+		if accessKey.Key == "" {
+			return errf("%s 的 key 不能为空", label)
+		}
+		if c.LocalAPIKey != "" && accessKey.Key == c.LocalAPIKey {
+			return errf("%s 的 key 不能与 local_api_key 相同", label)
+		}
+		if previous, exists := ownerLabel[accessKey.Key]; exists {
+			// previous 恒为「哪种资源的哪一把」的完整描述（工作空间那一圈写进去的），
+			// 因此这里与被写入方用同一种句式，读者不必猜占用者是什么资源。
+			return errf("%s 的 key 与%s 重复", label, previous)
+		}
+		// 只写 ownerLabel：访问密钥这一圈后面没有别的消费者了，keyOwner 里的名字
+		// 没人读。（与工作空间那一圈不同，那边两处冲突都要报裸空间名。）
+		ownerLabel[accessKey.Key] = label
 	}
 
 	modelNames := map[string]bool{}
