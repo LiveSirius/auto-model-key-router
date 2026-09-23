@@ -88,8 +88,8 @@ func DisplayName(agent string) string {
 
 // Options 是 Configure / Rollback / GetStatus 的可注入参数。
 //
-// BaseDir 替代参照实现里的 Path.home()：所有默认路径都由它推导。测试与对拍
-// 语料必须把它指向临时目录，否则会写进开发者真实的用户配置目录。
+// BaseDir 替代参照实现里的 Path.home()：所有默认路径都由它推导。测试必须把它
+// 指向临时目录，否则会写进开发者真实的用户配置目录。
 //
 // TargetPath / BackupPath 对应参照实现里的同名可选参数；为空时按 Agent 推导。
 // BackupDir 对应 agent_backup_path 的 backup_dir 参数，为空时用平台缓存目录。

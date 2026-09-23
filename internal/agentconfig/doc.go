@@ -13,7 +13,7 @@ Package agentconfig 把 AMKR 的路由信息写进第三方 AI Agent CLI 的本�
     「当前配置是否就是 AMKR 写入的那份」（agent_config.py:94）。
 
 与参照实现的两处刻意差异：home 目录是**注入**的（Options.BaseDir 替代
-Path.home()，测试与对拍语料一律指向临时目录），以及 Codex 的 TOML 回写自己
+Path.home()，测试一律指向临时目录），以及 Codex 的 TOML 回写自己
 实现格式保真（见下）。
 
 # go-toml/v2 的注释丢失：实测数据
@@ -98,7 +98,8 @@ github.com/pelletier/go-toml/v2 v2.4.3、Python 3.12.12、tomlkit 0.15.0）。
 	model_reasoning_effort = "high"
 
 注释、空行、键序、行尾注释全部保留；只有被改动的值变了，新键按 tomlkit 的规则
-插入。这就是 Go 侧必须复刻的语义，也是 testdata 对拍语料的 oracle。
+插入。这就是 Go 侧必须复刻的语义，由 tomlpreserve_test.go 的具名用例逐字节锁定
+（那里的期望值来自真实 tomlkit 0.15.0，不是人手推演）。
 
 (c) unstable.Parser 确实能给出字节位置（Node.Raw.Offset/Length、Node.Key()、
 Node.Value()），但它不暴露注释与空行节点，靠它无法重建被保留的 trivia。因此
@@ -112,7 +113,7 @@ go-toml/v2 的 unstable parser 只做语法校验**——依赖因此有实质�
 
 D1. home 目录是注入参数。参照实现从 Path.home() 推导三个目标路径
 （agent_config.py:69-84）。Go 侧改成 Options.BaseDir：默认路径由它推导，`~`
-也对它展开。测试与对拍语料一律指向临时目录，**绝不触碰开发者真实的
+也对它展开。测试一律指向临时目录，**绝不触碰开发者真实的
 ~/.claude、~/.codex、~/.pi**。环境变量覆盖（CLAUDE_CONFIG_DIR /
 PI_CODING_AGENT_DIR / CODEX_HOME）的优先级与参照实现一致。
 
@@ -122,7 +123,7 @@ D2. Status.Mode 用空串表示 None。合法模式只有 native / unified-model
 D3. 错误文本。AgentConfigError 的前缀与措辞逐字保留（例如
 `不支持的 Agent: x`、`Pi Agent 仅支持 unified-model 模式`、
 `Codex 配置中的 model_providers 必须是 TOML 表`、`Agent 配置备份内容已损坏`）。
-两类必然不同，对拍语料只断言前缀：
+两类必然不同，Go 侧只保证前缀一致：
   - 底层解析器错误：Python 是 json.JSONDecodeError / tomlkit 错误的自身文本
     （如 `Expecting value: line 1 column 1 (char 0)`），Go 侧是 canonical /
     迷你 tomlkit / go-toml/v2 各自的文本；前缀
@@ -154,7 +155,8 @@ D6. Codex 里 model_providers / model_providers.OpenAI 的非法形状：
 
 D7. Path.resolve(strict=False) vs filepath.Abs + Clean。两者对不存在的路径都只做
 词法规范化，差别只在符号链接解析；AMKR 写入的三个目标路径都不应是符号链接。
-对拍语料记录了 Python 的 _resolved_path 输出，Go 测试断言结果字符串一致。
+Go 测试断言结果字符串与 Python 的 _resolved_path 输出一致（见
+TestDivergenceResolvePathIsLexical）。
 
 D8. **合法性判定的补丁**。参照实现靠 tomlkit 做 TOML 合法性判定；Go 侧靠
 go-toml/v2 的 unstable parser（validateTOML）加迷你 tomlkit 自己的检查。实测
@@ -168,9 +170,7 @@ go-toml/v2 的 unstable parser（validateTOML）加迷你 tomlkit 自己的检�
 原因是 unstable parser 只做**语法**解析，不查 TOML 的语义约束（重复键、重复表、
 表与键值冲突）。放任不管的后果是：Go 会去改写一份 Python 会拒收的文件，并把重复
 键原样留在用户配置里。所以迷你 tomlkit 自己拦了这三条（parseBody 的重复键检查、
-attachTable/mergeInto 的重复表与表键冲突检查），语料里
-codex_duplicate_key / codex_duplicate_table / codex_table_over_value 三条用例断言
-「Python 报错，Go 也报同样的前缀」。
+attachTable/mergeInto 的重复表与表键冲突检查）。
 
 其余 42 份文档两侧判定一致；45 份的完整清单与逐条对比见本文件的实测记录（探针
 脚本是临时文件，不留在仓库）。需要注意的是这仍是**采样**而非证明：如果将来发现
@@ -181,16 +181,14 @@ codex_duplicate_key / codex_duplicate_table / codex_table_over_value 三条用�
 
 P1. Claude Code 的 attribution 被**整体替换**。参照实现执行
 data["attribution"] = {"commit": "", "pr": ""}（agent_config.py:306），因此用户写
-在 attribution 里的其它字段会丢失。Go 照抄该行为；语料里的
-claude_attribution_replaced 用例断言「Python 丢什么，Go 就丢什么」。这是参照实现
-自己的数据丢失点，迁移阶段刻意不改，但值得上游注意。
+在 attribution 里的其它字段会丢失。Go 照抄该行为——这是参照实现自己的数据丢失
+点，迁移阶段刻意不改，但值得上游注意。
 
 P2. Pi agent 的 providers.amkr 被**整体覆盖**。参照实现直接赋值
-（agent_config.py:379），用户在该 provider 下的自定义字段会丢。同样照抄，由
-pi_existing_providers 用例锁定。
+（agent_config.py:379），用户在该 provider 下的自定义字段会丢。同样照抄。
 
 P3. Codex 里用户自带的 [model_providers.openai]（小写）**不被覆盖**。
 CODEX_PROVIDER_ID 是大小写敏感的 "OpenAI"，两者在 Codex 里是两个 provider。
-这是参照实现的既有行为，由 codex_commented 用例锁定。
+这是参照实现的既有行为，刻意保留。
 */
 package agentconfig

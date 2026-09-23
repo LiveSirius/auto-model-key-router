@@ -20,7 +20,7 @@ import (
 // 所以这里实现一个只覆盖 Codex 配置所需子集的迷你 tomlkit：解析成与 tomlkit
 // 同构的 body / trivia 模型，编辑与渲染逐条照抄 tomlkit 的 container.py 与
 // items.py（引用处标注 tomlkit 源码位置），从而与 Python 输出逐字节一致。
-// 一致性由 testdata/agentconfig_corpus.json 对拍锁定，oracle 是真实 tomlkit。
+// 一致性由 tomlpreserve_test.go 锁定：那里的期望值是真实 tomlkit 0.15.0 的输出。
 //
 // 刻意不支持、遇到即显式报错的形状（绝不退化成有损重写）：
 //   - 点号键（`a.b = 1`）：tomlkit 走 _handle_dotted_key，重建整棵隐式表；

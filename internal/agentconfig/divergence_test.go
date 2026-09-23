@@ -37,7 +37,7 @@ func pinBaseEnv(t *testing.T, root string) {
 	}
 }
 
-// testConfigs 是各用例需要的路由配置（内联字面量，原为对拍语料里的 fixture）。
+// testConfigs 是各用例需要的路由配置（内联字面量）。
 //
 // 刻意走 config.FromDict：这样配置解析的一致性仍在覆盖范围内。
 var testConfigs = map[string]string{
