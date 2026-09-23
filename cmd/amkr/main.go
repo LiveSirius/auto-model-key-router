@@ -441,7 +441,7 @@ func unifiedModelPanel(cfg *config.RouterConfig, title, color string) tui.Render
 func printConfigSummary(terminal *tui.Terminal, cfg *config.RouterConfig) {
 	healthy := service.DefaultEnv().IsServiceHealthy(cfg.Host, cfg.Port, true)
 	width, _ := terminal.Size()
-	summary := configSummaryLine(cfg, healthy, true, width)
+	summary := configSummaryLine(cfg, healthy, width)
 	terminal.Print(tui.SectionPanel(summary, "运行概览", "cyan"))
 	if cfg.Host == "0.0.0.0" {
 		terminal.Print(tui.SectionPanel(publicWarningText, "公网开放风险", "red"))

@@ -3,9 +3,8 @@ package main
 // 本文件移植 auto_model_key_router/main.py（202 行）的**参数解析与分支决策**。
 //
 // 与 main.go（进程装配与监听）分开是为了让「选哪条分支、配置被改成了什么」可以脱离
-// 副作用单独断言：cmd/amkr/testdata/cli_corpus.json 由
-// gen_amkr_cli_corpus.py（已随 Python 退役移除） 驱动**真实 Python** 产出，Go 侧用 decide() 重放同一批
-// 参数并比对分支与解析结果（见 cli_corpus_test.go）。
+// 副作用单独断言：parseOptions / selectCommand 都是纯函数，可直接喂参数断言。
+// （原先还有一层 cmd/amkr/testdata/cli_corpus.json 对拍，该语料已随对拍语料一并退役。）
 //
 // # 24 个 flag 的处置
 //
@@ -394,21 +393,19 @@ func routerAddressText(cfg *config.RouterConfig) string {
 // 查询（只暴露按时间窗聚合的 Snapshot），复刻它必须改 internal/metrics——超出本任务的
 // 允许范围。WebUI 与 /api/metrics 已覆盖同一信息。
 //
-// healthy 与 visitorInstalled 作为参数传入：前者需要探测 /health（副作用），后者在
-// 参照实现里是构建期开关，而 Go 侧按决策 4 恒为「已安装」。
-func configSummaryItems(cfg *config.RouterConfig, healthy bool, visitorInstalled bool) []string {
+// healthy 作为参数传入：它需要探测 /health（副作用）。
+//
+// 原先还有一个 visitorInstalled 参数与「访客 Key / 访客可用」两行 —— 随访客模式一并
+// 删除，改报**访问密钥**的数量（那是现在唯一分发给外部使用者的受限凭据）。
+func configSummaryItems(cfg *config.RouterConfig, healthy bool) []string {
 	modelCount := len(cfg.Models)
 	keyCount := 0
-	visitorKeys := 0
 	upstreams := map[string]struct{}{}
 	for _, model := range cfg.Models {
 		keyCount += len(model.Keys)
 		for _, key := range model.Keys {
 			if key.BaseURL != "" {
 				upstreams[key.BaseURL] = struct{}{}
-			}
-			if key.Enabled && key.AllowVisitor {
-				visitorKeys++
 			}
 		}
 	}
@@ -428,27 +425,26 @@ func configSummaryItems(cfg *config.RouterConfig, healthy bool, visitorInstalled
 		fmt.Sprintf("[dim]Key[/dim] [bold green]%d[/bold green]", keyCount),
 		fmt.Sprintf("[dim]上游[/dim] [bold magenta]%d[/bold magenta]", len(upstreams)),
 	}
-	if visitorInstalled {
+	if len(cfg.AccessKeys) > 0 {
+		enabled := 0
+		for _, accessKey := range cfg.AccessKeys {
+			if accessKey.Enabled {
+				enabled++
+			}
+		}
 		items = append(items,
-			fmt.Sprintf("[dim]访客Key[/dim] [bold]%s[/bold]", visitorAPIKey),
-			fmt.Sprintf("[dim]访客可用[/dim] [bold green]%d[/bold green]", visitorKeys),
+			fmt.Sprintf("[dim]访问密钥[/dim] [bold green]%d[/bold green]", enabled),
 		)
 	}
 	return items
 }
 
-// visitorAPIKey 与 internal/auth 的 VisitorAPIKey 同值。
-//
-// 不 import internal/auth：那个包会带进整个鉴权实现（含 hmac 比较与错误路径），
-// 而这里只需要一个常量；auth 的测试已锁定该常量为 "amkr-visitor"。
-const visitorAPIKey = "amkr-visitor"
-
 // configSummaryLine 复刻「运行概览」那行文本的渲染（dashboard.py:898-902）。
 //
 // Python 用 Text(no_wrap=True, overflow="ellipsis") 把带标记的条目拼成一行；Go 侧
 // 按既定策略降级为纯文本（去掉标记）后套用同样的 no_wrap+ellipsis 版式。
-func configSummaryLine(cfg *config.RouterConfig, healthy, visitorInstalled bool, width int) string {
-	plain := tui.StripMarkup(strings.Join(configSummaryItems(cfg, healthy, visitorInstalled), "  "))
+func configSummaryLine(cfg *config.RouterConfig, healthy bool, width int) string {
+	plain := tui.StripMarkup(strings.Join(configSummaryItems(cfg, healthy), "  "))
 	lines := tui.Text{Value: plain, NoWrap: true, OverflowEllipsis: true}.RenderLines(width)
 	if len(lines) == 0 {
 		return ""
