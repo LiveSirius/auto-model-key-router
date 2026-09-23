@@ -77,7 +77,7 @@ func VersionNumbers(version string) []int64 {
 	head, _, _ := strings.Cut(version, "+")
 	parts := numberPattern.FindAllString(head, -1)
 	// 参照实现返回元组；没有数字时是空元组，因此这里返回**空切片而非 nil**，
-	// 以便与语料比较时形状一致。
+	// 与参照实现的形状一致。
 	numbers := make([]int64, 0, len(parts))
 	for _, part := range parts {
 		// ponytail: Python 的 int 无上限，这里收窄到 int64。版本号分量不可能达到
@@ -137,7 +137,7 @@ func GitHubSourceArchiveURL(tag string) string {
 	return "https://github.com/" + GitHubRepository + "/archive/refs/tags/" + tag + ".zip"
 }
 
-// Fetcher 是一次 JSON 取回。注入它是为了让测试与语料回放**不联网**。
+// Fetcher 是一次 JSON 取回。注入它是为了让测试**不联网**。
 //
 // 返回的 *canonical.Value 必须是 JSON 对象；非对象由调用方判为错误（对应 Python
 // fetch_json 里的 `if not isinstance(data, dict)`）。
