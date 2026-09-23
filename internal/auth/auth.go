@@ -1,9 +1,14 @@
-// Package auth 实现 AMKR 的鉴权判定：本地 API key 给完整权限，固定 visitor key
-// 给受限权限。移植 auto_model_key_router/auth.py 与 visitor.py。
+// Package auth 实现 AMKR 的入站凭据判定：本地 API key 给完整权限。
 //
-// 权限词表刻意保留 full / visitor 两个值，而不是 is_admin 布尔：visitor 不是
-// 「权限更小」而是**模型级**权限——只能用标了 allow_visitor 的 Key、不能用
-// unified-model、拿不到指标与配置接口，这些差异无法用一个布尔表达。
+// 原先这里还有第二档「访客」模式（固定 key `amkr-visitor` + 上游 key 上的
+// allow_visitor 开关）。它已被**访问密钥**取代：那是一个独立的配置资源，每把 key
+// 自带供应商与模型清单（见 config.AccessKeyConfig）。取代的理由是固定访客 key 的
+// 两处硬伤——所有人共用一把 key，且权限只能靠逐个改上游 key 的开关来拼，既无法
+// 一人一把，也无法按人收窄。
+//
+// 访问密钥的解析**刻意不在本包**：本包是被对拍语料锁定的纯函数，而访问密钥要读配置
+// （密钥清单、供应商清单）并与 keypool 的选择逻辑协同。它落在 proxy 与 app 面的
+// authorize 里，与工作空间推理 key 同一处。
 //
 // 本包不依赖任何 HTTP 框架，只吃 http.Header：判定逻辑是纯函数，便于逐条对拍，
 // 也避免把鉴权绑死在某个路由库上。
@@ -15,20 +20,16 @@ import (
 	"strings"
 )
 
-// VisitorAPIKey 是固定的访客凭据。
-const VisitorAPIKey = "amkr-visitor"
-
-// VisitorModelPrefix 是访客可见的模型 ID 前缀。
-const VisitorModelPrefix = "amkr-"
-
 // Mode 是鉴权结果的权限范围。
+//
+// 只保留 full 一档：受限凭据（访问密钥、工作空间推理 key）的权限不是「更小的
+// full」，而是由各自的清单在**代理层**逐项判定，无法用一个枚举表达。把它们塞进
+// 这里只会让本包依赖配置。
 type Mode string
 
 const (
-	// ModeFull 表示完整权限。
+	// ModeFull 表示完整权限（本地 API key）。
 	ModeFull Mode = "full"
-	// ModeVisitor 表示受限的访客权限。
-	ModeVisitor Mode = "visitor"
 )
 
 // Context 是一次成功的鉴权结果。
@@ -41,9 +42,6 @@ type Context struct {
 
 // IsFull 报告是否为完整权限。
 func (c Context) IsFull() bool { return c.Mode == ModeFull }
-
-// VisitorOnly 报告是否仅为访客权限。
-func (c Context) VisitorOnly() bool { return c.Mode == ModeVisitor }
 
 // Authorizer 把请求折算成鉴权结果，返回 nil 表示未通过。
 //
@@ -84,25 +82,13 @@ func ModeFromAPIKey(apiKey, localAPIKey string) *Mode {
 		mode := ModeFull
 		return &mode
 	}
-	if IsVisitorAPIKey(apiKey) {
-		mode := ModeVisitor
-		return &mode
-	}
 	return nil
 }
 
-// IsVisitorAPIKey 报告凭据是否为访客 key。
+// DefaultAuthorizer 是默认判定：只有本地 API key 通过，给完整权限。
 //
-// 用恒定时间比较，避免按字节提前返回泄漏 key 内容。
-//
-// 这里**刻意没有**「功能是否可用」这一层判断（参照实现是
-// `VISITOR_FEATURE_AVAILABLE and hmac.compare_digest(...)`）：经产品决策取消开关
-// 语义后，访客功能常驻，不再存在「功能缺席」这种状态。详见 visitor_test.go 顶部说明。
-func IsVisitorAPIKey(apiKey string) bool {
-	return hmac.Equal([]byte(apiKey), []byte(VisitorAPIKey))
-}
-
-// DefaultAuthorizer 是默认判定：本地 API key 为完整权限，固定 visitor key 为受限权限。
+// 受限凭据（访问密钥、工作空间推理 key）不在这里判定：它们要读配置清单，而本包
+// 刻意不依赖 config。调用方在本函数返回 nil 之后再去查那两条通道。
 func DefaultAuthorizer(r *http.Request, localAPIKey string) *Context {
 	mode := ModeFromAPIKey(RequestAPIKey(r.Header), localAPIKey)
 	if mode == nil {

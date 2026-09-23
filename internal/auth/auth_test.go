@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// pythonLocalKey 与 pythonVisitorKey 取自参照实现实测值。
+// pythonLocalKey 取自参照实现实测值。
 const pythonLocalKey = "amkr_local_secret_123"
 
 // TestModeFromAPIKeyMatchesPython 逐条对齐参照实现的判定结果。
@@ -22,7 +22,6 @@ func TestModeFromAPIKeyMatchesPython(t *testing.T) {
 	}{
 		{name: "本地 key 为空时整体关闭鉴权", localAPIKey: "", apiKey: "", wantMode: ModeFull},
 		{name: "本地 key 为空时一律完整权限", localAPIKey: "", apiKey: "anything", wantMode: ModeFull},
-		{name: "本地 key 为空时访客 key 也是完整权限", localAPIKey: "", apiKey: VisitorAPIKey, wantMode: ModeFull},
 		{name: "本地 key 匹配为完整权限", localAPIKey: pythonLocalKey, apiKey: pythonLocalKey, wantMode: ModeFull},
 		{name: "mis-match 拒绝", localAPIKey: pythonLocalKey, apiKey: "wrong", wantRejected: true},
 		// 前缀/后缀/大小写都不接受，防止有人把比较改成 HasPrefix 之类的"优化"。
@@ -30,11 +29,10 @@ func TestModeFromAPIKeyMatchesPython(t *testing.T) {
 		{name: "本地 key 加后缀被拒绝", localAPIKey: pythonLocalKey, apiKey: pythonLocalKey + "x", wantRejected: true},
 		{name: "大小写不同被拒绝", localAPIKey: pythonLocalKey, apiKey: "AMKR_LOCAL_SECRET_123", wantRejected: true},
 		{name: "首尾空白不被忽略", localAPIKey: pythonLocalKey, apiKey: " " + pythonLocalKey + " ", wantRejected: true},
-		// 访客 key 的**拒绝**用例是编译形态无关的：默认形态下靠精确匹配拒绝，
-		// 关闭访客功能的形态下靠功能不可用拒绝。两种形态都必须拒绝。
+		// 已取消的固定访客 key 必须被拒绝：它不是 local_api_key，也不再有任何特殊通道。
+		// 留着这几条是为了防止将来有人把 `amkr-visitor` 当成"兼容旧客户端"重新接回来。
+		{name: "已取消的访客 key 被拒绝", localAPIKey: pythonLocalKey, apiKey: "amkr-visitor", wantRejected: true},
 		{name: "访客 key 大写被拒绝", localAPIKey: pythonLocalKey, apiKey: "AMKR-VISITOR", wantRejected: true},
-		{name: "访客 key 带前导空格被拒绝", localAPIKey: pythonLocalKey, apiKey: " " + VisitorAPIKey, wantRejected: true},
-		{name: "访客 key 加后缀被拒绝", localAPIKey: pythonLocalKey, apiKey: VisitorAPIKey + "x", wantRejected: true},
 		{name: "下划线代替连字符被拒绝", localAPIKey: pythonLocalKey, apiKey: "amkr_visitor", wantRejected: true},
 		// 非 ASCII：参照实现不会 500，只拒绝。
 		{name: "非 ASCII 凭据被拒绝而非报错", localAPIKey: pythonLocalKey, apiKey: "中文", wantRejected: true},
@@ -61,19 +59,10 @@ func TestModeFromAPIKeyMatchesPython(t *testing.T) {
 	}
 }
 
-// 访客 key 的正向断言在 visitor_test.go。那里已不再带构建标签：访客功能已取消开关
-// 语义（原 `amkr_no_visitor` 裁剪机制连同 visitor_disabled_test.go 一并删除），
-// 访客断言只剩一种形态。
-
-// TestVisitorConstants 锁定对外可见的常量（/health 与模型前缀都依赖它们）。
-func TestVisitorConstants(t *testing.T) {
-	if VisitorAPIKey != "amkr-visitor" {
-		t.Errorf("VisitorAPIKey = %q，期望 %q", VisitorAPIKey, "amkr-visitor")
-	}
-	if VisitorModelPrefix != "amkr-" {
-		t.Errorf("VisitorModelPrefix = %q，期望 %q", VisitorModelPrefix, "amkr-")
-	}
-}
+// 访客模式已整体移除：固定 key `amkr-visitor`、ModeVisitor 与 VisitorModelPrefix 都
+// 不再存在，取而代之的是配置里的访问密钥资源（见 config.AccessKeyConfig）。原先的
+// visitor_test.go 随之删除。上面那条「已取消的访客 key 被拒绝」是留给这次删除的回归
+// 断言：它必须和任何其它错误凭据一样被拒绝。
 
 // TestRequestAPIKeyMatchesPython 逐条对齐凭据提取规则。
 //
