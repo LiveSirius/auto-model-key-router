@@ -93,9 +93,9 @@ func TestUpdateApplyRequiresFullAuth(t *testing.T) {
 	if anonymous.Code != http.StatusUnauthorized {
 		t.Errorf("匿名请求状态码 = %d，期望 401（body=%s）", anonymous.Code, anonymous.Body.String())
 	}
-	visitor := serve(app, http.MethodPost, "/ui/update/apply", visitorAuthorization)
-	if visitor.Code != http.StatusUnauthorized {
-		t.Errorf("访客凭据状态码 = %d，期望 401", visitor.Code)
+	other := serve(app, http.MethodPost, "/ui/update/apply", otherAuthorization)
+	if other.Code != http.StatusUnauthorized {
+		t.Errorf("非完整权限凭据状态码 = %d，期望 401", other.Code)
 	}
 	if called {
 		t.Error("未通过鉴权时绝不能触发更新")

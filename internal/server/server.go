@@ -58,7 +58,11 @@ type Options struct {
 	// 与 Python 相同：运维路由与管理路由注册在同一个应用上，共用同一套鉴权与错误形状。
 	OpsEnabled *bool
 	// Authorizer 覆盖鉴权实现，对应 create_app(authenticator=...)（app.py:84）。
-	// nil 表示 internal/auth 的默认实现（本地 key = full，固定 visitor key = visitor）。
+	// nil 表示 internal/auth 的默认实现（本地 key = full）。
+	//
+	// 注入自定义 Authorizer 会**一并停用**访问密钥与工作空间推理凭据的识别：那两者
+	// 由 proxy 在默认鉴权之后自行匹配配置，而自定义鉴权器接管后这条路径不再走到。
+	// 这是有意的取舍——注入者要的就是「鉴权全由我说了算」。
 	//
 	// 同一个鉴权器会同时作用于 app 面、proxy 与管理 API：参照实现只有
 	// app.state.authenticator 一份。
@@ -218,19 +222,22 @@ func New(options Options) (*App, error) {
 	proxyOptions := proxy.Options{Logger: options.Logger}
 	if options.Authorizer != nil {
 		// 参照实现只有一个 authenticator（app.state.authenticator），proxy 也走它
-		// （proxy_handler.py 的 authorize 读 app.state）。proxy 侧的接缝只关心
-		// visitor_only 一个布尔，因此这里做一次收窄转换。
+		// （proxy_handler.py 的 authorize 读 app.state）。宿主的钩子只回答「是不是
+		// 完整权限」，受限凭据（访问密钥、工作空间推理 key）是 AMKR 自己的配置能力，
+		// 宿主体系里没有对应概念，因此这里不透传。
 		//
-		// 宿主自带的身份体系里没有「工作空间凭据」这个概念，因此 Workspace 留空：
-		// 空间仍由 X-AMKR-Workspace 头选择。作用域推理凭据是 AMKR 自己的配置能力，
-		// 它在 proxy 的默认判定里解析（见 proxy.Handler.authorize）。
+		// 宿主自带的身份体系里也没有「工作空间凭据」这个概念，因此 Workspace 留空：
+		// 空间仍由 X-AMKR-Workspace 头选择。
+		//
+		// **已知取舍**：注入自定义 Authorizer 时，访问密钥与工作空间推理凭据都不再被
+		// 识别（宿主接管了整条判定链）。这是有意的——宿主既然自带身份体系，AMKR 就不该
+		// 在旁边再开两条它管不到的通道。
 		authorizer := options.Authorizer
 		proxyOptions.Authorizer = func(r *http.Request, localAPIKey string) *proxy.AuthorizerResult {
-			context := authorizer(r, localAPIKey)
-			if context == nil {
+			if authorizer(r, localAPIKey) == nil {
 				return nil
 			}
-			return &proxy.AuthorizerResult{VisitorOnly: context.VisitorOnly()}
+			return &proxy.AuthorizerResult{}
 		}
 	}
 	app.proxy = proxy.New(app.manager, &switchableSink{app: app}, proxyOptions)

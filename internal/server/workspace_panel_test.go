@@ -141,7 +141,7 @@ func TestWorkspacePanelIsScopedToItsKey(t *testing.T) {
 func TestWorkspacePanelRejectsOtherCredentials(t *testing.T) {
 	app := newWorkspacePanelApp(t)
 
-	for _, authorization := range []string{"", fullAuthorization, visitorAuthorization, "Bearer nope"} {
+	for _, authorization := range []string{"", fullAuthorization, otherAuthorization, "Bearer nope"} {
 		recorder := serve(app, http.MethodGet, "/ui/workspace-panel.json", authorization)
 		if recorder.Code != http.StatusUnauthorized {
 			t.Errorf("凭据 %q 状态码 = %d，期望 401", authorization, recorder.Code)

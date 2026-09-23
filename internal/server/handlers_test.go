@@ -21,9 +21,9 @@ import (
 // 「哪些模型该出现」显式写出来，读者不必去读语料 JSON：
 //
 //   - model-b 没有任何 key（未配置）⇒ 它自己与它的别名都不出现；
-//   - model-v 有 allow_visitor 的 key ⇒ 完整清单里出现，访客清单里是 amkr- 前缀名；
-//   - model-nv 有 key 但不允许访客 ⇒ 只在完整清单里；
 //   - unified-model 是**末尾追加**的（key_pool.available_model_ids 的 append 语义）。
+//
+// 访问密钥那份收窄清单由 TestModelsNarrowedForAccessKey 覆盖。
 func TestModelsExcludesUnconfiguredModelAndAppendsUnified(t *testing.T) {
 	app := newTestApp(t, t.TempDir(), nil)
 
@@ -41,16 +41,84 @@ func TestModelsExcludesUnconfiguredModelAndAppendsUnified(t *testing.T) {
 	if len(full) == 0 || full[len(full)-1] != "unified-model" {
 		t.Errorf("unified-model 必须是最后一项: %v", full)
 	}
+}
 
-	visitor := modelIDs(t, serve(app, http.MethodGet, "/v1/models", visitorAuthorization))
-	if len(visitor) != 1 || visitor[0] != "amkr-model-v" {
-		t.Errorf("访客清单 = %v，期望只有 amkr-model-v", visitor)
+// accessKeyFixture 是一份带访问密钥的配置文本。
+//
+// 三把 key 覆盖三种清单组合：
+//   - 带清单的（providers=[prov-a], models=[model-a]）；
+//   - 只管供应商的（providers=[prov-b]）；
+//   - 停用的。
+//
+// 它们合起来验证 /v1/models 的收窄与 proxy 的判定用的是同一份判据。
+const accessKeyFixture = `{
+  "config_version": 4,
+  "local_api_key": "local-key",
+  "host": "127.0.0.1",
+  "port": 8000,
+  "endpoint_capabilities_path": "<CAP>",
+  "metrics_db_path": "<DB>",
+  "log_file_path": "<LOG>",
+  "webui_enabled": false,
+  "ops_enabled": true,
+  "providers": {
+    "prov-a": {"base_url": "https://a.test", "keys": {"key-a": {"api_key": "sk-a"}}},
+    "prov-b": {"base_url": "https://b.test", "keys": {"key-b": {"api_key": "sk-b"}}}
+  },
+  "models": {
+    "model-a": {"targets": [{"provider": "prov-a", "key": "key-a", "upstream_model": "model-a"}], "aliases": ["alias-a"]},
+    "model-b": {"targets": [{"provider": "prov-b", "key": "key-b", "upstream_model": "model-b"}]}
+  },
+  "access_keys": {
+    "scoped": {"name": "只管 prov-a", "key": "amkr_ak_scoped", "providers": ["prov-a"], "models": ["model-a"]},
+    "provonly": {"name": "只管 prov-b", "key": "amkr_ak_provonly", "providers": ["prov-b"]},
+    "off": {"name": "已停用", "key": "amkr_ak_off", "enabled": false}
+  }
+}`
+
+// TestModelsNarrowedForAccessKey 固化 /v1/models 对访问密钥的收窄。
+//
+// 清单必须与 proxy 的判定一致：列了却调不动、或调得动却不在清单里，都会让接入方
+// 以为自己配错了。四种情况：
+//
+//   - 两份清单都配 -> 只列交集里的那个模型名；
+//   - 只配 providers -> 列该供应商能服务的全部模型名；
+//   - unified-model 一律不列（访问密钥用不了它）；
+//   - 停用的 key -> 403，且**不是** 401（停用是可恢复的配置状态，不是错误凭据）。
+func TestModelsNarrowedForAccessKey(t *testing.T) {
+	app := newTestAppWith(t, t.TempDir(), appFixture{opsEnabled: true, configText: accessKeyFixture})
+
+	scoped := modelIDs(t, serve(app, http.MethodGet, "/v1/models", "Bearer amkr_ak_scoped"))
+	if len(scoped) != 1 || scoped[0] != "model-a" {
+		t.Errorf("两份清单都配时应只列交集，实得 %v", scoped)
 	}
-	// 访客看不到 unified-model（它没有 allow_visitor 的 key）。
-	for _, unwanted := range []string{"unified-model", "model-a", "model-nv"} {
-		if contains(visitor, unwanted) {
-			t.Errorf("访客清单不应包含 %q: %v", unwanted, visitor)
-		}
+	if contains(scoped, "model-b") {
+		t.Errorf("清单外的模型不该出现: %v", scoped)
+	}
+	if contains(scoped, "unified-model") {
+		t.Errorf("访问密钥用不了 unified-model，不该列出: %v", scoped)
+	}
+
+	providerOnly := modelIDs(t, serve(app, http.MethodGet, "/v1/models", "Bearer amkr_ak_provonly"))
+	if len(providerOnly) != 1 || providerOnly[0] != "model-b" {
+		t.Errorf("只配 providers 时应列该供应商的全部模型，实得 %v", providerOnly)
+	}
+
+	disabled := serve(app, http.MethodGet, "/v1/models", "Bearer amkr_ak_off")
+	if disabled.Code != http.StatusForbidden {
+		t.Errorf("停用的访问密钥应 403，实得 %d（body=%s）", disabled.Code, disabled.Body.String())
+	}
+}
+
+// TestVisitorKeyIsRejected 断言取消访客模式后固定访客 key 不再被接受。
+//
+// 这是那条「删干净」的回归线：只要有人把 amkr-visitor 特例加回来，这里就会红。
+func TestVisitorKeyIsRejected(t *testing.T) {
+	app := newTestApp(t, t.TempDir(), nil)
+	recorder := serve(app, http.MethodGet, "/v1/models", "Bearer amkr-visitor")
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("amkr-visitor 应被当成错误凭据（401），实得 %d（body=%s）",
+			recorder.Code, recorder.Body.String())
 	}
 }
 

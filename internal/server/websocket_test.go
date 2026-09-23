@@ -201,9 +201,10 @@ func TestWSEventsAuthFailures(t *testing.T) {
 			eventbus.AuthCloseReasonTimeoutOrInvalidMessage},
 		{"token 不对走 4003", `{"type": "auth", "token": "nope"}`, eventbus.CloseCodeAuthFailed,
 			eventbus.AuthCloseReasonFailed},
-		// 访客 key 能过 HTTP 的 /v1/models，但事件流只对**完整权限**开放
+		// 受限凭据能过 HTTP 的 /v1/models，但事件流只对**完整权限**开放
 		// （app.py:337 的 auth.is_full）——这条断言是那个收窄的唯一落点。
-		{"访客 key 走 4003", `{"type": "auth", "token": "amkr-visitor"}`, eventbus.CloseCodeAuthFailed,
+		// 用已取消的访客 key 字面量：它现在就是一把不存在的凭据，因此必然被拒。
+		{"受限凭据走 4003", `{"type": "auth", "token": "amkr-visitor"}`, eventbus.CloseCodeAuthFailed,
 			eventbus.AuthCloseReasonFailed},
 		{"type 不是 auth 走 4003", `{"type": "hello", "token": "local-key"}`,
 			eventbus.CloseCodeAuthFailed, eventbus.AuthCloseReasonFailed},

@@ -138,7 +138,7 @@ func TestWorkspaceUsageEndpointRequiresFullAuth(t *testing.T) {
 	if recorder := serve(app, http.MethodGet, "/ui/workspace-usage.json", ""); recorder.Code != http.StatusUnauthorized {
 		t.Errorf("无凭据状态码 = %d，期望 401", recorder.Code)
 	}
-	if recorder := serve(app, http.MethodGet, "/ui/workspace-usage.json", visitorAuthorization); recorder.Code != http.StatusUnauthorized {
+	if recorder := serve(app, http.MethodGet, "/ui/workspace-usage.json", otherAuthorization); recorder.Code != http.StatusUnauthorized {
 		t.Errorf("访客状态码 = %d，期望 401", recorder.Code)
 	}
 }

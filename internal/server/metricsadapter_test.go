@@ -49,7 +49,7 @@ func TestMetricsAdapterRecordFieldMapping(t *testing.T) {
 		DurationMS:       1234,
 		FirstTokenMS:     56,
 		RequestedModelID: "alias-a",
-		CallerType:       "visitor",
+		CallerType:       "access_key",
 		ProviderID:       &providerID,
 		PoolName:         &poolName,
 		UpstreamModelID:  &upstreamModel,
@@ -78,7 +78,7 @@ func TestMetricsAdapterRecordFieldMapping(t *testing.T) {
 	if params.RequestedModelID == nil || *params.RequestedModelID != "alias-a" {
 		t.Errorf("RequestedModelID = %v，期望 alias-a", params.RequestedModelID)
 	}
-	if params.CallerType != "visitor" {
+	if params.CallerType != "access_key" {
 		t.Errorf("CallerType = %q", params.CallerType)
 	}
 	if params.ProviderID == nil || *params.ProviderID != "prov-a" {
@@ -191,7 +191,7 @@ func TestMetricsAdapterRecordStreamMapping(t *testing.T) {
 		DurationMS:       120,
 		FirstTokenMS:     30,
 		RequestedModelID: "alias-a",
-		CallerType:       "visitor",
+		CallerType:       "access_key",
 		ProviderID:       "prov-a",
 		PoolName:         "",
 		UpstreamModelID:  "upstream-a",
@@ -212,7 +212,7 @@ func TestMetricsAdapterRecordStreamMapping(t *testing.T) {
 	if params.RequestedModelID == nil || *params.RequestedModelID != "alias-a" {
 		t.Errorf("RequestedModelID = %v", params.RequestedModelID)
 	}
-	if params.CallerType != "visitor" {
+	if params.CallerType != "access_key" {
 		t.Errorf("CallerType = %q", params.CallerType)
 	}
 	if params.ProviderID == nil || *params.ProviderID != "prov-a" {

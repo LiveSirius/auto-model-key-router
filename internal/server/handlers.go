@@ -40,21 +40,29 @@ func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 // handleModels 对应 app.py:183-210 的 GET /v1/models。
 //
-// 与 /health 的差别是它**需要鉴权**，且访客看到的是另一份模型清单
-// （key_pool.available_model_ids(visitor_only=True) 返回 "amkr-" 前缀的对外名）。
+// 需要鉴权，且**按凭据的授权范围收窄**：
+//   - 本地主凭据：全部可用模型 + unified-model；
+//   - 访问密钥：只列它 providers 清单能覆盖、且模型名在它 models 清单内的模型；
+//   - 工作空间推理凭据：按该空间的 models 白名单，或退化为任务名。
 //
-// 作用域推理凭据看到的是**第三份**清单：它的空间配置了 models 白名单时按白名单收窄，
-// 否则只列任务名（那是它天然被授权调用的名字）。这份清单必须与 proxy 的判定一致——
-// 列了却调不动、或调得动却不在清单里，都会让接入方以为自己配错了。
+// 这份清单必须与 proxy 的判定一致——列了却调不动、或调得动却不在清单里，都会让
+// 接入方以为自己配错了。
 func (a *App) handleModels(w http.ResponseWriter, r *http.Request) {
 	a.withLease(w, func(resources *runtime.RuntimeResources) {
+		apiKey := auth.RequestAPIKey(r.Header)
 		context := auth.Authenticate(a.options.Authorizer, r, resources.Config.LocalAPIKey)
+		var accessKey *config.AccessKeyConfig
 		scoped := ""
 		if context == nil {
-			// 完整权限与访客都没通过，再看是不是某个空间的推理 key。判定顺序与
+			// 完整权限没通过，再看是不是某把访问密钥或某个空间的推理 key。判定顺序与
 			// proxy.Handler.authorize 一致。
-			scoped = resources.Config.WorkspaceForInferenceKey(auth.RequestAPIKey(r.Header))
-			if scoped == "" {
+			if key := resources.Config.AccessKeyFor(apiKey); key != nil {
+				if !key.Enabled {
+					writeErrorEnvelope(w, http.StatusForbidden, "访问密钥已被停用: "+key.Name)
+					return
+				}
+				accessKey = key
+			} else if scoped = resources.Config.WorkspaceForInferenceKey(apiKey); scoped == "" {
 				writeErrorEnvelope(w, http.StatusUnauthorized, authFailureMessage)
 				return
 			}
@@ -65,9 +73,14 @@ func (a *App) handleModels(w http.ResponseWriter, r *http.Request) {
 			writeInternalError(w)
 			return
 		}
-		names := pool.AvailableModelIDs(context != nil && context.VisitorOnly())
-		if scoped != "" {
+		var names []string
+		switch {
+		case accessKey != nil:
+			names = accessKeyModelNames(pool, accessKey)
+		case scoped != "":
 			names = scopedModelNames(resources.Config, scoped)
+		default:
+			names = pool.AvailableModelIDs(nil)
 		}
 		items := make([]*canonical.Value, 0, len(names))
 		for _, modelID := range names {
@@ -82,6 +95,31 @@ func (a *App) handleModels(w http.ResponseWriter, r *http.Request) {
 			canonical.ObjectPair{Key: "data", Value: canonical.NewArray(items...)},
 		))
 	})
+}
+
+// accessKeyModelNames 列出某把访问密钥可用且**在它清单内**的模型名（升序）。
+//
+// 两步过滤缺一不可，否则清单会与实际能力脱节：
+//   - pool.AvailableModelIDs 按 providers 清单收窄，排除「有配置但一个上游都用不了」
+//     的模型；
+//   - AllowsModel 再按 models 清单收窄到这把 key 被明确授权的名字。
+//
+// unified-model 由 AvailableModelIDs 追加在末尾，这里必须**剔掉**：访问密钥用不了
+// 它（见 proxy 的同名判断），列出来就是给了个必然 403 的名字。
+func accessKeyModelNames(pool *keypool.KeyPool, accessKey *config.AccessKeyConfig) []string {
+	available := pool.AvailableModelIDs(accessKey)
+	names := make([]string, 0, len(available))
+	for _, name := range available {
+		if name == config.UNIFIED_MODEL_ID {
+			continue
+		}
+		if !accessKey.AllowsModel(name) {
+			continue
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // scopedModelNames 列出某个工作空间的作用域凭据**可直呼**的名字（升序）。

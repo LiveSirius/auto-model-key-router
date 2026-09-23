@@ -81,10 +81,13 @@ var (
 	qFloat24   = canonical.NewFloat(24)
 	qFloatOne  = canonical.NewFloat(1)
 	qInt60     = canonical.NewInt("60")
-	// 三档：本机（local_api_key）、访客（amkr-visitor）、工作空间推理凭据。
-	// workspace 是 Go 侧新增（参照实现只有前两档），语料锁定的 filter/snapshot
-	// 用例都只用 local 与 visitor，因此加这一档不影响它们。
-	callerTypes = []string{"local", "visitor", "workspace"}
+	// 三档：本机（local_api_key）、工作空间推理凭据、访问密钥。后两者是 Go 侧新增
+	// （参照实现只有 local 与已删除的 visitor 两档）。
+	//
+	// 访问密钥取代了 visitor 档：两者都是「分发给外部使用者的受限凭据」，但访问密钥
+	// 一人一把、各带清单，因此指标里分开统计才有意义。老库里残留的 visitor 行不再
+	// 出现在过滤器里（值域即契约，见 qLiteral）。
+	callerTypes = []string{"local", "workspace", "access_key"}
 )
 
 // metricsSnapshotParams 对应 app.py:212-216 的 GET /metrics 签名。

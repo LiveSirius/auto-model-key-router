@@ -17,7 +17,7 @@ import (
 )
 
 // fixtureTemplate 是 Go 侧测试用的最小 v4 配置：与语料夹具同形（含一个没有任何 key
-// 的模型、一个允许访客的 key、一个隐藏别名、unified_model），但路径由调用方填。
+// 的模型、一个隐藏别名、unified_model），但路径由调用方填。
 //
 // 三个 %s 依次是 endpoint_capabilities_path、metrics_db_path、log_file_path（都指向
 // 测试的临时目录），随后两个 %v 是 ops_enabled 与 webui_enabled。
@@ -42,7 +42,7 @@ const fixtureTemplate = `{
       "base_url": "https://a.example.test",
       "keys": {
         "key-a": {"api_key": "sk-secret-a", "enabled": true},
-        "key-b": {"api_key": "sk-secret-b", "enabled": true, "allow_visitor": true}
+        "key-b": {"api_key": "sk-secret-b", "enabled": true}
       },
       "routes": {"openai": "v1/chat/completions"}
     },
@@ -171,11 +171,15 @@ func serve(app *App, method, path, authorization string) *httptest.ResponseRecor
 	return recorder
 }
 
-// fullAuthorization / visitorAuthorization 是测试用的两个凭据。
+// fullAuthorization 是本地主凭据；otherAuthorization 是一个**不被接受**的凭据。
+//
+// 它刻意沿用已取消的访客 key 字面量：这些用例关心的是「非完整权限的凭据会被挡在
+// 管理面之外」，而 amkr-visitor 现在正好就是一把不存在的凭据（见 internal/auth 与
+// TestVisitorKeyIsRejected）。用它比编一个假 key 更能说明「访客模式确实没了」。
 const (
-	fullAuthorization    = "Bearer local-key"
-	visitorAuthorization = "Bearer amkr-visitor"
-	notFoundBody         = `{"detail":"Not Found"}`
+	fullAuthorization  = "Bearer local-key"
+	otherAuthorization = "Bearer amkr-visitor"
+	notFoundBody       = `{"detail":"Not Found"}`
 )
 
 // stubCheckUpdate 是版本检查桩：不联网，且 LatestVersion 比任一测试版本都新。
