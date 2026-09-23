@@ -164,7 +164,8 @@ func hasWorkspaceCredential(entry *canonical.Value) bool {
    `/api` 面在语义上不连续，挂 `/ui/` 既落在冻结清单之外，也让「不开 WebUI 就没有
    这些读数」这件事顺理成章。判断标准是**它是不是管理面的正式资源**，而不是「能不
    能挂到 /ui 躲开语料」。
-4. **访客 Key 不能使用任务**，带上该头也一样。
+4. **访问密钥不能使用任务**，带上该头也一样（它不绑定工作空间，该头只用来选任务所在的
+   空间，而访问密钥一律进不了任务路由）。
 5. **错误文本**：工作空间引入的新错误（`workspaces 必须是对象`、`工作空间名不能为空`、
    `工作空间名重复: %s`、`工作空间 %s 必须是对象`、`workspaces.<空间>.tasks...`）没有
    Python 先例，是自由措辞；但既有的 `任务…` / `tasks.<名字>…` 文本被语料逐字节锁定，
@@ -265,16 +266,16 @@ CREATE TABLE IF NOT EXISTS request_workspace (
 
 1. `request_id` 是 `INTEGER PRIMARY KEY`，即 rowid 别名。一对一约束与 JOIN 索引
    同时到手，且**不会**在 `sqlite_master` 里多出一条索引条目。
-2. `request_metrics` 的建表原文、列序与索引定义被 `internal/metrics/testdata/schema.jsonl`
+2. `request_metrics` 的建表原文、列序与索引定义原先由 `internal/metrics/testdata/schema.jsonl`
    **逐字节锁定**（`TestSchemaMatchesPython`），那是整条兼容链的根。而
    `ALTER TABLE ... ADD COLUMN` **会重写 `sqlite_master.sql`**（实测：即便在全新库
-   上也会把新列以追加形式写进原文），加列必然打破那份语料——**而语料生成器已随
-   Python 退役，无法重生成**。旁挂表让 `request_metrics` 自身逐字节不变，差异面从
-   「表定义被改写」缩小到「多了一张表」。
+   上也会把新列以追加形式写进原文），加列必然打破那份语料。旁挂表让
+   `request_metrics` 自身逐字节不变，差异面从「表定义被改写」缩小到「多了一张表」。
 
-因此 `TestSchemaMatchesPython` / `TestLegacyDatabaseUpgrade` 里有一份显式白名单
-（`extraMasterEntries`）：测试的职责从「完全一致」变成「除白名单外完全一致」。往库里
-再加第二个对象会让它立刻失败——兼容分歧必须是白名单式的、被逐条审视的。
+   注意：那份语料连同对拍测试已随「冻结语料退役」一并删除，因此这条理由现在只剩
+   **历史依据**——旁挂表的设计不再由它守护。`request_metrics` 的列序与索引定义仍是
+   兼容性契约（旧二进制要能继续读写同一个库），改动前请回到本节与 `internal/metrics`
+   的 schema 说明确认影响面。
 
 > 旧二进制打开新库时只是看不到这张表，仍能正常读写指标。加列则会遇到它不认识的列序
 > （`SELECT *` 与 `table_info` 的输出都会变）。
@@ -456,10 +457,11 @@ fragment 更宽的攻击面。如果 `X-AMKR-Workspace` 能换空间，一把泄
 
 `config.Validate` 用**一张占用表**统管两把 key，因此下列情况全部非法：
 
-- 占用保留的访客 key（`amkr-visitor`）；
 - 与 `local_api_key` 相同（那等于把主凭据发出去）；
 - 与**任何**空间的**任何**一把 key 重复——**包括跨类型**：一个空间的面板 key 不得
-  等于另一个空间的推理 key。
+  等于另一个空间的推理 key；
+- 与**任何一把访问密钥**（`access_keys.*.key`）重复：访问密钥也走 `/v1` 面，与推理
+  key 的判定彼此独立，撞车会让同一把 key 的权限取决于先命中哪张清单。
 
 最后一条是必须的：两把 key 的判定发生在不同调用点（面板面 vs `/v1` 面），同一个字符串
 两处都命中会让权限边界取决于走到哪条路由。错误文本沿用既有的
@@ -496,8 +498,8 @@ fragment 更宽的攻击面。如果 `X-AMKR-Workspace` 能换空间，一把泄
 
 ### key 冲突：报错，而不是悄悄换一个
 
-包里的 `api_key` 撞上目标实例上**别处**的凭据（另一个空间、或 `local_api_key`），或者用了
-保留的 `amkr-visitor` 时，导入**报错**，错误信息指出与哪个空间撞了。
+包里的 `api_key` 撞上目标实例上**别处**的凭据（另一个空间、`local_api_key`，或任意一把
+**访问密钥**）时，导入**报错**，错误信息指出与哪个空间撞了。
 
 不悄悄换一个新 key 的理由是：换掉看似「让导入成功」，实际藏起了一件用户必须知道的事——
 那把 key 通常已经嵌在别人的页面里，换掉之后**旧 key 会指向别人别的空间**，而响应里没有
@@ -538,10 +540,11 @@ fragment 更宽的攻击面。如果 `X-AMKR-Workspace` 能换空间，一把泄
       `hasWorkspaceCredential` 与 `config.parseTasks`；带 `api_key`、`inference_key`
       或 `models` 的空间在**两处**都必须留下）
 - [ ] 面板 key 是否仍然只从**请求头**解析，且生效时忽略 `X-AMKR-Workspace`？
-- [ ] 推理 key 是否同样钉死空间、忽略请求头，且走的仍是「先完整权限/访客，再作用域」
-      这个顺序？（顺序反了会让一把空间 key 变成管理员凭据）
+- [ ] 推理 key 是否同样钉死空间、忽略请求头，且走的仍是「先完整权限、再访问密钥、最后
+      作用域凭据」这个顺序？（顺序反了会让一把空间 key 变成管理员凭据）
 - [ ] 模型清单是否在**别名解析之后**判定，且 `/v1/models` 的收窄与 proxy 的判定一致？
-- [ ] 两把 key 的占用表是否仍然**跨类型**统一检查？（面板 key 撞推理 key 必须非法）
+- [ ] 两把 key 的占用表是否仍然**跨类型**统一检查？（面板 key 撞推理 key、以及任一者撞
+      访问密钥，都必须非法）
 - [ ] 新的响应体是否泄漏了任一 key 或隐藏别名？（目录接口只给 `has_inference_key`
       布尔，不得返回 key）
 - [ ] `webui/panel.js` 是否又碰了 `localStorage` 或发了 `X-AMKR-Workspace`？

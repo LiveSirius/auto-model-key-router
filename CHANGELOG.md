@@ -1,5 +1,101 @@
 # Changelog
 
+## [Unreleased]
+
+### 重大变更
+
+- **访客模式整体移除，改为「访问密钥」资源。** 原先固定的共享凭据 `amkr-visitor`（权限由
+  每个上游 key 上的 `allow_visitor` 开关拼出来）连同它的一整套模型级规则一起删除：
+  `amkr-` 模型名前缀、`visitor` 权限档、`ModeVisitor` / `VisitorModelPrefix`、`visitor_test.go`
+  全部不再存在。`amkr-visitor` 现在与任何错误凭据一样被 `401` 拒绝。
+
+  原因是固定访客 key 的两处硬伤：**所有人共用一把**，且权限只能靠逐个改上游 key 的开关来
+  拼——既做不到一人一把，也做不到按人收窄，更回答不了「这把 key 是谁的、它本该能调什么」。
+
+  取代它的是配置顶层的 `access_keys`：形状 `{"<key_id>": {"name"?, "key", "enabled"?,
+  "providers"?, "models"?}}`，用对象而不是数组（`key_id` 是更新与轮换时的稳定定位符，数组
+  下标不是身份）。生成的 key 前缀是 `amkr_ak_` + 43 位 base64url（32 字节随机数，共 50
+  字符），与既有的 `amkr_`、`amkr_ws_`、`amkr_ik_` 并列。
+
+  `providers`（供应商 ID 清单）与 `models`（模型名清单，真实 ID 或别名）都是**三态**：
+  **省略 = 不限制**，**`[]` = 一个都不许**，有内容 = 只许这些。「省略」与「空数组」是两种
+  不同的授权状态，配置、管理 API 与 WebUI 三处都保住这个区别（用 `nil` 判定而不是
+  `len(...) == 0`，后者会把运维写下的禁令当成放开）。`models` 按调用方**写的原始名字**比对，
+  发生在**别名解析之前**——清单里因此可以写别名，而只要限制了模型，同一个模型换个写法也绕过
+  不去。清单里每个名字都会在写盘时逐个校验存在性，写错一个直接 `422`，而不是让某把已经分发
+  出去的 key 静默少一项权限。
+
+  访问密钥的权限边界：**不能用 `unified-model`**（全局计划不属于任何清单能收窄的范畴）；
+  **不能用任务名**（任务自己固定的模型可能不在清单里，绕过去等于清单失效）；拿不到 `/metrics`
+  与 `/api/*` 管理接口。它**不绑定工作空间**，跟着 `X-AMKR-Workspace` 头走，与本地主凭据一致。
+  被停用的 key 回 `403`（`访问密钥已被停用: <name>`）而不是 `401`——停用是可恢复的已知身份，
+  错误凭据不是，两者的排查方向完全不同。
+
+  解析落在 `internal/proxy/handler.go` 的 `authorize` 与 app 面（`/v1/models`），顺序是
+  **完整权限 → 访问密钥 → 工作空间推理 key**；本地主凭据必须**先**判，否则一把受限 key 可能
+  被当成管理员凭据用。与工作空间推理 key 一样刻意不进 `internal/auth`——那包是不依赖 `config`
+  的纯函数，而这两条通道要读配置清单。
+
+  凭据唯一性也随之扩成**跨类型统一检查**：`local_api_key`、`workspaces.*.api_key`、
+  `workspaces.*.inference_key` 与 `access_keys.*.key` 共用一张占用表，任意两处相同都是错误
+  （写盘时 `422`，加载时是配置错误），而不是「取第一个」——撞车会让同一把 key 的权限取决于先
+  命中哪张清单。
+
+  验证：`internal/config/model_test.go`（`TestAccessKeyParseErrors` 等，含三态与引用校验）、
+  `internal/api/accesskeys_test.go`（明文出现时机、三态、404/422、撞车）、
+  `internal/server/handlers_test.go` 与 `internal/proxy` 的访问密钥收窄用例。
+
+- **`/health` 删除 `visitor_feature_installed`、`visitor_access_enabled`、`visitor_key_count`
+  三个字段**（破坏性变更）。固定访客 key 不再存在；访问密钥的数量与管理走 `/api/access-keys`，
+  不属于无鉴权的存活探针该报的内容。按字段名取值的老调用方（CLI、运维脚本、agent 配置工具）
+  需要同步去掉对这三个字段的处理。
+
+- **`caller_type` 的 `visitor` 档改成 `access_key`。** 指标库里请求来源现在只有三档：
+  `local`（主凭据）、`workspace`（工作空间推理凭据）、`access_key`（访问密钥）。
+  `internal/metrics/store.go` 的默认分组键、`schema.go` 回填 UPDATE 的合法值表与
+  `server/query.go` 的字面量过滤三处同步改齐；老库里残留的 `visitor` 行会在下一次缺列升级时
+  被收敛到 `local`（那些流量来自一把已不存在的凭据，没有更强的归属可还原）。
+  `/metrics/requests`、`/metrics/series` 的 `caller_type` 过滤器与 WebUI 的标签查表一并更新。
+
+- **`allow_visitor` 不再被读取，也不再出现在管理 API 的请求体与响应里。**
+  `ProviderKeyCreate` / `KeyCreate` / `KeyUpdate` 请求体不再声明该字段（APIModel 是
+  `extra="forbid"`，继续传会得到 `422 extra_forbidden`），`KeyResponse` /
+  `ProviderResponse` / `ModelResponse` 也不再回显它，模型响应里由它派生的
+  `visitor_available` 同样消失（响应体因此变短：以字段名取值的老调用方需同步）。配置导出
+  原先的 `include_visitor` 参数随之取消——导出的形状从此与配置无关。已在配置文件里写下的
+  `allow_visitor` **不会导致加载失败**（未知字段照旧原样保留、原样写回），只是从此不再有
+  任何效果：受限凭据的授权改由访问密钥自己的两份清单表达。
+
+### 新增
+
+- **访问密钥的管理 API**（Go 侧新增，登记在 `workspacePatterns()` 与 `internal/api/server.go`
+  的 `patterns` 里，与冻结的 47 条 Python 路由清单不重叠）：
+
+  - `GET /api/access-keys` → `{config_revision, access_keys: [{id, name, enabled,
+    key_fingerprint, providers?, models?}]}`。`providers` / `models` **只在配置里显式写了**
+    该字段时才出现（省略 = 不限制），空数组原样返回（一个都不许）；**明文永不出现**。
+  - `POST /api/access-keys` → `201`，请求体 `{config_revision, name, key?, enabled?,
+    providers?, models?}`；`key` 不传由服务端生成。响应是这条记录**外加明文 `key`**——明文
+    只在新建与轮换时出现一次，凭据随列表散出去等于每次打开管理页都重新泄漏一遍。
+  - `PUT /api/access-keys/{key_id}` → 改名字、启停与两份清单，**不换 key**。`providers` /
+    `models` **必填但可为 `null`**（`[...]` 限定、`[]` 一个都不许、`null` 清除回到不限制）：
+    必填是为了不让一次漏传字段被当成「清除限制」，那是把授权悄悄放宽。
+  - `POST /api/access-keys/{key_id}/rotate` → 换掉明文并返回新值，**旧 key 立即失效**。独立
+    端点而不是塞进「更新」：换 key 会让调用方手里那把立刻失效，是必须单独告知的动作。
+  - `DELETE /api/access-keys/{key_id}` → `204`，删掉最后一把时 `access_keys` 段一并移除。
+  - 404 文案 `访问密钥不存在: <id>`；422 文案与配置层逐字一致
+    （`access_keys.<id>.providers[<n>] 引用了未配置的供应商: <name>` 等四类）。
+
+  访问密钥**不随** `/api/config/export|import` 迁移（`TransferableConfig` 刻意不带它）：与
+  `local_api_key` 同类，是本实例的入站凭据，而导出文件常被贴进工单与聊天记录。
+
+- **WebUI 新增「访问密钥」页**（导航 id `access-keys`，配置分组下，`webui/pages/accesskeys.js`）：
+  列表、新建（明文只显示一次并可复制）、改名、启停、编辑两份清单、轮换、删除。供应商页的
+  「访客访问」勾选框与概览运行卡片的「访客访问」行随功能删除一并移除。
+
+- 供应商删除/迁移的凭据占用表把访问密钥也纳进来：工作空间整包导入时，包里的 `api_key`
+  撞上任意一把访问密钥同样**报错**而不是悄悄换一个（`configops.secretOwnerOutside`）。
+
 ## [5.2.1] - 2026-09-19
 
 ### 新增

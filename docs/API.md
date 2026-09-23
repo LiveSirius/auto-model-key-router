@@ -27,12 +27,17 @@ x-api-key: your-local-api-key
 | 调用方 | 可访问接口 | 说明 |
 | --- | --- | --- |
 | 本地 API key | `/v1/models`、`/v1/*`、`/metrics`、`/api/*` | 完整权限 |
-| 固定 visitor key `amkr-visitor` | `/v1/models`、`/v1/*` | 需要安装 `visitor` 扩展，只能使用允许访客访问的 Key |
+| **访问密钥**（`amkr_ak_…`） | `/v1/models`、`/v1/*` | 每把密钥自带 `providers` / `models` 两份清单；不绑定工作空间，随 `X-AMKR-Workspace` 头走。**不能**用 `unified-model` 与任务名，拿不到 `/metrics` 与管理接口 |
 | **工作空间推理 key**（`amkr_ik_…`） | `/v1/models`、`/v1/*` | 空间由 key **钉死**（`X-AMKR-Workspace` 被忽略）；只能用任务名，或 `workspaces.<空间>.models` 清单内的模型 |
 | 工作空间面板 key（`amkr_ws_…`） | `/api/tasks*`、`/ui/workspace-panel.json` | 空间由 key 钉死；**不能**用 `/v1/*` |
 | 无 key | `HEAD /`、`GET /health` | 当运行时 `local_api_key` 为空时，其他接口也按本地完整权限处理 |
 
-visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。visitor 不能使用内部别名、真实模型 ID、`unified-model` 或没有开启 `allow_visitor` 的 Key。
+访问密钥取代了原先的固定 visitor key `amkr-visitor`（已整体移除，该字符串现在与任何错误凭据一样被 `401` 拒绝）。真实模型名直接暴露，不再有 `amkr-{真实模型ID}` 这层前缀。它以配置的 `access_keys.<key_id>` 为资源，管理走 `/api/access-keys` 系列：
+
+- `providers` 是供应商 ID 清单，`models` 是模型名清单（真实模型 ID **或**别名，按调用方**写的原始名字**比对，发生在别名解析之前）。两份清单都是**省略 = 不限制**、**显式 `[]` = 一个都不许**，两者是不同的状态。
+- 被停用的密钥回 `403`（`访问密钥已被停用: <name>`），与「凭据不认识」的 `401` 刻意区分开：停用是可恢复的，认错凭据不是。
+- 明文只在新建与轮换的响应里出现一次，其余任何接口只回指纹。
+- 访问密钥**不绑定工作空间**，用法与本地主凭据一致：`X-AMKR-Workspace` 照常生效。
 
 推理 key 是「AMKR 作为多个项目共用网关」的凭据：一把 key 对应一个工作空间，被配进各个项目的环境变量。它不能用 `unified-model`（那是运维为整台实例挑的全局计划，不属于任何空间），也不能用别的空间的模型或任务名。
 
@@ -42,13 +47,13 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | --- | --- | --- | --- |
 | `HEAD` | `/` | 无 | 存活探针，返回 `204` |
 | `GET` | `/health` | 无 | 服务、配置和端点能力状态 |
-| `GET` | `/v1/models` | 本地或 visitor | 查询当前调用方可用模型 |
-| `POST` | `/v1/chat/completions` | 本地或 visitor | OpenAI Chat Completions 兼容接口 |
-| `POST` | `/v1/messages` | 本地或 visitor | Anthropic Messages 兼容接口 |
-| `POST` | `/v1/messages/count_tokens` | 本地或 visitor | 本地估算 Anthropic 输入 token |
-| `POST` | `/v1/responses` | 本地或 visitor | OpenAI Responses 兼容接口 |
-| `POST` | `/v1/embeddings` | 本地或 visitor | OpenAI Embeddings 兼容接口 |
-| 多种 | `/v1/{path}` | 本地或 visitor | 其他 OpenAI-compatible 接口透传 |
+| `GET` | `/v1/models` | 本地或访问密钥 | 查询当前调用方可用模型 |
+| `POST` | `/v1/chat/completions` | 本地或访问密钥 | OpenAI Chat Completions 兼容接口 |
+| `POST` | `/v1/messages` | 本地或访问密钥 | Anthropic Messages 兼容接口 |
+| `POST` | `/v1/messages/count_tokens` | 本地或访问密钥 | 本地估算 Anthropic 输入 token |
+| `POST` | `/v1/responses` | 本地或访问密钥 | OpenAI Responses 兼容接口 |
+| `POST` | `/v1/embeddings` | 本地或访问密钥 | OpenAI Embeddings 兼容接口 |
+| 多种 | `/v1/{path}` | 本地或访问密钥 | 其他 OpenAI-compatible 接口透传 |
 | `GET` | `/metrics` | 仅本地 | 查询 SQLite 聚合调用统计 |
 | `GET` | `/metrics/requests` | 仅本地 | 分页查询持久化上游调用明细 |
 | `GET` | `/metrics/series` | 仅本地 | 查询补零的持久化统计时间桶 |
@@ -71,6 +76,9 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 | `POST` | `/api/workspaces/{workspace}/inference-key` | 仅本地 | 轮换该空间的**推理 key**（不动面板 key）；新 key 仅在本次响应返回 |
 | `PUT` | `/api/workspaces/{workspace}/models` | 仅本地 | 设定该空间**允许直呼**的模型清单（`null` 清除限制，`[]` 一个都不许） |
 | `POST` | `/api/workspaces/export`、`/api/workspaces/import` | 仅本地 | 导出或导入工作空间**整包**（**带** `api_key`，不含 providers/models），与配置导入导出相互独立 |
+| `GET/POST` | `/api/access-keys` | 仅本地 | 列出访问密钥（只给指纹）或新建一把（响应里含**明文 `key`**，仅此一次） |
+| `PUT/DELETE` | `/api/access-keys/{key_id}` | 仅本地 | 改名、启停与两份清单（**不换 key**），或删除 |
+| `POST` | `/api/access-keys/{key_id}/rotate` | 仅本地 | 换掉该访问密钥的明文（旧 key 立即失效）；新 key 仅在本次响应返回 |
 | `GET/PUT` | `/api/settings` | 仅本地 | 查询或更新监听、超时和重试设置 |
 | `POST` | `/api/settings/local-api-key` | 仅本地 | 重置本地鉴权 Key；新 Key 仅在本次响应返回 |
 | `POST` | `/api/update/check` | 仅本地 | 复用 CLI 的 GitHub Releases 版本检查 |
@@ -96,8 +104,8 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 管理面的 47 条与运维面的 7 条路由列在 `routePatterns()` / `opsRoutePatterns()` 里，响应
 由逐字节语料锁定——那是**已发布接口**的回归凭证，不能随意增减。新增能力因此分两类：
 
-- **管理面的正式资源**（工作空间自身的读/改/删与整包迁移）注册在 `/api` 之下，但列在
-  **另一份**清单（`workspacePatterns()`）里。它们没有历史版本可对照，塞进那 47 条会让
+- **管理面的正式资源**（工作空间自身的读/改/删与整包迁移、访问密钥）注册在 `/api` 之下，
+  但列在**另一份**清单（`workspacePatterns()`）里。它们没有历史版本可对照，塞进那 47 条会让
   「这 47 条逐字节等于已发布行为」这句话失去意义。两批注册在同一棵 mux 上，因此错方法的
   `405` / `Allow` 判定要同时看两份清单。
 - **本项目自有的读数**（价格目录 `/ui/pricing.json`、自更新入口、工作空间用量
@@ -111,7 +119,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 体不需要（也不允许）新增 `workspace` 字段。
 
 与 `/ui/pricing.json` 的区别是**鉴权**：价格目录是公开只读数据，自更新会替换磁盘上的
-可执行文件并重启服务，因此 `/ui/update/apply` 要求完整权限（访客 key 一律 401），
+可执行文件并重启服务，因此 `/ui/update/apply` 要求完整权限（访问密钥一律 401），
 只有 `/ui/update/status` 不鉴权（它只回答「这个构建有没有自更新能力」）。
 `/ui/workspace-usage.json` 与自更新同类，要求完整权限。
 
@@ -123,7 +131,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 
 | 参数 | 类型 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `model` | string | 是 | 真实模型 ID、模型别名、隐藏别名（如各 target 的 `upstream_model`）、`unified-model`、任务名（`TASK_XXXXXX`）、`模型[Key名称]` 或 visitor 公共模型 ID |
+| `model` | string | 是 | 真实模型 ID、模型别名、隐藏别名（如各 target 的 `upstream_model`）、`unified-model`、任务名（`TASK_XXXXXX`）或 `模型[Key名称]` |
 | `stream` | boolean | 否 | 为 `true` 时使用流式响应，并自动向上游补充 `stream_options.include_usage=true` |
 | `stream_options` | object | 否 | 流式选项；服务会保留已有字段并强制加入 `include_usage=true` |
 | `reasoning_effort` | string | 否 | 推理强度；模型配置中的非空值优先级更高 |
@@ -167,7 +175,7 @@ visitor 模型使用 `amkr-{真实模型ID}` 形式，例如 `amkr-gpt-5.5`。vi
 - 不在任务 `params` 里的参数照常透传。`max_tokens` 与 Anthropic 的 `stop` 一样有跨方言同义字段：任务固定了 `max_tokens` 时，Responses 方言的 `max_output_tokens` 同样视为冲突（`400`），不会绕过后被静默丢掉。
 - 任务不接受调用方指定 Key（`TASK_000001[main]` 返回 `400`），Key 仍由目标模型自身的路由模式决定。
 - 任务可以**尚未指定模型**（创建时不传 `model`，先把名字与固定参数定下来）：此时请求它会得到 `404` 与「任务 TASK_000001 尚未指定模型…」，而**不是**回落到别的模型。见「任务路由接口」里的 TaskCreate。
-- 访客 Key 不能访问任务名。
+- 访问密钥不能访问任务名：任务自己固定的模型可能不在这把密钥的 `models` 清单里，绕过去等于清单失效。
 
 #### 工作空间
 
@@ -189,7 +197,7 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 - 该头**不会**转发给上游：它是 AMKR 自己的路由状态，上游既看不懂也不该看到，因此与 `Authorization`、`X-Api-Key`、`Host` 等同属转发前剔除的请求头。
 - 未配置的工作空间名不是错误：任务查表落空后会按普通模型名继续解析，因此最终和「模型未配置」是同一个 `404`。
 - 工作空间只隔离任务：模型的 ID、别名、隐藏别名与 `unified-model` 仍然全局唯一，任务名也不能与它们撞名。
-- 访客 Key 不能使用任务，带上该头也一样。
+- 访问密钥不能使用任务（它根本不进任务路由），带上该头也一样。
 
 工作空间本身的管理（列出/改名/删除）走 `/api/workspaces*`，见下方「任务路由接口」一节。
 
@@ -312,14 +320,13 @@ curl http://127.0.0.1:8000/v1/chat/completions \
 | `config_path` | string | 当前配置文件绝对路径；嵌入式应用可能为空 |
 | `local_auth_enabled` | boolean | 是否设置本地鉴权 |
 | `local_api_key_fingerprint` | string | 本地 key 的 SHA-256 前 12 位 |
-| `visitor_feature_installed` | boolean | 是否安装 visitor 扩展 |
-| `visitor_access_enabled` | boolean | 是否存在启用且允许 visitor 的 Key |
-| `visitor_key_count` | integer | visitor 可用 Key 总数 |
 | `unified_model` | object/null | 当前真实模型和可选固定 Key；含 `default` 与可选的 `image` / `embeddings` 计划 |
 | `native_endpoint_states` | object | 上游原生端点能力缓存 |
 | `ops_enabled` | boolean | 运维接口是否注册（见 `--no-ops` / `enable_ops`） |
 
 Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或管理 API 暴露。长期启停 Key 请更新配置中的 `enabled`。
+
+随访客模式整体移除，`/health` 不再有 `visitor_feature_installed`、`visitor_access_enabled` 与 `visitor_key_count` 三个字段（这是破坏性变更，按字段名取值的老调用方需要同步去掉）。访问密钥的数量与管理走 `/api/access-keys`，不属于无鉴权的存活探针该报的内容。
 
 ### `GET /v1/models`
 
@@ -338,7 +345,9 @@ Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或�
 }
 ```
 
-本地调用只返回当前有可用 Key 的真实模型、别名和已配置的 `unified-model`。visitor 只返回 `amkr-*` 公共模型 ID。
+本地调用只返回当前有可用 Key 的真实模型、别名和已配置的 `unified-model`。
+
+访问密钥返回的是**按它自己两份清单收窄后**的清单：先按 `providers` 清单排掉一个上游都用不了的模型，再按 `models` 清单排掉未授权的名字，排序后返回。它看不到 `unified-model`（访问密钥用不了它，列出来就是一个必然 `403` 的名字）。这份清单与代理面的判定同源——列了却调不动、或调得动却不在清单里，都会让接入方以为自己配错了。
 
 工作空间推理 key 返回**第三份**清单：该空间配了 `models` 时就是它，没配时退化成该空间的**任务名**（那是它天然被授权调用的东西）。两份清单都必须与代理面的判定一致——列了却调不动、或调得动却不在清单里，都会让接入方以为自己配错了。`unified-model` 不出现在这份清单里（它是全局计划，作用域凭据用不了）。
 
@@ -350,7 +359,7 @@ Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或�
 
 ### `GET /metrics`
 
-仅接受本地完整权限，不接受 visitor key。
+仅接受本地完整权限，不接受访问密钥与工作空间凭据。
 
 可选查询参数：
 
@@ -373,7 +382,7 @@ Key 的失败次数和冷却属于内部调度细节，不通过 `/health` 或�
 | `current_rpm` | 当前窗口内请求数，即近 1 分钟 RPM |
 | `current_tpm` | 当前窗口内 token 总数，即近 1 分钟 TPM |
 | `total` | 全局累计统计 |
-| `caller_types` | 按 `local`、`visitor` 拆分 |
+| `caller_types` | 按 `local`、`workspace`、`access_key` 拆分 |
 | `models` | 按真实模型 ID 拆分 |
 | `requested_models` | 按请求中的模型名或别名拆分 |
 | `model_requested_models` | 真实模型到请求模型名的嵌套统计 |
@@ -407,7 +416,7 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
 | --- | --- | --- | --- |
 | `hours` | number | `24` | 最近小时数，必须大于 `0` 且不超过 `720` |
 | `all_history` | boolean | `false` | 为 `true` 时忽略 `hours` 并查询全部历史 |
-| `caller_type` | string | 无 | `local` 或 `visitor` |
+| `caller_type` | string | 无 | `local`、`workspace` 或 `access_key` |
 | `model_id` | string | 无 | 真实路由模型 ID |
 | `requested_model_id` | string | 无 | 客户端请求中的模型名或别名 |
 | `provider_id` | string | 无 | 请求发生时的供应商 ID |
@@ -555,16 +564,15 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
 | `api_key` | string | 是 | 非空 |
 | `base_url` | string/null | 否 | 决定 Key 落在哪个供应商：匹配已存在供应商的 `base_url`，否则自动创建供应商；缺省用配置的 `default_base_url`，否则为 `https://api.openai.com` |
 | `enabled` | boolean | 否 | `true` |
-| `allow_visitor` | boolean | 否 | `false` |
 | `upstream_routes` | object/null | 否 | 兼容字段；会写入该 Key 的 `base_url` 对应的 URL 级路由，而不是保存到 Key 上 |
 
 `base_url` 最终必须以 `http://` 或 `https://` 开头。KeyCreate/KeyUpdate 中的 `upstream_routes` 仅用于兼容旧客户端；值只能是相对路径或路径前缀，例如 `{"anthropic": "anthropic/"}` 会规范化为 URL 级配置 `upstream_routes[base_url].anthropic = "anthropic/v1/messages"`。
 
-> v4 中 Key 存储在 `providers.<id>.keys` 下，模型通过 `targets[]` 引用 `{provider, key, upstream_model}`。本组「模型 Key 接口」与 KeyCreate/KeyUpdate 是面向模型的操作：`POST /api/models/{model_id}/keys` 会在供应商下创建（或定位）Key 并把它绑定为该模型的一个 target；`PUT/DELETE` 只影响当前模型的绑定（详见下文）。如需直接管理供应商 Key（改名、启停、删除、访客权限），使用 `/api/providers/{provider_id}/keys` 系列接口。
+> v4 中 Key 存储在 `providers.<id>.keys` 下，模型通过 `targets[]` 引用 `{provider, key, upstream_model}`。本组「模型 Key 接口」与 KeyCreate/KeyUpdate 是面向模型的操作：`POST /api/models/{model_id}/keys` 会在供应商下创建（或定位）Key 并把它绑定为该模型的一个 target；`PUT/DELETE` 只影响当前模型的绑定（详见下文）。如需直接管理供应商 Key（改名、启停、删除），使用 `/api/providers/{provider_id}/keys` 系列接口。
 
 #### KeyUpdate
 
-字段与 KeyCreate 相同，全部可省略，但请求中至少需要出现一个字段。省略 `api_key` 会保留原密钥；`name`、`api_key`、`enabled`、`allow_visitor` 不能为 `null`。`base_url: null` 会恢复为配置的默认上游地址；`upstream_routes: null` 或 `{}` 会清空自定义路由。
+字段与 KeyCreate 相同，全部可省略，但请求中至少需要出现一个字段。省略 `api_key` 会保留原密钥；`name`、`api_key`、`enabled` 不能为 `null`。`base_url: null` 会恢复为配置的默认上游地址；`upstream_routes: null` 或 `{}` 会清空自定义路由。
 
 #### ModelResponse
 
@@ -576,13 +584,11 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
   "auto_hidden_aliases": ["gpt-5.5-2026-01-01"],
   "routing_mode": "round_robin",
   "reasoning_effort": "medium",
-  "visitor_available": true,
   "keys": [
     {
       "name": "main",
       "base_url": "https://api.openai.com",
       "enabled": true,
-      "allow_visitor": true,
       "api_key_fingerprint": "0123456789ab"
     }
   ]
@@ -598,7 +604,6 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
   "name": "main",
   "base_url": "https://api.openai.com",
   "enabled": true,
-  "allow_visitor": true,
   "api_key_fingerprint": "0123456789ab"
 }
 ```
@@ -636,7 +641,6 @@ v4 起新写入的调用只按供应商与上游模型归因（模型池维度�
     {
       "name": "main",
       "enabled": true,
-      "allow_visitor": true,
       "api_key_fingerprint": "0123456789ab",
       "capabilities": {
         "models": ["gpt-5.5"],
@@ -770,7 +774,7 @@ Key 接口操作的是「模型绑定的 Key」（v4 中即该模型 `targets[]`
 curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
   -H "Authorization: Bearer your-local-api-key" \
   -H "Content-Type: application/json" \
-  -d '{"allow_visitor": true}'
+  -d '{"enabled": false}'
 ```
 
 #### `DELETE /api/models/{model_id}/keys/{key_name}`
@@ -848,8 +852,9 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
   见下）。请在这一步保存。
 - `409`：名字已被占用（`{"detail": "工作空间已存在: <name>"}`），或名字是 `default`
   （`{"detail": "工作空间名重复: default"}`）。
-- `422`：名字为空，或某把 key 撞上访客 key `amkr-visitor` / 本地 `local_api_key` / 别的
-  空间的**任何一把** key（跨类型也算撞车）。
+- `422`：名字为空，或某把 key 撞上本地 `local_api_key` / 别的空间的**任何一把** key
+  （跨类型也算撞车）/ 任意一把**访问密钥**。冲突时**报错**而不是取第一个：同一个字符串
+  在两处都命中会让权限边界取决于先命中哪张清单。
 
 #### `PUT /api/workspaces/{workspace}`
 
@@ -960,8 +965,8 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 
 - `422`：包里没有 `spaces`、空间内容不是对象、含 `default`、或看起来是配置导出的整包
   （带 `providers` / `models`）——这种情况明确报错，而不是静默丢掉那两段。
-- `422`：包里某个 `api_key` 撞上了目标实例上**别处**的凭据（另一个空间或
-  `local_api_key`），或用了保留的 `amkr-visitor`。这里**报错**而不是悄悄换一个新 key：
+- `422`：包里某个 `api_key` 撞上了目标实例上**别处**的凭据（另一个空间、
+  `local_api_key`，或任意一把**访问密钥**）。这里**报错**而不是悄悄换一个新 key：
   换掉会藏起一件用户必须知道的事——那把 key 通常已经嵌在别人的页面里，换掉之后旧 key
   会指向别人**别的**空间，而响应里没有任何字段能说明这件事。错误信息会指出与哪个空间撞了。
   （唯一的例外就是 `rekeyed`：克隆造成的冲突是必然的，因此换 key 并明确回报。）
@@ -972,6 +977,149 @@ curl -X PUT http://127.0.0.1:8000/api/models/gpt-5.5/keys/main \
 > 但那条通道的导出会**剥掉** `api_key`）；导入时引用不到模型的任务会被跳过（与「该模型
 > 从未配置」一致）。删除模型时会一并清理引用它的任务：首选模型没了则删除整个任务，只有
 > 备选没了则退化为单模型任务。
+
+### 访问密钥接口
+
+访问密钥（`amkr_ak_` + 43 位 base64url，共 50 字符）是分发给外部使用者的受限推理凭据，
+取代了原先固定的 `amkr-visitor`。它是配置里 `access_keys.<key_id>` 这个**对象**的一段
+（用 `key_id` 而不是数组下标：更新、轮换、删除都要一个稳定定位符），五个端点覆盖目录、
+新建、改清单、轮换与删除。
+
+与工作空间的两把 key 不同，访问密钥**不绑定工作空间**：它跟着请求里的
+`X-AMKR-Workspace` 头走，与本地主凭据的用法一致。清单已经表达了要限制的东西（能碰哪些
+上游、能调哪些模型），再绑一个空间只会让「发给外部试用者」多一道没必要的配置。
+
+**明文只在新建与轮换的响应里出现一次**，之后任何 GET 都只回指纹。凭据随列表散出去，
+等于每次打开管理页都重新泄漏一遍；要看已有 key 只能翻配置文件或轮换。
+
+#### `GET /api/access-keys`
+
+返回目录（只读，不含任何明文）：
+
+```json
+{
+  "access_keys": [
+    {
+      "id": "3f2a…",
+      "name": "试用账号 A",
+      "enabled": true,
+      "key_fingerprint": "0123456789ab",
+      "providers": ["openai"],
+      "models": ["gpt-4o-mini", "fast-mini"]
+    }
+  ],
+  "config_revision": "…"
+}
+```
+
+顺序是配置里的插入顺序（刚建的那把在末尾），而不是字典序。
+
+`providers` / `models` 只在配置里**显式写了**该字段时才出现：**省略表示「不限制」**，
+**空数组表示「一个都不许」**。两者是有区别的授权状态，因此不能让空数组顶替省略——那会把
+运维写下的禁令显示成「未限制」。这与 `/api/workspaces` 里 `models` 的处理是同一约定。
+
+#### `POST /api/access-keys`
+
+新建一把密钥，成功返回 `201`。请求体：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string | 是 | 非空；给人看的标识，不参与鉴权 |
+| `key` | string/null | 否 | 明文密钥；不传或为 `null` 时由服务端生成（`amkr_ak_` 前缀）。传了就用调用方给的（应用侧通常已有既定凭据） |
+| `enabled` | boolean | 否 | 默认 `true`；为假时这把密钥立即失效，但配置保留 |
+| `providers` | string[]/null | 否 | 允许使用的供应商 ID 清单；省略与 `null` 都表示本次不设这份清单（不限制），`[]` 表示一个都不许 |
+| `models` | string[]/null | 否 | 允许使用的模型名清单（真实 ID 或别名）；三态同 `providers` |
+| `config_revision` | string | 是 | 并发校验版本号 |
+
+`id` 由服务端生成（32 位十六进制，与 `uuid4().hex` 同形）：它是配置里的稳定定位符，
+让调用方自己取 id 只会引入「重名怎么办」这种没有意义的问题。
+
+成功响应是新建的那一条，**外加一个 `key` 字段**（明文，仅此一次）：
+
+```json
+{
+  "id": "3f2a…",
+  "name": "试用账号 A",
+  "enabled": true,
+  "key_fingerprint": "0123456789ab",
+  "providers": ["openai"],
+  "models": [],
+  "key": "amkr_ak_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "config_revision": "…"
+}
+```
+
+- 请求里显式传 `[]` 会原样落成空数组（一个都不许），不会退化成「不限制」。
+- 新建接口的 `providers` / `models` **没有**「清除」这一态：清除限制只出现在更新接口上。
+
+#### `PUT /api/access-keys/{key_id}`
+
+改名字、启停与两份清单。**不换 key** —— 轮换是独立端点，它会让调用方手里那把立刻失效，
+是必须单独告知的动作；塞进「更新」里就等于一次改名顺手换掉别人正在用的凭据。
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `name` | string/null | 否 | 非空；`null` 表示本次不改 |
+| `enabled` | boolean/null | 否 | `null` 表示本次不改 |
+| `providers` | string[]/null | **是** | `[...]` 限定为这些；`[]` 一个都不许；`null` 清除清单，回到「不限制」 |
+| `models` | string[]/null | **是** | 三态同 `providers` |
+| `config_revision` | string | 是 | 并发校验版本号 |
+
+`providers` 与 `models` **必填但可为 `null`**，与 `PUT /api/workspaces/{workspace}/models`
+同一套三态。必填是为了不让一次漏传字段被当成「清除限制」——那是把一条授权悄悄放宽；要清除
+就显式写 `null`。
+
+成功返回该条目的当前形状（与目录里的元素相同，**没有** `key` 字段）。
+
+```bash
+curl -X PUT http://127.0.0.1:8000/api/access-keys/3f2a… \
+  -H "Authorization: Bearer your-local-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{"providers": ["openai"], "models": null}'
+```
+
+#### `POST /api/access-keys/{key_id}/rotate`
+
+换掉这把密钥的明文并返回新值，成功返回 `200`：
+
+```json
+{
+  "id": "3f2a…",
+  "name": "试用账号 A",
+  "enabled": true,
+  "key_fingerprint": "…",
+  "key": "amkr_ak_yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+  "config_revision": "…"
+}
+```
+
+- 旧 key **立即失效**（配置里只留新值）——这正是轮换的意义：泄漏的那把在写盘那一刻就不再
+  被任何判定命中。
+- 明文只在这次响应里出现。请求体可省略，或只带 `config_revision`。
+
+#### `DELETE /api/access-keys/{key_id}`
+
+删除该密钥，成功返回 `204`，该 key 立即失效。请求体可省略，或只带 `config_revision`。删掉
+最后一把时 `access_keys` 段会一并从配置里移除（空段留着会让「有没有配过访问密钥」看起来是真）。
+
+#### 访问密钥的错误
+
+| 状态码 | 场景 |
+| --- | --- |
+| `404` | `{"detail": "访问密钥不存在: <id>"}`；更新、轮换、删除一个不存在的 id |
+| `422` | `{"detail": "访问密钥 ID 不能为空"}`；路径里的 id 去掉空白后为空 |
+| `422` | `access_keys.<id>.providers[<n>] 引用了未配置的供应商: <name>` / `access_keys.<id>.models[<n>] 引用了未配置的模型: <name>`；清单里写错目标。写错一个名字会让某把已经分发出去的 key 静默少一项权限，而调用方只看到 `403`，因此宁可在这里明确报错 |
+| `422` | `access_keys.<id>.providers[<n>] 不能为空` / `access_keys.<id>.models[<n>] 不能为空`；清单里出现空串 |
+| `422` | `访问密钥的 key 不能与 local_api_key 相同` / `访问密钥 <id> 与 <占用者> 的 key 重复`；同一把凭据在实例内出现两次 |
+
+凭据唯一性是**跨类型**的：`local_api_key`、`workspaces.*.api_key`、
+`workspaces.*.inference_key` 与 `access_keys.*.key` 共用一张占用表，任意两处相同都是配置
+错误（写盘时 `422`，加载时是配置错误），而不是「取第一个」。撞车会让同一把 key 的权限取决
+于先命中哪张清单——那是把权限边界交给判定顺序。
+
+> 访问密钥**不随** `/api/config/export` 导出，也不接受 `/api/config/import` 导入。它与
+> `local_api_key` 同类：是本实例的入站凭据，而导出文件常被贴进工单与聊天记录。想迁移请
+> 在目标实例上重新建一把。
 
 ### 供应商接口与能力探测
 
@@ -1003,7 +1151,7 @@ v4 中 Key 与探测都以 Key 为单元：`providers.<id>` 保存 `base_url`、
 
 #### `GET/POST /api/providers/{provider_id}/keys`
 
-列出该供应商的 Key（`{"keys": [KeyResponse]}`）或创建新 Key。创建请求体为 ProviderKeyCreate（`name`、`api_key`、`enabled`、`allow_visitor`、`config_revision`），成功返回 `201` 和 KeyResponse。新 Key 默认不绑定任何模型；需要按模型绑定请使用模型 Key 接口或 `/api/routes`。
+列出该供应商的 Key（`{"keys": [KeyResponse]}`）或创建新 Key。创建请求体为 ProviderKeyCreate（`name`、`api_key`、`enabled`、`config_revision`），成功返回 `201` 和 KeyResponse。新 Key 默认不绑定任何模型；需要按模型绑定请使用模型 Key 接口或 `/api/routes`。
 
 #### `GET/PUT/DELETE /api/providers/{provider_id}/keys/{key_name}`
 
@@ -1075,10 +1223,10 @@ curl -X POST http://127.0.0.1:8000/api/routes \
 | `204` | 删除成功 |
 | `400` | 请求体中缺少 `model`、更新体为空或配置校验失败；请求任务名时显式传了该任务已固定的采样参数，或指定了 Key（`TASK_XXXXXX[key]`） |
 | `401` | 本地 API key 验证失败 |
-| `403` | visitor 无权访问模型或 Key（含任务名） |
-| `404` | 模型、Key、供应商或探测不存在；任务指向的模型没有启用的 Key；任务尚未指定模型；工作空间不存在（迁移导出按名取空间时） |
+| `403` | 访问密钥无权访问该模型（不在它的 `providers` 或 `models` 清单里），或该访问密钥已被停用 |
+| `404` | 模型、Key、供应商、探测或访问密钥不存在；任务指向的模型没有启用的 Key；任务尚未指定模型；工作空间不存在（迁移导出按名取空间时） |
 | `409` | 名称冲突、删除最后一个 Key、无法持久化嵌入式配置 |
-| `422` | 管理 API 请求字段类型错误、缺少必填字段或包含未知字段；供应商暂无 Key 时探测；工作空间迁移包畸形、含 `default` 或看起来是配置导出的整包 |
+| `422` | 管理 API 请求字段类型错误、缺少必填字段或包含未知字段；供应商暂无 Key 时探测；工作空间迁移包畸形、含 `default` 或看起来是配置导出的整包；访问密钥的 `providers` / `models` 引用了未配置的供应商或模型，或凭据与实例内其它凭据重复 |
 | `500` | 配置保存失败 |
 | `502` | 上游连接或响应转换失败 |
 | `503` | 没有可用 Key |
@@ -1132,7 +1280,7 @@ http://127.0.0.1:8000/ui/
 供**嵌入第三方后台的独立面板页**（`/ui/panel.html`，见 [`USAGE.md` 9.3](USAGE.md#93-把工作空间面板嵌进你自己的后台) 与接入方指南 [`PANEL.md`](PANEL.md)）读取本空间的用量与流向。
 
 **鉴权方式与其它端点不同**：它认的是**工作空间的面板 key**（配置里的
-`workspaces.<空间>.api_key`），本地管理 key 与访客 key 一律 `401`。生效时空间由 key
+`workspaces.<空间>.api_key`），本地管理 key、访问密钥与推理 key 一律 `401`。生效时空间由 key
 **钉死**，请求头 `X-AMKR-Workspace` 被忽略。
 
 > 面板 key 与推理 key 是**两把不同的凭据**，不能互换：面板 key 只用于 `/api/tasks*` 与
@@ -1449,31 +1597,41 @@ app, err := server.New(server.Options{
     ConfigPath: "router-config.json",
     Config:     cfg,
     Authorizer: func(r *http.Request, localAPIKey string) *auth.Context {
-        user := hostUser(r)              // 宿主的身份体系
-        if user == nil {
-            return nil                   // nil = 拒绝，返回 401
+        if hostUser(r) == nil {              // 宿主的身份体系
+            return nil                       // nil = 拒绝，返回 401
         }
-        if user.IsAdmin {
-            return auth.Full()
-        }
-        return auth.Visitor()            // 受限，见下
+        return &auth.Context{Mode: auth.ModeFull}
     },
 })
 ```
 
-`auth.Context` 只有两种模式，语义与默认鉴权完全一致：
+`auth.Context` 只有**一档**权限：
 
 | 模式 | 权限 |
 | --- | --- |
-| full | 全部接口，全部模型 |
-| visitor | 仅 `/v1/models` 与 `/v1/*`，且只能用标记了 `allow_visitor` 的 Key 与 `amkr-{模型ID}` 形式；拿不到 `/metrics` 与配置管理接口 |
+| `full` | 全部接口，全部模型 |
 
-`visitor` **不是「权限更小的 full」而是一套模型级规则**（visitor 不能用内部别名、真实
-模型 ID 或 `unified-model`），因此钩子必须显式选择它，不能用布尔值表达。
+访客档已随访问密钥的引入整体删除：受限凭据不是「权限更小的 full」，而是由各自的清单在
+**代理层**逐项判定（访问密钥看 `providers` / `models`，工作空间推理 key 看空间与
+`workspaces.<空间>.models`），一个枚举表达不了。因此 `auth` 包里只剩 `ModeFull` 与
+`IsFull()`，没有 `auth.Visitor()` 这样的构造函数——宿主需要「部分权限」时，正确做法是在
+自己的钩子里判定，而不是把它塞回 AMKR 的权限枚举。
 
-同时覆盖 WebSocket：`/ws/events` 只对 full 开放。WebSocket 握手无法携带自定义头，所以
+受限凭据的解析**不在 `internal/auth`**：那包是不依赖 `config` 的纯函数，而这两条通道要读
+配置里的清单，因此 AMKR 自己在 `internal/proxy` 的 `authorize` 与 app 面（`/v1/models`）
+里解析——顺序是「完整权限 → 访问密钥 → 工作空间推理 key」，本地主凭据必须**先**判，否则
+一把受限 key 可能被当成管理员凭据用。被停用的访问密钥此时回报 `403` 与原因，而不是当成
+错误凭据。
+
+> **注入自定义 `Authorizer` 时的已知取舍**：宿主接管了整条判定链，因此**访问密钥与工作空间
+> 推理 key 都不再被识别**（`internal/server` 不会把它们透传给宿主的钩子）。这是有意的——
+> 宿主既然自带身份体系，AMKR 就不该在旁边再开两条它管不到的通道。需要这两条通道时不要注入
+> `Authorizer`。
+
+同时覆盖 WebSocket：`/ws/events` 只对 `full` 开放。WebSocket 握手无法携带自定义头，所以
 AMKR 的凭据只能走首帧 `{"type":"auth","token":"..."}`；该 token 会被折算成
 `Authorization: Bearer <token>` 后交给同一个钩子。宿主的 cookie 在握手头中，因此用
 cookie / session 鉴权时握手即可通过，无需处理首帧。钩子拒绝时连接以 `4003` 关闭。
 
-未传 `Authorizer` 时行为不变（本地 key 或固定 visitor key）。
+未传 `Authorizer` 时走默认实现：只有本地 API key 给完整权限，之后 AMKR 继续查访问密钥与
+工作空间推理 key 两条通道（`local_api_key` 为空表示鉴权整体关闭，一律按完整权限处理）。
