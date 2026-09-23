@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -29,7 +30,7 @@ func TestSelectionCorpusIsDiscriminating(t *testing.T) {
 	routerConfig := mustConfig(t, raw)
 	pool := New(routerConfig, nil, func() float64 { return 1000 })
 
-	first, err := pool.NextKey("m", nil, false, "")
+	first, err := pool.NextKey("m", nil, nil, "")
 	if err != nil {
 		t.Fatalf("首次选择失败: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestNextKeyRoundRobinDoesNotStarve(t *testing.T) {
 
 	counts := map[string]int{}
 	for range 9 {
-		key, err := pool.NextKey("m", nil, false, "")
+		key, err := pool.NextKey("m", nil, nil, "")
 		if err != nil {
 			t.Fatalf("选择失败: %v", err)
 		}
@@ -102,7 +103,7 @@ func TestConcurrentNextKeyDoesNotRace(t *testing.T) {
 		go func() {
 			defer func() { done <- struct{}{} }()
 			for range perWorker {
-				key, err := pool.NextKey("m", nil, false, "")
+				key, err := pool.NextKey("m", nil, nil, "")
 				if err != nil {
 					return
 				}
@@ -391,7 +392,7 @@ func TestHiddenNamesPreferRealIDs(t *testing.T) {
 	}
 	// hidden_model_names() 含 beta（alpha 的上游名）与 u（beta 的上游名），但
 	// beta 是真实 ID，因此只剩 u 作为隐藏名。
-	if hidden := pool.HiddenModelIDs(); !equalStrings(hidden, []string{"u"}) {
+	if hidden := pool.HiddenModelIDs(); !slices.Equal(hidden, []string{"u"}) {
 		t.Fatalf("隐藏名列表应为 [u]（beta 被真实 ID 遮蔽），实际 %v", hidden)
 	}
 	// 未撞名的自动推导名仍然可作为隐藏名直接调用。
@@ -424,21 +425,96 @@ func TestExplicitHiddenAliasCollidingWithModelIDIsRejected(t *testing.T) {
 	}
 }
 
-// TestVisitorRoutePrefix 验证访客模型名前缀规则。
-func TestVisitorRoutePrefix(t *testing.T) {
+// TestAccessKeyProviderScope 验证访问密钥的供应商清单在**候选集合**层面生效。
+//
+// 过滤放在候选集合而不是挑选之后，是为了让 only_first 也守规矩：若先选中一把无权
+// 使用的 key 再判权限，那把 key 会被白白占用一轮、并且错误信息会指向错误的维度。
+func TestAccessKeyProviderScope(t *testing.T) {
 	raw := `{
 		"config_version": 4, "local_api_key": "local",
-		"providers": {"p": {"base_url": "https://a.example", "keys": {
-			"k1": {"api_key": "1", "allow_visitor": true}}}},
-		"models": {"m": {"targets": [{"provider": "p", "key": "k1", "upstream_model": "u"}]}}
+		"providers": {
+			"p1": {"base_url": "https://a.example", "keys": {"k1": {"api_key": "1"}}},
+			"p2": {"base_url": "https://b.example", "keys": {"k2": {"api_key": "2"}}}
+		},
+		"models": {"m": {"targets": [
+			{"provider": "p1", "key": "k1", "upstream_model": "u"},
+			{"provider": "p2", "key": "k2", "upstream_model": "u"}
+		]}},
+		"access_keys": {
+			"onlyP1": {"key": "ak-p1", "providers": ["p1"]},
+			"none": {"key": "ak-none", "providers": []},
+			"open": {"key": "ak-open"}
+		}
 	}`
-	pool := New(mustConfig(t, raw), nil, func() float64 { return 1000 })
-
-	if got, found := pool.ResolveVisitorModelID("amkr-m"); !found || got != "m" {
-		t.Fatalf("访客前缀解析失败：%q %v", got, found)
+	cfg := mustConfig(t, raw)
+	pool := New(cfg, nil, func() float64 { return 1000 })
+	byName := func(name string) *config.AccessKeyConfig {
+		key := cfg.AccessKeyFor(name)
+		if key == nil {
+			t.Fatalf("配置里没有 %s", name)
+		}
+		return key
 	}
-	if _, found := pool.ResolveVisitorModelID("m"); found {
-		t.Fatal("非前缀名不应被当作访客路由")
+
+	if got := pool.KeyCountFor("m", byName("ak-p1")); got != 1 {
+		t.Fatalf("清单内可用 key 数 = %d，期望 1", got)
+	}
+	// 空数组 = 一个都不许（与「省略」不同）。
+	if got := pool.KeyCountFor("m", byName("ak-none")); got != 0 {
+		t.Fatalf("空清单可用 key 数 = %d，期望 0", got)
+	}
+	if got := pool.KeyCountFor("m", byName("ak-open")); got != 2 {
+		t.Fatalf("不限制时可用 key 数 = %d，期望 2", got)
+	}
+
+	// 选出来的 key 必须真的属于清单内的供应商。
+	selected, err := pool.NextKey("m", nil, byName("ak-p1"), "")
+	if err != nil {
+		t.Fatalf("选 key 失败: %v", err)
+	}
+	if selected.Provider != "p1" {
+		t.Fatalf("选中了 %s 的 key，期望 p1", selected.Provider)
+	}
+	// 按名字直呼清单外的 key 也必须失败。
+	if _, err := pool.KeyByName("m", "k2", byName("ak-p1")); err == nil {
+		t.Fatal("清单外的 key 不应被 KeyByName 选中")
+	}
+}
+
+// TestAccessKeyStickyIsolatedPerKey 验证不同访问密钥的粘滞互不干扰。
+//
+// 两把 key 对同一模型可以有不同供应商清单。共用一个粘滞键会让清单更窄的那把被粘到
+// 一把它无权使用的上游 key 上——那是一次 403，而调用方什么都没做错。
+func TestAccessKeyStickyIsolatedPerKey(t *testing.T) {
+	raw := `{
+		"config_version": 4, "local_api_key": "local",
+		"providers": {
+			"p1": {"base_url": "https://a.example", "keys": {"k1": {"api_key": "1"}}},
+			"p2": {"base_url": "https://b.example", "keys": {"k2": {"api_key": "2"}}}
+		},
+		"models": {"m": {"targets": [
+			{"provider": "p1", "key": "k1", "upstream_model": "u"},
+			{"provider": "p2", "key": "k2", "upstream_model": "u"}
+		], "routing_mode": "round_robin"}},
+		"access_keys": {"a": {"key": "ak-a", "providers": ["p1"]}}
+	}`
+	cfg := mustConfig(t, raw)
+	pool := New(cfg, nil, func() float64 { return 1000 })
+	accessKey := cfg.AccessKeyFor("ak-a")
+
+	// 同一份亲和键 + 同一把访问密钥 => 稳定选中同一个上游。
+	first, err := pool.NextKey("m", nil, accessKey, "same-affinity")
+	if err != nil {
+		t.Fatalf("第一次选 key 失败: %v", err)
+	}
+	for i := 0; i < 5; i++ {
+		again, err := pool.NextKey("m", nil, accessKey, "same-affinity")
+		if err != nil {
+			t.Fatalf("第 %d 次选 key 失败: %v", i, err)
+		}
+		if again.Name != first.Name {
+			t.Fatalf("粘滞失效：%q -> %q", first.Name, again.Name)
+		}
 	}
 }
 

@@ -3,15 +3,38 @@ package keypool
 import (
 	"errors"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/Sparrived/auto-model-key-router/internal/canonical"
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// VisitorModelPrefix 是访客可见模型名的前缀（对齐 visitor.py:7）。
-const VisitorModelPrefix = "amkr-"
+// accessKeyProviders 返回某把访问密钥允许的供应商集合；nil 表示不限制。
+//
+// 调用方（proxy / app 面）手里有一把 *config.AccessKeyConfig，nil 表示「完整权限」。
+// 把判定收在这里而不是散布到各调用点：供应商过滤必须与「挑选上游 key」在同一处锁内
+// 完成，否则会出现「先选中一把 key、再发现无权」的中间态。
+func accessKeyProviders(key *config.AccessKeyConfig) map[string]bool {
+	if key == nil || key.Providers == nil {
+		return nil
+	}
+	allowed := make(map[string]bool, len(key.Providers))
+	for _, provider := range key.Providers {
+		allowed[provider] = true
+	}
+	return allowed
+}
+
+// accessKeyStickyID 返回粘滞映射里代表该作用域的标识。
+//
+// 必须参与粘滞键：两把访问密钥对同一模型可以有不同供应商清单，共用一个粘滞键会让
+// 清单更窄的那把被粘到一把它无权使用的上游 key 上。完整权限用空串，既有行为不变。
+func accessKeyStickyID(key *config.AccessKeyConfig) string {
+	if key == nil {
+		return ""
+	}
+	return key.ID
+}
 
 // 错误分类与参照实现的异常一一对应，且**文本逐字一致**：
 // Python 的 `KeyError(x)` 文本是 repr，即带引号的 `'x'`；RuntimeError 直接是消息。
@@ -70,7 +93,6 @@ type KeyPool struct {
 	reasoningEffort map[string]string
 	aliases         map[string]string
 	hiddenNames     map[string]bool
-	visitorRoutes   map[string]string
 
 	failureThreshold int
 	cooldownSeconds  float64
@@ -94,15 +116,17 @@ type KeyPool struct {
 	capabilityStore *CapabilityStore
 }
 
-// stickyKey 是粘滞映射的键：(模型, 是否访客, 粘滞哈希)。
+// stickyKey 是粘滞映射的键：(模型, 作用域标识, 粘滞哈希)。
+//
+// 第二元是 accessKeyStickyID：同一模型下，不同访问密钥各有各的粘滞序列（互不干扰），
+// 全权凭据用空串。见 accessKeyStickyID 的说明。
 type stickyKey = [3]string
 
 // applyConfig 装载配置。
 //
 // 字段划分与参照实现的 _apply_config 一一对应，含两处易错点：
 //   - hidden_names 需排除已是真实 ID/别名的名字，再以 setdefault 语义补进别名表
-//     （真实 ID/别名优先）；
-//   - 访客路由前缀不与已有的 VISITOR_MODEL_PREFIX 名字重复添加。
+//     （真实 ID/别名优先）。
 func (p *KeyPool) applyConfig(cfg *config.RouterConfig) {
 	p.keys = map[string][]config.KeyConfig{}
 	p.routingModes = map[string]string{}
@@ -133,18 +157,6 @@ func (p *KeyPool) applyConfig(cfg *config.RouterConfig) {
 	for name, modelID := range hiddenNames {
 		if _, exists := p.aliases[name]; !exists {
 			p.aliases[name] = modelID
-		}
-	}
-
-	p.visitorRoutes = map[string]string{}
-	for modelID := range p.keys {
-		if !strings.HasPrefix(modelID, VisitorModelPrefix) {
-			p.visitorRoutes[VisitorModelPrefix+modelID] = modelID
-		}
-	}
-	for modelID := range p.keys {
-		if strings.HasPrefix(modelID, VisitorModelPrefix) {
-			p.visitorRoutes[modelID] = modelID
 		}
 	}
 
@@ -267,23 +279,15 @@ func (p *KeyPool) PublicModelIDs() []string {
 
 // AvailableModelIDs 返回当前确实有可用 key 的对外模型名（排序）。
 //
-// visitorOnly 时只考虑允许访客的 key，且以访客前缀名为准。
-func (p *KeyPool) AvailableModelIDs(visitorOnly bool) []string {
+// accessKey 非 nil 且配了供应商清单时，只考虑属于这些供应商的 key：一把访问密钥不该
+// 在模型清单里看到自己一个上游都用不了的模型——那会让调用方以为能调，实际每次都 403。
+// 这份过滤与选 key 走同一个 keysForModelLocked，因此「列出来的」与「调得动的」恒等。
+func (p *KeyPool) AvailableModelIDs(accessKey *config.AccessKeyConfig) []string {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if visitorOnly {
-		result := []string{}
-		for publicID, modelID := range p.visitorRoutes {
-			if len(p.keysForModelLocked(modelID, true)) > 0 {
-				result = append(result, publicID)
-			}
-		}
-		slices.Sort(result)
-		return result
-	}
 	result := []string{}
 	for name, modelID := range p.aliases {
-		if !p.hiddenNames[name] && len(p.keysForModelLocked(modelID, false)) > 0 {
+		if !p.hiddenNames[name] && len(p.keysForModelLocked(modelID, accessKey)) > 0 {
 			result = append(result, name)
 		}
 	}
@@ -308,14 +312,6 @@ func (p *KeyPool) resolveModelID(modelID string) string {
 		return resolved
 	}
 	return modelID
-}
-
-// ResolveVisitorModelID 把访客可见模型名解析成真实 ID。
-func (p *KeyPool) ResolveVisitorModelID(publicModelID string) (string, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	modelID, found := p.visitorRoutes[publicModelID]
-	return modelID, found
 }
 
 // ErrNoUnifiedModel 由上面的 noUnifiedModelError 承载，见文件顶部定义。
@@ -468,18 +464,23 @@ func (p *KeyPool) UnifiedRoute() *canonical.Value {
 	return result
 }
 
-// KeyCount 返回模型启用的 key 数。
+// KeyCount 返回模型启用的 key 数（不按访问密钥作用域过滤）。
 func (p *KeyPool) KeyCount(modelID string) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(p.keysForModelLocked(p.resolveModelID(modelID), false))
+	return len(p.keysForModelLocked(p.resolveModelID(modelID), nil))
 }
 
-// VisitorKeyCount 返回模型允许访客的启用 key 数。
-func (p *KeyPool) VisitorKeyCount(modelID string) int {
+// KeyCountFor 返回模型在某把访问密钥作用域内可用的 key 数；accessKey 为 nil 时等同
+// KeyCount。
+//
+// 与 KeyCount 分开而不是加个可选参数：调用点对「模型总共配了几把 key」与「本请求
+// 能用几把」都要，混成一个函数会让「模型未配置」与「供应商不在清单里」两种情况
+// 分不开——而它们该回 404 还是 403 是不同的。
+func (p *KeyPool) KeyCountFor(modelID string, accessKey *config.AccessKeyConfig) int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return len(p.keysForModelLocked(p.resolveModelID(modelID), true))
+	return len(p.keysForModelLocked(p.resolveModelID(modelID), accessKey))
 }
 
 // RoutingMode 返回模型的路由模式（缺省 round_robin）。
@@ -500,27 +501,36 @@ func (p *KeyPool) ReasoningEffort(modelID string) string {
 	return p.reasoningEffort[p.resolveModelID(modelID)]
 }
 
-// KeysForModel 返回模型启用的 key。
-func (p *KeyPool) KeysForModel(modelID string, visitorOnly bool) []config.KeyConfig {
+// KeysForModel 返回模型启用且落在作用域内的 key。
+func (p *KeyPool) KeysForModel(modelID string, accessKey *config.AccessKeyConfig) []config.KeyConfig {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.keysForModelLocked(p.resolveModelID(modelID), visitorOnly)
+	return p.keysForModelLocked(p.resolveModelID(modelID), accessKey)
 }
 
 // keysForModelLocked 是无锁版本，返回副本切片。
-func (p *KeyPool) keysForModelLocked(modelID string, visitorOnly bool) []config.KeyConfig {
+//
+// accessKey 非 nil 且配了供应商清单时，只保留属于这些供应商的 key。过滤放在
+// **候选集合**这一层而不是挑选之后：作用域之外的 key 根本不该进入候选，否则
+// only_first 会先选中一把无权使用的 key 再失败。
+func (p *KeyPool) keysForModelLocked(modelID string, accessKey *config.AccessKeyConfig) []config.KeyConfig {
+	allowed := accessKeyProviders(accessKey)
 	all := p.keys[modelID]
 	result := make([]config.KeyConfig, 0, len(all))
 	for _, key := range all {
-		if key.Enabled && (!visitorOnly || key.AllowVisitor) {
-			result = append(result, key)
+		if !key.Enabled {
+			continue
 		}
+		if allowed != nil && !allowed[key.Provider] {
+			continue
+		}
+		result = append(result, key)
 	}
 	return result
 }
 
 // KeyByName 按名字取启用中的 key。
-func (p *KeyPool) KeyByName(modelID, keyName string, visitorOnly bool) (config.KeyConfig, error) {
+func (p *KeyPool) KeyByName(modelID, keyName string, accessKey *config.AccessKeyConfig) (config.KeyConfig, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	modelID = p.resolveModelID(modelID)
@@ -528,10 +538,15 @@ func (p *KeyPool) KeyByName(modelID, keyName string, visitorOnly bool) (config.K
 	if !found || len(keys) == 0 {
 		return config.KeyConfig{}, &unknownModelError{modelID: modelID}
 	}
+	allowed := accessKeyProviders(accessKey)
 	for _, key := range keys {
-		if key.Name == keyName && key.Enabled && (!visitorOnly || key.AllowVisitor) {
-			return key, nil
+		if key.Name != keyName || !key.Enabled {
+			continue
 		}
+		if allowed != nil && !allowed[key.Provider] {
+			continue
+		}
+		return key, nil
 	}
 	return config.KeyConfig{}, &missingKeyError{modelID: modelID, keyName: keyName}
 }
@@ -545,7 +560,7 @@ func (p *KeyPool) KeyByName(modelID, keyName string, visitorOnly bool) (config.K
 //
 // 冷却过滤是**软**的：可用集合为空时会回退到「仅排除 excluded」的集合，因此
 // 冷却中的 key 仍可能被选中。这是刻意的降级策略，避免全部冷却时彻底不可用。
-func (p *KeyPool) NextKey(modelID string, excluded []string, visitorOnly bool, affinityKey string) (config.KeyConfig, error) {
+func (p *KeyPool) NextKey(modelID string, excluded []string, accessKey *config.AccessKeyConfig, affinityKey string) (config.KeyConfig, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -554,7 +569,7 @@ func (p *KeyPool) NextKey(modelID string, excluded []string, visitorOnly bool, a
 	for _, name := range excluded {
 		excludedSet[name] = true
 	}
-	keys := p.keysForModelLocked(modelID, visitorOnly)
+	keys := p.keysForModelLocked(modelID, accessKey)
 	if len(keys) == 0 {
 		if len(p.keys[modelID]) > 0 {
 			return config.KeyConfig{}, &noUsableKeyError{modelID: modelID}
@@ -606,7 +621,7 @@ func (p *KeyPool) NextKey(modelID string, excluded []string, visitorOnly bool, a
 	var sticky stickyKey
 	hasSticky := false
 	if affinityKey != "" && p.routingModeLocked(modelID) == "round_robin" {
-		sticky = stickyKey{modelID, boolString(visitorOnly), affinityKey}
+		sticky = stickyKey{modelID, accessKeyStickyID(accessKey), affinityKey}
 		hasSticky = true
 
 		if stickyName, found := p.stickyKeys[sticky]; found {
@@ -771,17 +786,6 @@ func nullable(value string) *canonical.Value {
 		return canonical.NewNull()
 	}
 	return canonical.NewString(value)
-}
-
-// boolString 把布尔渲染成 Python 风格的字符串键片段（True/False）。
-//
-// 粘滞键包含 visitor_only，参照实现直接用它作为元组元素；Go 需要可比较的键，
-// 故转成字符串。取值本身不影响行为，只要求同一布尔稳定映射到同一字符串。
-func boolString(value bool) string {
-	if value {
-		return "True"
-	}
-	return "False"
 }
 
 // sortedMapKeys 返回 map 的排序键。
