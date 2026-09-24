@@ -3,12 +3,16 @@ package selfupdate
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // 本文件覆盖自更新里最容易悄悄坏掉的三处：产物命名（与 release.yml 必须逐字一致）、
@@ -275,5 +279,202 @@ func TestStalePathIsSuffixOfTarget(t *testing.T) {
 	}
 	if !strings.HasSuffix(StalePath(target), StaleSuffix) {
 		t.Error("StalePath 必须以 StaleSuffix 结尾")
+	}
+}
+
+// noRetrySleep 把重试之间的等待换成空操作，返回恢复函数。
+//
+// 没有它，每个失败用例都要真等 500ms+1s+2s=3.5 秒。
+func noRetrySleep() func() {
+	original := retrySleep
+	retrySleep = func(time.Duration) {}
+	return func() { retrySleep = original }
+}
+
+// TestDownloadRetriesTransientFailures 是本次修复的核心断言。
+//
+// 起因是一次真实的失败：`amkr --update` 死在
+// `TLS handshake timeout`。原来的实现只做一次 client.Get，**任何**一次传输层抖动都会
+// 让整个更新失败——而这类抖动重试一次就好了。这里用「前两次连接被重置、第三次成功」
+// 模拟那个抖动，断言最终能拿到内容。
+func TestDownloadRetriesTransientFailures(t *testing.T) {
+	defer noRetrySleep()
+
+	payload := []byte("新版本内容")
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if atomic.AddInt32(&attempts, 1) <= 2 {
+			// 模拟传输层错误：直接掐断连接（客户端会看到 EOF/连接重置）。
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("假服务不支持 Hijack")
+				return
+			}
+			conn, _, err := hijacker.Hijack()
+			if err != nil {
+				t.Errorf("Hijack 失败: %v", err)
+				return
+			}
+			_ = conn.Close()
+			return
+		}
+		_, _ = w.Write(payload)
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "payload")
+	if err := Download(server.Client(), server.URL, path); err != nil {
+		t.Fatalf("瞬时失败应当重试并最终成功，实际 %v", err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("内容 = %q，期望 %q", got, payload)
+	}
+	if n := atomic.LoadInt32(&attempts); n != 3 {
+		t.Errorf("尝试次数 = %d，期望 3（前两次失败后成功）", n)
+	}
+}
+
+// TestDownloadRetriesServerErrorsButNotMissingAsset 锁定重试的**边界**。
+//
+// 5xx 值得再试（GitHub 偶发）；404 是确定性结论——产物名与 release.yml 漂移、或标签
+// 还没发布。对 404 重试只会让用户多等 3.5 秒再看到同一句话，因此必须立刻返回。
+func TestDownloadRetriesServerErrorsButNotMissingAsset(t *testing.T) {
+	defer noRetrySleep()
+
+	t.Run("503 重试到成功", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&attempts, 1) == 1 {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				return
+			}
+			_, _ = w.Write([]byte("ok"))
+		}))
+		defer server.Close()
+
+		path := filepath.Join(t.TempDir(), "payload")
+		if err := Download(server.Client(), server.URL, path); err != nil {
+			t.Fatalf("503 应当重试，实际 %v", err)
+		}
+		if n := atomic.LoadInt32(&attempts); n != 2 {
+			t.Errorf("尝试次数 = %d，期望 2", n)
+		}
+	})
+
+	t.Run("404 不重试", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attempts, 1)
+			http.NotFound(w, r)
+		}))
+		defer server.Close()
+
+		path := filepath.Join(t.TempDir(), "payload")
+		err := Download(server.Client(), server.URL, path)
+		if err == nil {
+			t.Fatal("404 必须报错")
+		}
+		if !strings.Contains(err.Error(), "404") {
+			t.Errorf("错误应点明 404，实际 %v", err)
+		}
+		if n := atomic.LoadInt32(&attempts); n != 1 {
+			t.Errorf("404 不该重试，实际请求了 %d 次", n)
+		}
+	})
+}
+
+// TestDownloadFailsAfterExhaustingRetries 锁定「重试有上限」：一直失败就如实报错，
+// 不能无限重试把用户挂在那里。
+func TestDownloadFailsAfterExhaustingRetries(t *testing.T) {
+	defer noRetrySleep()
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "payload")
+	if err := Download(server.Client(), server.URL, path); err == nil {
+		t.Fatal("持续 500 时 Download 必须报错")
+	}
+	if n := atomic.LoadInt32(&attempts); n != downloadAttempts {
+		t.Errorf("尝试次数 = %d，期望 %d（有上限）", n, downloadAttempts)
+	}
+	// 失败后不该留下半截文件。
+	if _, err := os.Stat(path); err == nil {
+		t.Error("失败后不该留下下载文件")
+	}
+}
+
+// TestFetchChecksumsRetriesAndKeepsDeterministicFailure 锁定校验和路径的两面：
+// 网络抖动要重试，而「文件里没有这个产物」是确定性结论、不该重试。
+func TestFetchChecksumsRetriesAndKeepsDeterministicFailure(t *testing.T) {
+	defer noRetrySleep()
+
+	const asset = "amkr_9.9.9_windows_amd64.exe"
+	t.Run("瞬时失败后成功", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&attempts, 1) == 1 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			_, _ = w.Write([]byte(strings.Repeat("a", 64) + "  " + asset + "\n"))
+		}))
+		defer server.Close()
+		defer withReleasesBaseURL(server.URL)()
+
+		digest, err := FetchChecksums(server.Client(), "9.9.9", asset)
+		if err != nil {
+			t.Fatalf("瞬时失败应当重试，实际 %v", err)
+		}
+		if digest != strings.Repeat("a", 64) {
+			t.Errorf("digest = %q", digest)
+		}
+	})
+
+	t.Run("缺少产物不重试", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attempts, 1)
+			_, _ = w.Write([]byte(strings.Repeat("a", 64) + "  amkr_9.9.9_别的平台\n"))
+		}))
+		defer server.Close()
+		defer withReleasesBaseURL(server.URL)()
+
+		if _, err := FetchChecksums(server.Client(), "9.9.9", asset); err == nil {
+			t.Fatal("校验和里没有该产物时必须报错")
+		}
+		if n := atomic.LoadInt32(&attempts); n != 1 {
+			t.Errorf("确定性结论不该重试，实际请求了 %d 次", n)
+		}
+	})
+}
+
+// TestFetchWithRetryReturnsConsumeErrorImmediately 锁定：consume 的错误（磁盘写不进去）
+// 不重试——它不是网络问题，重试也不会变好。
+func TestFetchWithRetryReturnsConsumeErrorImmediately(t *testing.T) {
+	defer noRetrySleep()
+
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		_, _ = w.Write([]byte("body"))
+	}))
+	defer server.Close()
+
+	sentinel := errors.New("磁盘满了")
+	err := fetchWithRetry(server.Client(), server.URL, func(io.Reader) error { return sentinel })
+	if !errors.Is(err, sentinel) {
+		t.Errorf("错误应为 consume 的原错误，实际 %v", err)
+	}
+	if n := atomic.LoadInt32(&attempts); n != 1 {
+		t.Errorf("consume 失败不该重试，实际请求了 %d 次", n)
 	}
 }

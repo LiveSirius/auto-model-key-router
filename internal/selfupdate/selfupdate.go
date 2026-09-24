@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
@@ -89,51 +90,126 @@ func VerifySHA256(path, expected string) error {
 	return nil
 }
 
-// Download 把 url 取回并写入 path；client 为 nil 时用 http.DefaultClient。
-func Download(client *http.Client, url, path string) error {
+// 下载路径的重试参数。
+//
+// 为什么必须有重试：实测一次 `amkr --update` 就死在
+// `TLS handshake timeout` 上——单个 `client.Get` 没有任何重试，一次传输层抖动就
+// 让整个更新失败，而用户看到的是"更新失败"，重跑一次往往就好了。这类失败是**瞬时**的
+// （TLS 握手超时、连接重置、DNS 抖动、GitHub 偶发 5xx/429），正是重试能解决的。
+//
+// 与 internal/config/persist.go 的 replaceWithRetry 同形（4 次尝试、延迟倍增），
+// 不另造抽象。
+const (
+	downloadAttempts   = 4
+	downloadRetryDelay = 500 * time.Millisecond
+)
+
+// retrySleep 是重试之间的等待，抽成变量让测试把它换成空操作（否则每个失败用例都要
+// 真等 3.5 秒）。生产代码从不改写它。
+var retrySleep = time.Sleep
+
+// httpStatusError 是非 2xx 响应。
+//
+// 单独成类型而不是直接 fmt.Errorf：重试决策必须能分辨「5xx/429 值得再试」与
+// 「404 再试一百次也是 404」，靠错误文本做不了这个判断。
+type httpStatusError struct {
+	Code int
+	URL  string
+}
+
+func (e *httpStatusError) Error() string { return fmt.Sprintf("HTTP %d: %s", e.Code, e.URL) }
+
+// retryable 报告这个状态码是否值得重试。
+//
+// 404/403 这类是**确定性**失败：产物名字与 release.yml 漂移、标签还没发布、或校验和
+// 文件里就没有这个平台。重试只会让用户多等几秒再看到同一个结论，因此立刻返回。
+func (e *httpStatusError) retryable() bool {
+	return e.Code == http.StatusRequestTimeout ||
+		e.Code == http.StatusTooManyRequests ||
+		e.Code >= 500
+}
+
+// fetchWithRetry 带重试地取回 url，把响应体交给 consume 消费。
+//
+// 重试的边界划得很清楚：**连接层失败与可重试的状态码**才重试；consume 的错误
+// （磁盘写不进去、校验和文件里没有这个产物）一律立即返回——那些重试也不会变好。
+func fetchWithRetry(client *http.Client, url string, consume func(io.Reader) error) error {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	response, err := client.Get(url)
-	if err != nil {
-		return err
+	delay := downloadRetryDelay
+	var lastErr error
+	for attempt := 0; attempt < downloadAttempts; attempt++ {
+		if attempt > 0 {
+			retrySleep(delay)
+			delay *= 2
+		}
+		response, err := client.Get(url)
+		if err != nil {
+			// 传输层错误（TLS 握手超时、连接重置、DNS）：典型的一次性抖动。
+			lastErr = err
+			continue
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			_ = response.Body.Close()
+			status := &httpStatusError{Code: response.StatusCode, URL: url}
+			if !status.retryable() {
+				return status
+			}
+			lastErr = status
+			continue
+		}
+		err = consume(response.Body)
+		closeErr := response.Body.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		return nil
 	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return fmt.Errorf("HTTP %d: %s", response.StatusCode, url)
-	}
-	file, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	if _, err := io.Copy(file, response.Body); err != nil {
-		_ = file.Close()
-		_ = os.Remove(path)
-		return err
-	}
-	if err := file.Close(); err != nil {
-		_ = os.Remove(path)
-		return err
-	}
-	return nil
+	return lastErr
+}
+
+// Download 把 url 取回并写入 path；client 为 nil 时用 http.DefaultClient。
+//
+// 瞬时网络失败会重试（见 fetchWithRetry）。每次尝试都用 O_TRUNC 重开文件，因此重试
+// 不会把上一次的半截内容接在后面。
+func Download(client *http.Client, url, path string) error {
+	return fetchWithRetry(client, url, func(body io.Reader) error {
+		file, err := os.Create(path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(file, body); err != nil {
+			_ = file.Close()
+			_ = os.Remove(path)
+			return err
+		}
+		if err := file.Close(); err != nil {
+			_ = os.Remove(path)
+			return err
+		}
+		return nil
+	})
 }
 
 // FetchChecksums 取回并解析给定版本的校验和文件。
+//
+// 网络失败同样重试；但「文件里没有这个产物」是确定性结论，不重试（由 Apply 折成
+// 拒绝安装）。
 func FetchChecksums(client *http.Client, version, asset string) (string, error) {
 	url := ChecksumsURL(version)
-	if client == nil {
-		client = http.DefaultClient
-	}
-	response, err := client.Get(url)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = response.Body.Close() }()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("HTTP %d: %s", response.StatusCode, url)
-	}
-	body, err := io.ReadAll(response.Body)
-	if err != nil {
+	var body []byte
+	if err := fetchWithRetry(client, url, func(reader io.Reader) error {
+		text, err := io.ReadAll(reader)
+		if err != nil {
+			return err
+		}
+		body = text
+		return nil
+	}); err != nil {
 		return "", err
 	}
 	digest, ok := ParseChecksums(string(body), asset)
