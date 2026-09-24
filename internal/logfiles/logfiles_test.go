@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// fixedNow 是具名测试统一使用的注入时刻（与语料同一时刻）。
+// fixedNow 是具名测试统一使用的注入时刻。
 var fixedNow = time.Date(2026, 1, 2, 3, 4, 5, 0, time.Local)
 
 // writeFixture 在 root 下建一个文件（自动建父目录），返回其绝对路径。
@@ -271,7 +271,7 @@ func TestArchivedLogPathsGlobFlavorDivergesFromPython(t *testing.T) {
 //
 // pathlib 在 Windows 上 glob 不区分大小写（fnmatch 前会 normcase），Go 的
 // filepath.Match 在所有平台都区分。这里固定 Go 的行为：若跟着 Windows 变成
-// 不区分，同一份语料在 CI（Linux）与开发机（Windows）上会得到不同期望值。
+// 不区分，同一份期望值在 CI（Linux）与开发机（Windows）上就会不一致。
 //
 // 注意不能在同一个目录里放「只差大小写」的两个文件：Windows 文件系统本身
 // 不区分大小写，第二次写入会落到同一个文件上，测出来的现象是假的。

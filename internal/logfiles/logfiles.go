@@ -1,13 +1,13 @@
 // Package logfiles 移植 auto_model_key_router/log_files.py：日志文件轮转。
 //
-// 三个函数都直接落在文件系统上，语料因此把夹具钉在临时目录里、只记录**相对**
-// 路径，Go 测试建自己的临时目录重放同一批操作（见 testdata/logfiles_corpus.json）。
+// 三个函数都直接落在文件系统上，因此夹具必须钉在临时目录里、只比较**相对**
+// 路径，测试建自己的临时目录覆盖同一批操作。
 //
 // 与 Python 的两处已记录差异（都有具名测试锁定）：
 //
 //   - 通配符用 Go 的 filepath.Match，而 pathlib 用 fnmatch：字符类的取反写法
 //     不同（Python 是 `[!b]`，Go 是 `[^b]`），Go 把 `\` 当转义而 Python 不认。
-//     日志文件名里出现这些字符不现实，语料只用两边一致的形态。
+//     日志文件名里出现这些字符不现实，用例只用两边一致的形态。
 //   - pathlib 在 Windows 上 glob 不区分大小写，Go 侧一律区分。
 //
 // Python 的 “Path“ 会把路径归一化（`//`、`.`、结尾分隔符）后再拼归档名；
@@ -47,8 +47,8 @@ const fallbackSuffix = ".log"
 //   - 文件存在且**长度>0** 时改成归档名，并在原路径新建空文件，返回归档路径；
 //   - 其余情况（不存在、长度为 0）只把原路径截断/建空，返回的归档路径为空串。
 //
-// now 在 Python 里是函数内部的 datetime.now()，这里提成显式参数以便对拍
-// （语料把时刻钉在 2026-01-02T03:04:05）；真实调用方传 time.Now()。
+// now 在 Python 里是函数内部的 datetime.now()，这里提成显式参数便于测试
+// （用例把时刻钉在 2026-01-02T03:04:05）；真实调用方传 time.Now()。
 func ArchiveCurrentLog(logFilePath string, now time.Time) (archivePath string, archived bool, err error) {
 	parent := pyParent(logFilePath)
 	if err := os.MkdirAll(parent, 0o755); err != nil {
@@ -119,7 +119,7 @@ func NextLogArchivePath(logFilePath string, now time.Time) (string, error) {
 // 并排除日志文件自身。父目录不存在或不可读时返回空列表——Python 的 pathlib
 // 会吞掉 OSError，这里同样不上报错误。
 //
-// 通配符语义见包注释：与 fnmatch 在字符类取反/转义上有差异，语料只覆盖
+// 通配符语义见包注释：与 fnmatch 在字符类取反/转义上有差异，用例只覆盖
 // 两边一致的部分。
 func ArchivedLogPaths(logFilePath string) []string {
 	name := pyPathNameIgnoringError(logFilePath)

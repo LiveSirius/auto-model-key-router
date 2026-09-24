@@ -179,7 +179,7 @@ func validBracketedHost(hostname string) bool {
 // 「NFKC(netloc) 里出现分隔符」等价于「netloc 里出现这些码点」。
 //
 // 表由 Python 对全码点跑 unicodedata.normalize("NFKC") 扫出（共 19 个），
-// 语料里的 nfkc_unsafe_runes 锁定了这份结果，改错会被测试挡住。
+// 这份结果由 TestCompactURLFallsBackOnUnsafeNetloc 钉住，改错会被测试挡住。
 var nfkcUnsafeRunes = map[rune]struct{}{
 	'\u2047': {}, '\u2048': {}, '\u2049': {}, '\u2100': {}, '\u2101': {},
 	'\u2105': {}, '\u2106': {}, '\u2a74': {}, '\ufe13': {}, '\ufe16': {},

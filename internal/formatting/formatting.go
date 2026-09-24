@@ -3,8 +3,7 @@
 //
 // 这些函数看着简单，但都是「显示不对也没人报警」的地方，且 Python 的格式化语义
 // 相当细（截断后长度仍等于 limit、int/int 是精确有理数除法后一次舍入、
-// 百分号格式是十进制四舍六入五成双）。因此每个函数都由
-// gen_formatting_corpus.py（已随 Python 退役移除） 用 Python 参照实现生成语料，Go 侧逐条复现。
+// 百分号格式是十进制四舍六入五成双）。因此每个函数都由本包用例逐个边界钉住。
 package formatting
 
 import (
@@ -101,7 +100,7 @@ func CompactURL(value string, limit int) string {
 // Percent 返回 numerator/denominator 的百分比文本，保留 1 位小数（formatting.py:35）。
 //
 // 分母 <=0（含 0）时直接返回 "0%"，不返回 "0.0%"——调用方靠这一点区分
-// 「没有样本」与「比例是 0」，语料锁定了该分支。
+// 「没有样本」与「比例是 0」，这是对外契约（由 TestPercentNonPositiveDenominator 锁定）。
 //
 // 用 big.Rat 而不是 float64(n)/float64(d)：Python 的 int/int 是对**精确有理数**
 // 做一次正确舍入，而先转 float64 再除会多一次舍入，大整数上两者结果不同
@@ -145,7 +144,8 @@ func abbreviate(value, divisor int64, unit string) string {
 // formatFloat1 等价于 Python 的 `f"{value:.1f}"`。
 //
 // Go 的 FormatFloat 与 CPython 的 PyOS_double_to_string 都是对二进制精确值做
-// 正确舍入、平局取偶（"6.25" → 6.2、"18.75" → 18.8），语料里用等距平局逐条锁定。
+// 正确舍入、平局取偶（"6.25" → 6.2、"18.75" → 18.8），由 TestPercentRoundsHalfToEven
+// 用等距平局逐条钉住。
 func formatFloat1(value float64) string {
 	return strconv.FormatFloat(value, 'f', 1, 64)
 }

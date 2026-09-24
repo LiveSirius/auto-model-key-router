@@ -117,7 +117,7 @@ func TestPercentRoundsHalfToEven(t *testing.T) {
 //
 // 999999 会输出 "1000.0K" 而不是进位成 "1.0M"：Python 先按 value 判阈值，
 // 再对商做一位小数格式化，所以商跨过 1000 也不会换单位。TUI 上这是可见的
-// 「奇怪但正确」的输出，语料已逐条锁定。
+// 「奇怪但正确」的输出，本用例逐条钉住。
 func TestAbbreviateNumberDoesNotPromoteUnit(t *testing.T) {
 	cases := map[int64]string{
 		999:           "999",
