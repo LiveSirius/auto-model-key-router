@@ -27,7 +27,10 @@ class FakeNode {
   replaceWith() {}
   focus() {}
 }
-define("location", { hash: "#/overview", reload() {} });
+// location.hash/reload 给 app.js，search/replace 给登录页（pages/login.js 会用
+// location.replace 跳回内页）。少了它们，这个检查会在导入入口模块时直接抛栈，
+// 看起来像"模块坏了"，而实际只是垫片没覆盖用到的浏览器 API。
+define("location", { hash: "#/overview", pathname: "/ui/", search: "", reload() {}, replace() {} });
 define("window", { addEventListener() {}, isSecureContext: true, location: global.location });
 define("navigator", { clipboard: null });
 define("Node", FakeNode);

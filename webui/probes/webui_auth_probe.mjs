@@ -2,11 +2,21 @@
 // 用法：node webui_auth_probe.mjs <scenario>，结果以 JSON 打到 stdout。
 // 每个场景单独起进程，保证模块级缓存（各页面的 state）互不干扰。
 
+import { existsSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import path from "node:path";
 
 const WEBUI = path.resolve(import.meta.dirname, "..");
 const scenario = process.argv[2];
+
+// loginTargetExists 断言跳转目标在磁盘上真的存在。
+//
+// 拼 URL 的代码与资产文件是两处，改了一处忘了另一处时，跳过去只会得到一个 404——
+// 而那时用户已经被带离了主界面，看到的是一张"页面不存在"，不是登录框。
+const loginTargetExists = (url) => {
+  const file = String(url || "").split("?")[0].replace(/^[^/]*/, "");
+  return existsSync(path.join(WEBUI, path.basename(file)));
+};
 
 // —— 最小 DOM 垫片 ——
 class FakeNode {
@@ -64,11 +74,16 @@ const define = (name, value) =>
   Object.defineProperty(global, name, { value, writable: true, configurable: true });
 
 let reloads = 0;
+// 登录已拆成独立页：未授权时主界面不再就地画表单，而是 location.replace 到
+// /ui/login.html。replaces 记下跳转目标，好断言"跳了、跳到哪、带没带 next/reason"。
+const replaces = [];
 define("location", {
   hash: "#/settings",
   // 独立运行时 WebUI 在 /ui/ 下；嵌入场景会覆盖成 /<prefix>/ui/。
   pathname: "/ui/",
+  search: "",
   reload() { reloads += 1; },
+  replace(url) { replaces.push(String(url)); },
 });
 define("window", {
   addEventListener() {},
@@ -93,7 +108,10 @@ define("document", {
 });
 
 // app.js 的 scheduleTimers 会拉起真实定时器，会把探针进程挂住；这里一律 stub。
-define("setInterval", () => 0);
+// 回调**记下来**而不是丢掉：登录页的"轮询重绘不重建输入框"必须驱动真实的重绘路径
+// （早先的写法是手动调 renderShell，那是模拟健康轮询，不是它本身）。
+const intervalFns = [];
+define("setInterval", (fn) => { intervalFns.push(fn); return 0; });
 define("clearInterval", () => {});
 define("setTimeout", () => 0);
 
@@ -310,6 +328,9 @@ global.fetch = async (url, options = {}) => {
 // —— 驱动 ——
 const { boot, store, renderShell, navigate } = await import(pathToFileURL(path.join(WEBUI, "app.js")).href);
 const { api } = await import(pathToFileURL(path.join(WEBUI, "api.js")).href);
+// 登录是独立一页（pages/login.js），它自己的入口是 bootLogin。管理器与登录页是两个
+// 页面，本探针两种都要驱动：管理器断言"未授权时跳走了"，登录页断言"跳来之后能收凭据"。
+const { bootLogin } = await import(pathToFileURL(path.join(WEBUI, "pages", "login.js")).href);
 
 function findAll(node, predicate, out = []) {
   if (predicate(node)) out.push(node);
@@ -343,15 +364,12 @@ const setup = {
   stale_key_prompts_login: () => { storage.set("amkr.apiKey", "stale-key"); },
   no_key_prompts_login: () => {},
   valid_key_renders_page: () => { storage.set("amkr.apiKey", "good-key"); },
-  wrong_key_submit_shows_error: () => {},
-  correct_key_submit_reloads: () => {},
   mid_session_401_returns_to_login: () => { storage.set("amkr.apiKey", "good-key"); },
-  login_input_survives_health_poll: () => {},
   auth_disabled_no_login: () => {
     server.authEnabled = false;
     storage.set("amkr.apiKey", "anything");
   },
-  // 深链进入：地址栏直接指向某个内页，未鉴权时不能绕过验证页。
+  // 深链进入：地址栏直接指向某个内页，未鉴权时不能绕过登录页。
   deeplink_without_key_stays_on_login: () => {
     global.location.hash = "#/providers";
   },
@@ -359,12 +377,61 @@ const setup = {
     server.offline = true;
     storage.set("amkr.apiKey", "good-key");
   },
-  // 嵌入宿主：页面位于 /amkr/ui/，API 必须打到 /amkr 下而不是根路径。
+  // 嵌入宿主：页面位于 /amkr/ui/，API 必须打到 /amkr 下而不是根路径，
+  // 跳转目标也必须是 /amkr/ui/login.html。
   mounted_prefix_uses_prefixed_api: () => {
     server.prefix = "/amkr";
     global.location.pathname = "/amkr/ui/";
     storage.set("amkr.apiKey", "good-key");
   },
+
+  // —— 登录页本身（webui/login.html → pages/login.js）——
+  // 这一组由 bootLogin 驱动，而不是 boot：登录页与主界面是两个页面。
+  login_page_collects_key_and_returns_to_next: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "?next=%2Fui%2F%23%2Fproviders";
+  },
+  login_page_wrong_key_shows_error: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "";
+  },
+  // 开放重定向：?next= 是攻击者可控的输入，站外地址必须被丢掉。
+  // 第二个用例是**归一化绕过**：浏览器解析 URL 前会剥掉制表符/换行，所以
+  // "/\t/evil.example" 在它眼里就是 "//evil.example"。只校验原始串会放过它。
+  login_page_rejects_offsite_next: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "?next=%2F%2Fevil.example%2Fsteal";
+  },
+  login_page_rejects_obfuscated_next: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "?next=%2F%09%2Fevil.example%2Fsteal";
+  },
+  login_page_rejects_backslash_next: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "?next=%2F%5Cevil.example%2Fsteal";
+  },
+  login_page_reports_expired_session: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "?reason=expired";
+  },
+  login_page_unreachable_offers_retry: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "";
+    server.offline = true;
+  },
+  // 健康轮询会周期性重绘提示，但**不得**重建输入框：重建会丢掉用户粘了一半的 Key。
+  login_page_input_survives_poll: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "";
+  },
+  // 服务端关掉本地鉴权时登录页没有要问的东西，必须直接放行，
+  // 否则会卡在一个永远填不对的表单上。
+  login_page_skips_when_auth_disabled: () => {
+    global.location.pathname = "/ui/login.html";
+    global.location.search = "";
+    server.authEnabled = false;
+  },
+
   // 任务路由页：直接驱动真实页面模块，锁住表单与请求体形状。
   tasks_page_lists_and_saves: () => {
     global.location.hash = "#/tasks";
@@ -553,43 +620,64 @@ if (!scenarioNames.includes(scenario)) {
 }
 setup[scenario]();
 
-await boot();
+// 登录页的场景驱动 bootLogin（页面是 login.html），其余驱动主界面 boot（index.html）。
+// 两者的区别是真实的：登录页不再由 app.js 渲染，主界面未授权时也不再画表单。
+const loginScenarios = new Set([...scenarioNames].filter((name) => name.startsWith("login_page_")));
+if (loginScenarios.has(scenario)) await bootLogin();
+else await boot();
 // 页面首屏的读取是异步的，且可能会渲染不止一次；这里把在途的微任务排空，让断言
 // 看到的是稳定后的页面（否则断言的就是"恰好还没画完"的中间态）。
 const settle = async () => { for (let i = 0; i < 20; i += 1) await Promise.resolve(); };
 await settle();
 
 const checks = {};
+// 登录页（webui/login.html）必须自己就是登录界面，不再依赖 app.js 画表单。
+const onLoginPage = () => text().includes("连接到 AMKR");
+
 if (scenario === "stale_key_prompts_login") {
   // 报告的问题：带着失效 Key 进入时，不应把 401 当成设置读取失败缓存下来。
-  checks.loginCard = text().includes("连接到 AMKR");
+  // 现在也不再就地画表单，而是整页跳去登录页。
+  checks.redirectedToLogin = replaces.length === 1 && String(replaces[0]).includes("/ui/login.html");
+  checks.loginPageExists = loginTargetExists(replaces[0]);
   checks.notCachedSettingsError = !text().includes("读取设置失败");
   checks.unauthorized = store.authorized === false;
   checks.keyCleared = !storage.has("amkr.apiKey");
+  // 失效不是"从没登录过"，但也不是会话中途失效（那由 reason=expired 表达）：
+  // 首次进入就发现 Key 不能用时不该谎称"已失效"，只给获取提示即可。
+  checks.noReasonForFirstVisit = !String(replaces[0] || "").includes("reason=");
 } else if (scenario === "no_key_prompts_login") {
-  checks.loginCard = text().includes("连接到 AMKR");
+  // 未授权时主界面**一个节点都不画**，只跳转：跳转是唯一的未授权表现，
+  // 因此"带着无效 Key 进入主界面"没有入口。
+  checks.redirectedToLogin = replaces.length === 1 && String(replaces[0]).includes("/ui/login.html");
+  checks.loginPageExists = loginTargetExists(replaces[0]);
   checks.unauthorized = store.authorized === false;
-  // 独立页：不能带应用栏与导航，未鉴权时无从"进入"主界面。
+  // 「什么都没画」= 既没有主界面外壳，也没有就地登录表单。
+  checks.renderedNoShell = byClass("shell").length === 0;
+  checks.noLoginCardHere = !onLoginPage();
   checks.noAppBar = byClass("app-bar").length === 0;
   checks.noNav = byClass("nav").length === 0;
-  checks.noShell = byClass("shell").length === 0;
-  checks.noPages = !text().includes("模型路由") && !text().includes("统一模型");
-  checks.fullHeight = byClass("login-shell").length === 1;
+  // 只跳一次：健康轮询会反复 renderShell，重复 replace 会在历史里堆记录。
+  renderShell();
+  renderShell();
+  checks.redirectedOnce = replaces.length === 1;
 } else if (scenario === "deeplink_without_key_stays_on_login") {
-  // 地址栏直达内页也必须先过验证页。
+  // 地址栏直达内页也必须先过登录页，而且原地址要作为 next 带过去（深链不丢）。
   checks.pageWasProviders = store.page === "providers";
-  checks.stillLogin = store.authorized === false && text().includes("连接到 AMKR");
+  checks.stillUnauthorized = store.authorized === false;
+  checks.redirectedToLogin = replaces.length === 1 && String(replaces[0]).includes("/ui/login.html");
+  checks.loginPageExists = loginTargetExists(replaces[0]);
+  checks.nextKeepsDeeplink = decodeURIComponent(String(replaces[0] || "")).includes("#/providers");
   checks.noProvidersPage = !text().includes("供应商");
-  checks.noNav = byClass("nav").length === 0;
+  checks.renderedNoShell = byClass("shell").length === 0;
 } else if (scenario === "unreachable_service_stays_on_login") {
-  // 连不上时无从判断是否需要鉴权：宁可停在验证页，也不拿没验证过的状态进主界面。
-  checks.stillLogin = store.authorized === false && text().includes("连接到 AMKR");
-  checks.reasonShown = text().includes("无法连接");
+  // 连不上时无从判断是否需要鉴权：同样停在登录页，且**保留**本机 Key
+  // （可能只是服务还没起来，重试即可，不该让人重贴）。
+  checks.redirectedToLogin = replaces.length === 1 && String(replaces[0]).includes("/ui/login.html");
+  checks.stillUnauthorized = store.authorized === false;
   checks.keyKept = storage.get("amkr.apiKey") === "good-key";
-  checks.retryOffered = buttons().some((b) => b.textContent.includes("重试连接"));
 } else if (scenario === "mounted_prefix_uses_prefixed_api") {
   // 嵌入宿主时页面在 /amkr/ui/ 下，若 API 基址写死绝对路径，每个请求都会打到宿主
-  // 根路径（404/401），页面直接停在"读取设置失败"。
+  // 根路径（404/401）；跳转目标同理必须是 /amkr/ui/login.html。
   checks.authorized = store.authorized === true;
   checks.pageRendered = text().includes("设置");
   checks.requestsArePrefixed = server.requests.length > 0
@@ -597,44 +685,82 @@ if (scenario === "stale_key_prompts_login") {
   checks.healthPrefixed = server.requests.some((r) => r.url === "/amkr/health");
   checks.settingsPrefixed = server.requests.some((r) => r.url === "/amkr/api/settings");
 } else if (scenario === "valid_key_renders_page") {
-  checks.noLoginCard = !text().includes("连接到 AMKR");
+  checks.didNotRedirect = replaces.length === 0;
   checks.authorized = store.authorized === true;
   checks.pageRendered = text().includes("设置");
   checks.noAuthError = !text().includes("401");
   checks.hasAppBar = byClass("app-bar").length === 1;
   checks.hasNav = byClass("nav").length === 1;
-} else if (scenario === "wrong_key_submit_shows_error") {
-  await submitKey("bad-key");
-  checks.errorShown = text().includes("无效");
-  checks.stillLoginCard = text().includes("连接到 AMKR");
-  checks.keyNotStored = !storage.has("amkr.apiKey");
-  checks.noReload = reloads === 0;
-} else if (scenario === "correct_key_submit_reloads") {
-  await submitKey("good-key");
-  checks.keyStored = storage.get("amkr.apiKey") === "good-key";
-  checks.reloaded = reloads === 1;
-  checks.authorized = store.authorized === true;
 } else if (scenario === "mid_session_401_returns_to_login") {
   checks.startedAuthorized = store.authorized === true;
   // 模拟"重置本地鉴权 Key"：服务端换了 Key，浏览器里的旧 Key 立刻失效。
   server.accepted = new Set(["new-key"]);
   await api.settings().catch(() => {});
-  checks.backToLogin = store.authorized === false && text().includes("连接到 AMKR");
-  checks.reasonShown = text().includes("已失效");
-} else if (scenario === "login_input_survives_health_poll") {
+  checks.backToLogin = store.authorized === false;
+  checks.redirectedToLogin = replaces.length === 1 && String(replaces[0]).includes("/ui/login.html");
+  // 会话中途失效要说明"已失效"，登录页据 reason=expired 显示这句。
+  checks.reasonIsExpired = String(replaces[0] || "").includes("reason=expired");
+} else if (scenario === "auth_disabled_no_login") {
+  checks.didNotRedirect = replaces.length === 0;
+  checks.authorized = store.authorized === true;
+  checks.pageRendered = text().includes("设置");
+  checks.hasAppBar = byClass("app-bar").length === 1;
+} else if (scenario === "login_page_collects_key_and_returns_to_next") {
+  // 登录页收下凭据，然后回到 next 指定的内页。
+  checks.showsLoginForm = onLoginPage();
+  checks.hasKeyInput = inputs().length >= 1;
+  await submitKey("good-key");
+  checks.keyStored = storage.get("amkr.apiKey") === "good-key";
+  checks.returnedToNext = replaces.length === 1 && String(replaces[0]) === "/ui/#/providers";
+  checks.notReloading = reloads === 0;
+} else if (scenario === "login_page_wrong_key_shows_error") {
+  await submitKey("bad-key");
+  checks.errorShown = text().includes("无效");
+  checks.stillLoginForm = onLoginPage();
+  // 未经服务端验证的 Key 不能留在本机：留下的话下次打开会白打一轮 401。
+  checks.keyNotStored = !storage.has("amkr.apiKey");
+  checks.didNotEnter = replaces.length === 0;
+} else if (scenario === "login_page_rejects_offsite_next") {
+  // 开放重定向：next 指向站外时必须被丢掉，回到本站首页。
+  await submitKey("good-key");
+  checks.enteredApp = replaces.length === 1;
+  checks.stayedOnOrigin = String(replaces[0] || "").startsWith("/ui/");
+  checks.notOffsite = !String(replaces[0] || "").includes("evil.example");
+  checks.notProtocolRelative = !String(replaces[0] || "").startsWith("//");
+} else if (scenario === "login_page_rejects_obfuscated_next"
+  || scenario === "login_page_rejects_backslash_next") {
+  // 同一类开放重定向的变体：制表符/换行（浏览器归一化后才成 `//`）与反斜杠。
+  await submitKey("good-key");
+  checks.enteredApp = replaces.length === 1;
+  checks.stayedOnOrigin = String(replaces[0] || "").startsWith("/ui/");
+  checks.notOffsite = !String(replaces[0] || "").includes("evil.example");
+} else if (scenario === "login_page_reports_expired_session") {
+  // 主界面因会话失效跳过来时带 reason=expired：登录页要说明"已失效"，
+  // 而不是显示"没登录过"的获取 Key 提示。
+  checks.showsLoginForm = onLoginPage();
+  checks.expiredExplained = text().includes("已失效");
+} else if (scenario === "login_page_unreachable_offers_retry") {
+  checks.showsLoginForm = onLoginPage();
+  checks.reasonShown = text().includes("无法连接");
+  checks.retryOffered = buttons().some((b) => b.textContent.includes("重试连接"));
+  // 还没填 Key 时点重试只该重探服务，不该拿空凭据去验一遍再报"Key 无效"。
+  await clickButton("重试连接");
+  checks.retryDidNotClaimKeyInvalid = !text().includes("无效");
+} else if (scenario === "login_page_input_survives_poll") {
   const field = inputs()[0];
   checks.loginFieldPresent = Boolean(field);
   if (field) {
     field.value = "half-typed";
-    renderShell(); // 健康轮询会整壳重绘
+    // 驱动**真实**的轮询回调（bootLogin 注册的 setInterval），而不是手动调重绘。
+    for (const fn of intervalFns) await fn();
+    await settle();
     checks.sameNode = inputs()[0] === field;
     checks.valueKept = inputs()[0]?.value === "half-typed";
   }
-} else if (scenario === "auth_disabled_no_login") {
-  checks.noLoginCard = !text().includes("连接到 AMKR");
-  checks.authorized = store.authorized === true;
-  checks.pageRendered = text().includes("设置");
-  checks.hasAppBar = byClass("app-bar").length === 1;
+} else if (scenario === "login_page_skips_when_auth_disabled") {
+  // 服务端关掉本地鉴权时登录页没有要问的东西，必须直接放行。
+  checks.notShowingForm = !onLoginPage();
+  checks.enteredApp = replaces.length === 1 && String(replaces[0]).startsWith("/ui/");
 } else if (scenario === "tasks_page_lists_and_saves") {
   checks.authorized = store.authorized === true;
   checks.onTasksPage = store.page === "tasks";
