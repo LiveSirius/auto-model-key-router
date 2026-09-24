@@ -28,7 +28,8 @@ export class ApiError extends Error {
 }
 
 // Key 在会话中途失效（如在设置里重置了本地鉴权 Key）时，任何接口都会 401。
-// 这里统一上报，由 app.js 回到登录卡，避免各页面把 401 当成业务错误缓存下来。
+// 这里统一上报，由 app.js 跳回登录页，避免各页面把 401 当成业务错误缓存下来。
+// 登录页自身不注册这个钩子：它正在做的事就是验 Key，401 是预期结果而非异常。
 let unauthorizedHandler = null;
 
 export function onUnauthorized(handler) {

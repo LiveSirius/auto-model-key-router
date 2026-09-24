@@ -5,8 +5,8 @@
 // 对工作台页面（供应商/设置）尤其致命。改由 onTick 通知当前页面自行重绘。
 
 import { h, mount, errorText, formatCount, formatCompact } from "./dom.js";
-import { api, setKey, ApiError, onUnauthorized } from "./api.js";
-import { installToastHost, notice, buttonNode, input, field, empty, render, badge } from "./ui.js";
+import { api, apiBase, setKey, ApiError, onUnauthorized } from "./api.js";
+import { installToastHost, notice, buttonNode, empty } from "./ui.js";
 import { icon } from "./icons.js";
 
 import { renderOverview } from "./pages/overview.js";
@@ -157,8 +157,8 @@ async function loadHealth() {
   const before = store.connectionError;
   await fetchHealth();
   store.healthTicking = false;
-  // 连接状态变了就重绘验证页上的提示（服务刚起来/刚恢复）。验证页的节点是复用的，
-  // 重绘不会丢已粘贴一半的 Key 与焦点。
+  // 连接状态变了就重绘一次。鉴权通过后这只会刷新应用栏上的服务状态；未授权时
+  // renderShell 会去跳登录页，而 redirectToLogin 自带去重，重复调用是无害的空转。
   if (requiresKey() && before !== store.connectionError) renderShell();  // 健康轮询只更新应用栏，不动页面内容。
   renderBar();
   if (TICK_PAGES.has(store.page)) notifyTicks();
@@ -314,13 +314,13 @@ function renderBar() {
 export function renderShell() {
   tickListeners.clear();
   renderedPage = null;
-  // 未通过鉴权时整页只有验证页：应用栏与导航都不渲染，深链/切页/会话中途失效
-  // 都会回到这里，不给"带着无效 Key 进入主界面"留任何入口。
+  // 未通过鉴权时不在本页画表单，而是整页跳到独立的登录页（webui/login.html），并把
+  // 当前地址作为 next 交给它。深链/切页/会话中途失效都走这里，"带着无效 Key 进入
+  // 主界面"因此没有任何入口——本页在未授权时一个节点都不渲染。
   if (requiresKey()) {
     barHost = null;
     contentHost = null;
-    mount(appHost, loginPage());
-    renderedPage = "login";
+    redirectToLogin();
     return;
   }
   const nav = buildNav();
@@ -374,116 +374,42 @@ function renderContent(force = false) {
   }
 }
 
-// ══ 独立验证页 ══
-// 未通过鉴权时整页只有它：不渲染应用栏、导航与任何页面，深链、切页、会话中途
-// 失效都回到这里，不给"带着无效 Key 进入主界面"留入口。
-// 节点全程复用：健康轮询会整壳重绘，重建会让用户已粘贴一半的 Key 与焦点消失。
-const KEY_HINT = "可在终端执行 amkr --show-api-key 获取本地鉴权 Key。";
-const KEY_INVALID = "本地鉴权 Key 无效，请重新核对后重试。可在终端执行 amkr --show-api-key 获取。";
+// ══ 未授权时的去向 ══
+// 登录是**独立一页**（webui/login.html、pages/login.js）：本页在未授权时什么都不画，
+// 只负责把用户送过去，并把当前地址带上（登录成功后回到原本要去的内页，深链不丢）。
+//
+// 为什么用 replace 而不是 href：登录页不该留在历史记录里。用 href 的话，登录成功后
+// 按"后退"会退回到登录表单，而那时浏览器里已经有可用凭据了——一个已经登录的人被
+// 送回登录框，是很容易被当成"又掉线了"的假故障。
+//
+// 会话中途 401（如在设置里重置了本地鉴权 Key）带上 reason=expired：登录页据此区分
+// "从没登录过"与"原来那把失效了"。
 
-let loginNode = null;
-let loginNotice = null;   // askLogin 传入的会话失效原因，只在下次验证后有结论才清掉
-let loginPaint = null;    // 就地重绘状态提示，不重建输入框
-
-function loginPage() {
-  if (loginNode) { loginPaint(); return loginNode; }
-
-  const keyInput = input({ type: "password", placeholder: "粘贴本地鉴权 Key", autocomplete: "off" });
-  const statusHost = h("div");
-  const retryHost = h("div.btn-row");
-  const footHost = h("div.login-foot");
-
-  // 成功路径：整页重载。各页面模块的 state 是模块级缓存，重载是确定干净且
-  // 能顺带刷新 config_revision 的收尾（否则保存会 409）。
-  const succeed = () => {
-    store.authorized = true;
-    store.connectionError = null;
-    loginNotice = null;
-    loginNode = null;
-    location.reload();
-  };
-
-  const connectBtn = buttonNode("连接", { onClick: () => submit(), iconName: "key" });
-
-  async function submit() {
-    const value = keyInput.value.trim();
-    if (!value) {
-      loginNotice = { text: "请先填写本地鉴权 Key。", tone: "warn" };
-      loginPaint();
-      return;
-    }
-    // 清掉上一次的提示，否则"先填 Key"之类的旧提示会盖住本次的真实结果。
-    loginNotice = null;
-    connectBtn.disabled = true;
-    setKey(value);
-    const status = await verifyAccess();
-    connectBtn.disabled = false;
-    if (status === "ok") { succeed(); return; }
-    // 连不上时保留 Key：可能只是服务还没起来，重试即可，不该让用户重贴一次。
-    if (status === "unauthorized") { setKey(""); loginNotice = { text: KEY_INVALID, tone: "error" }; }
-    loginPaint();
-  }
-
-  keyInput.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") submit();
-  });
-
-  loginPaint = () => {
-    const failure = store.connectionError;
-    render(statusHost,
-      loginNotice
-        ? notice(loginNotice.text, loginNotice.tone)
-        : failure
-          ? notice(`无法连接 AMKR 服务：${failure}`, "error")
-          : notice(KEY_HINT, "info"),
-    );
-    // 已经拿不到服务时才给重试入口；Key 本身错了要改 Key，重试没有意义。
-    render(retryHost, failure && !loginNotice
-      ? buttonNode("重试连接", {
-          variant: "secondary",
-          iconName: "refresh",
-          onClick: async () => {
-            store.connectionError = null;
-            const status = await verifyAccess();
-            if (status === "ok") { succeed(); return; }
-            // 服务恢复后才发现 Key 也失效了，同样要清掉并说明原因。
-            if (status === "unauthorized") { setKey(""); loginNotice = { text: KEY_INVALID, tone: "error" }; }
-            loginPaint();
-          },
-        })
-      : null);
-    render(footHost, loginFoot());
-  };
-
-  loginNode = h("div.login-shell", {},
-    h("div.card.login-card", {},
-      h("div.login-head", {},
-        h("span.login-mark", {}, icon("shield", { size: 24 })),
-        h("div", {}, h("h2", "连接到 AMKR"), h("p.muted", "管理接口需要本地鉴权 Key")),
-      ),
-      h("div.stack", {}, statusHost, field("本地鉴权 Key", keyInput), retryHost),
-      h("div.btn-row", { style: { marginTop: "16px" } }, connectBtn),
-      footHost,
-    ),
-  );
-  loginPaint();
-  return loginNode;
+// loginURL 拼登录页地址。与 api.js 的 apiBase 同源：独立运行是 /ui/login.html，
+// 嵌入宿主是 /amkr/ui/login.html，写死 /ui 会让墙子路径部署跳到打不开的地址。
+function loginURL(reason) {
+  const params = new URLSearchParams();
+  const next = `${location.pathname}${location.search || ""}${location.hash || ""}`;
+  if (next && next !== "/") params.set("next", next);
+  if (reason) params.set("reason", reason);
+  const query = params.toString();
+  return `${apiBase()}/ui/login.html${query ? `?${query}` : ""}`;
 }
 
-// 独立页没有导航栏，把版本与入口放在页脚：能一眼确认连的是哪个实例。
-function loginFoot() {
-  const health = store.health;
-  return [
-    health?.version ? `版本 v${health.version}` : null,
-    health?.base_url || null,
-  ].filter(Boolean).join(" · ") || "AMKR WebUI";
+// redirecting 保证只跳一次：健康轮询会反复 renderShell，重复调用 replace 会让浏览器
+// 在历史里留下多条记录（并刷屏报错）。
+let redirecting = false;
+
+function redirectToLogin(reason) {
+  if (redirecting) return;
+  redirecting = true;
+  location.replace(loginURL(reason));
 }
 
+// askLogin 由 ctx 暴露给页面模块：任何接口 401 都能把用户送回登录页。
 function askLogin(message) {
-  loginNotice = message ? { text: message, tone: "warn" } : null;
-  loginNode = null;
   store.authorized = false;
-  renderShell();
+  redirectToLogin(message ? "expired" : null);
 }
 
 async function boot() {
@@ -502,18 +428,20 @@ async function boot() {
     if (next !== store.page) { store.page = next; renderShell(); scheduleTimers(); }
   });
 
-  // 已在验证页上时 401 由提交按钮自己提示，这里只管会话中途失效的情况。
+  // 会话中途失效（如设置里重置了本地鉴权 Key）走这里跳回登录页；本页首次进入时
+  // 还没授权，401 由下面的 verifyAccess 处理，不必重复跳转。
   onUnauthorized(() => { if (store.authorized) askLogin("本地鉴权 Key 已失效，请重新输入。"); });
 
   await fetchHealth();
   // 一律先验证再进主界面：需要鉴权时要校验 Key，连不上时也无从判断是否放行。
   const status = await verifyAccess();
   if (status !== "ok") {
+    // 无效凭据要清掉，否则下次打开还会拿它白打一轮 401；连不上时保留——可能只是
+    // 服务还没起来，重试即可，不该让用户在登录页重贴一次。
     if (status === "unauthorized") setKey("");
     store.authorized = false;
-    // 保留地址栏里的深链：验证通过并重载后回到用户原本要去的页面。
+    // 登出即离开本页：登录页接管轮询，这里不必再拉定时器（页面马上被替换）。
     renderShell();
-    scheduleTimers();
     return;
   }
   store.authorized = true;
