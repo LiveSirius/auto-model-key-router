@@ -93,6 +93,13 @@ type Env struct {
 	Running func(pid int) bool
 	// Terminate 终止进程（Windows taskkill /T /F，POSIX SIGTERM）。
 	Terminate func(pid int) error
+	// CanTerminate 报告本进程是否有权终止 pid。
+	//
+	// 与 Running 是**两个不同的问题**：Running 说"它还在不在"，CanTerminate 说"我杀不杀得掉"。
+	// 实测在 Windows 上这两者会分叉——SYSTEM 计划任务跑起来的实例既在运行，又对普通用户
+	// 完全不可终止（taskkill 一律 Access is denied）。自更新必须能提前分辨这一点，否则会向
+	// 用户承诺"服务将自动重启"，而助手只能空等到超时。
+	CanTerminate func(pid int) bool
 	// IsAdmin 对应 service.py:461 的 is_windows_admin。
 	IsAdmin func() bool
 	// Now 是缓存与日志归档用的时钟（Python 用 time.monotonic / datetime.now）。
@@ -140,9 +147,9 @@ func DefaultEnv() *Env {
 	}
 	env.Run = defaultRunner
 	env.Spawn = defaultSpawn()
-	// 进程存活/终止与管理员判定是仅有的两处平台差异，交给平台文件提供默认实现
-	// （windows: tasklist/taskkill + shell32；其余: signal + 恒假）。
-	env.Running, env.Terminate, env.IsAdmin = platformProcessHooks(env)
+	// 进程存活/终止与管理员判定是仅有的几处平台差异，交给平台文件提供默认实现
+	// （windows: tasklist/taskkill/OpenProcess + shell32；其余: signal + 恒假）。
+	env.Running, env.Terminate, env.IsAdmin, env.CanTerminate = platformProcessHooks(env)
 	return env
 }
 

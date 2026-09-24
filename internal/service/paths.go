@@ -47,6 +47,17 @@ func (e *Env) IsProcessRunning(pid int) bool {
 	return e.Running(pid)
 }
 
+// CanTerminateProcess 报告本进程是否有权终止 pid。
+//
+// 接缝为 nil 时按「能」处理：这是 DefaultEnv 之外的手工 Env（多为测试夹具）的默认立场，
+// 与改动之前的行为一致——那时根本没有这一问。
+func (e *Env) CanTerminateProcess(pid int) bool {
+	if e.CanTerminate == nil {
+		return true
+	}
+	return e.CanTerminate(pid)
+}
+
 // windowsRunning 是 Windows 分支的实现：`tasklist /FI "PID eq N" /FO CSV /NH`
 // 的输出里含有 `"N"` 或 `,N,` 就算存活（service.py:337-342）。
 //

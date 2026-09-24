@@ -92,6 +92,16 @@ func (e *Env) StopBackground(cfg *config.RouterConfig) tui.Renderable {
 		return tui.SectionPanel(
 			fmt.Sprintf("PID %d 已不存在，已清理 PID 文件。", pid), "后台服务", "yellow")
 	}
+	// 先问一句「我杀不杀得掉」再动手。实测：PID 文件里的进程可能已经被 SYSTEM 计划任务
+	// 接管（会话 0），此时 taskkill 一律被拒、进程永远不会退出，而下面的轮询会跑满 20 次
+	// 再报「已发送停止信号，进程退出中」——那句话是假的，用户会以为再等一会儿就好。
+	// 提前说清"没有权限"，并直接指向真正能做这件事的命令。
+	if !e.CanTerminateProcess(pid) {
+		return tui.SectionPanel(
+			fmt.Sprintf("PID %d 以更高权限运行，当前权限无法停止。\n"+
+				"请以管理员身份运行 [bold]amkr --service stop[/bold]（或重启计算机）。", pid),
+			"后台服务", "yellow")
+	}
 	if err := e.Terminate(pid); err != nil {
 		// Python 的 taskkill 返回码被忽略、POSIX 的 os.kill 可能抛 OSError 并向上
 		// 传播；Go 侧统一继续走轮询（下方 20 次循环会给出结论）。

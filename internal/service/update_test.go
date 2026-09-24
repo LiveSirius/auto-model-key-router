@@ -22,15 +22,21 @@ type updateTestEnv struct {
 	env *Env
 	// pidLive 决定 PID 文件里的进程是否算存活。
 	pidLive bool
+	// pidKillable 决定这个进程是否算「我们有权终止」。与 pidLive 分开是有意的：
+	// SYSTEM 计划任务接管的情形正是「活着但杀不掉」，那一种必须能被单测表达出来。
+	pidKillable bool
 	// healthy 决定 /health 探针的答案。
 	healthy bool
 }
 
 func newUpdateTestEnv(t *testing.T) *updateTestEnv {
 	t.Helper()
-	fixture := &updateTestEnv{pidLive: true}
+	// 默认「活着且杀得掉」：不这样的话，夹具里那个不存在的 PID（999999）会被真实的
+	// OpenProcess 判成不可终止，与桩掉的 Running 自相矛盾。
+	fixture := &updateTestEnv{pidLive: true, pidKillable: true}
 	env := DefaultEnv()
 	env.Running = func(int) bool { return fixture.pidLive }
+	env.CanTerminate = func(int) bool { return fixture.pidKillable }
 	env.Sleep = func(time.Duration) {}
 	env.Get = func(string, time.Duration) (int, []byte, error) {
 		if fixture.healthy {
@@ -183,6 +189,31 @@ func TestCanRestartService(t *testing.T) {
 	if !idle.env.CanRestartService(configPath, cfg) {
 		t.Error("有 PID 文件时应当报告可以自动重启")
 	}
+
+	// 同样的 PID 文件，但**进程还活着且我们杀不掉**（本机实测：SYSTEM 计划任务接管了
+	// 原先的后台服务，PID 文件仍指着一个会话 0 的进程）→ 必须报**不能**。
+	//
+	// 这是修掉的那个坑：只看「有 PID 文件」就会承诺自动重启，而助手停不掉它，
+	// 只能等端口释放直到超时，服务也不会被拉起。
+	pinned := newUpdateTestEnv(t)
+	pinned.pidLive = true
+	pinned.pidKillable = false
+	if !pinned.env.IsProcessRunning(999999) {
+		t.Fatal("夹具前提不成立：该进程应当算存活")
+	}
+	if pinned.env.CanTerminateProcess(999999) {
+		t.Fatal("夹具前提不成立：该进程应当算不可终止")
+	}
+	if pinned.env.CanRestartService(configPath, cfg) {
+		t.Error("有 PID 文件但进程不可终止时，必须报告不能自动重启（否则是空头承诺）")
+	}
+
+	// 对照：进程已经退出，PID 文件只是残留 → 仍然算「能」（不必停任何东西）。
+	pinned.pidLive = false
+	if !pinned.env.CanRestartService(configPath, cfg) {
+		t.Error("PID 文件残留但进程已退出时，应当报告可以自动重启")
+	}
+
 	if err := os.Remove(PidFilePath(cfg)); err != nil {
 		t.Fatal(err)
 	}

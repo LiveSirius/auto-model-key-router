@@ -23,9 +23,18 @@ func posixTerminate(pid int) error {
 	return syscall.Kill(pid, syscall.SIGTERM)
 }
 
-// platformProcessHooks 给出非 Windows 下 Env 的三个平台默认实现：
+// posixCanTerminate 报告本进程是否有权终止 pid。
+//
+// `kill(pid, 0)` 在无权时返回 EPERM——与 Running 相反，这里 EPERM 表示「**不**可终止」
+// （进程在跑，但不是我杀得掉的）。参照实现没有这一问，因为 Python 版从不做更新前的
+// 可重启性判断。
+func posixCanTerminate(pid int) bool {
+	return syscall.Kill(pid, 0) == nil
+}
+
+// platformProcessHooks 给出非 Windows 下 Env 的平台默认实现：
 // signal 存活判定、SIGTERM 终止、管理员判定恒假（service.py:462 的
-// `platform.system().lower() != "windows" → False`）。
-func platformProcessHooks(_ *Env) (func(int) bool, func(int) error, func() bool) {
-	return posixRunning, posixTerminate, func() bool { return false }
+// `platform.system().lower() != "windows" → False`）、signal 0 可终止性判定。
+func platformProcessHooks(_ *Env) (func(int) bool, func(int) error, func() bool, func(int) bool) {
+	return posixRunning, posixTerminate, func() bool { return false }, posixCanTerminate
 }

@@ -273,11 +273,82 @@ func TestPlatformProcessHooksAreInjected(t *testing.T) {
 	if env.Running == nil || env.Terminate == nil || env.IsAdmin == nil {
 		t.Fatalf("平台接缝未装上（Running/Terminate/IsAdmin 有空值）")
 	}
+	if env.CanTerminate == nil {
+		t.Fatalf("可终止性接缝未装上（自更新靠它分辨「在跑但杀不掉」的 SYSTEM 实例）")
+	}
 	if env.Run == nil || env.Spawn == nil || env.Get == nil || env.ArchiveLog == nil {
 		t.Fatalf("基础接缝未装上")
 	}
 	if env.GOOS != defaultGOOS {
 		t.Errorf("GOOS = %q，期望 %q", env.GOOS, defaultGOOS)
+	}
+}
+
+// TestCanTerminateProcessDefaultsToTrue 锁定接缝为 nil 时的立场：按「能」处理。
+//
+// 手工构造的 Env（测试夹具、集成方）不会填这个字段，而改动之前根本没有这一问——
+// 默认判「不能」会让它们**全部**退化成"无法自动重启"，那是比原状更坏的回归。
+func TestCanTerminateProcessDefaultsToTrue(t *testing.T) {
+	env := &Env{}
+	if !env.CanTerminateProcess(1234) {
+		t.Error("未装接缝时应当按「可以终止」处理（保持改动前的行为）")
+	}
+	env.CanTerminate = func(int) bool { return false }
+	if env.CanTerminateProcess(1234) {
+		t.Error("装了接缝时必须听接缝的")
+	}
+}
+
+// TestStopBackgroundRefusesToLieAboutHigherPrivilegeProcess 锁定停不掉时的面板文案。
+//
+// 修掉的那个坑：PID 文件里的进程可能已被 SYSTEM 计划任务接管，taskkill 一律被拒、
+// 进程永远不会退出，而轮询跑满 20 次后报的是「已发送停止信号，进程退出中」——
+// 那句话是假的，用户会一直等一个不会发生的事。必须提前说清没有权限，并给出真正
+// 能做这件事的命令。
+func TestStopBackgroundRefusesToLieAboutHigherPrivilegeProcess(t *testing.T) {
+	fixture := newUpdateTestEnv(t)
+	_, cfg := updateTestConfig(t)
+	if err := os.WriteFile(PidFilePath(cfg), []byte("3756"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	fixture.pidLive = true
+	fixture.pidKillable = false
+
+	terminated := 0
+	fixture.env.Terminate = func(int) error {
+		terminated++
+		return nil
+	}
+
+	text := RenderText(fixture.env.StopBackground(cfg))
+	if !strings.Contains(text, "无法停止") {
+		t.Errorf("应说明当前权限停不掉，实际 %q", text)
+	}
+	if strings.Contains(text, "已发送停止信号") {
+		t.Errorf("不该谎称已发送停止信号（那个进程杀不掉），实际 %q", text)
+	}
+	if terminated != 0 {
+		t.Errorf("明知杀不掉就不该再去 taskkill，实际调用了 %d 次", terminated)
+	}
+	if !strings.Contains(text, "管理员") {
+		t.Errorf("应给出提权后的做法，实际 %q", text)
+	}
+
+	// 对照：杀得掉的进程仍走原来的三段（终止 + 轮询 + 成功面板）。
+	// 让 Terminate 真的把进程「杀掉」，这样轮询才会看到它消失。
+	fixture.pidKillable = true
+	fixture.pidLive = true
+	fixture.env.Terminate = func(int) error {
+		terminated++
+		fixture.pidLive = false
+		return nil
+	}
+	text = RenderText(fixture.env.StopBackground(cfg))
+	if !strings.Contains(text, "后台服务已停止。") {
+		t.Errorf("可终止的进程应当正常停止，实际 %q", text)
+	}
+	if terminated != 1 {
+		t.Errorf("可终止的进程应当被终止一次，实际 %d 次", terminated)
 	}
 }
 
