@@ -109,8 +109,8 @@ func TestStripMarkupNeverRaises(t *testing.T) {
 // TestDisplayWidthEmojiDivergence 记录宽度表的边界：Go 用内置区段表，
 // 不做 ZWJ 组合序列的折叠，因此 emoji 组合可能与 rich 的 cell_len 不同。
 //
-// 单独的 emoji（含变体选择符）与 CJK 与 rich 一致（语料 width 段覆盖）；
-// 这里只把「已知不同」写清楚，避免以后有人误以为差异是回归。
+// 单独的 emoji（含变体选择符）与 CJK 与 rich 一致（下方用例的 richWidth 列是当时的
+// Python 实测值）；这里只把「已知不同」写清楚，避免以后有人误以为差异是回归。
 func TestDisplayWidthEmojiDivergence(t *testing.T) {
 	cases := []struct {
 		text      string
@@ -130,7 +130,7 @@ func TestDisplayWidthEmojiDivergence(t *testing.T) {
 		}
 	}
 	// ZWJ 家族序列：Go 逐个码点相加（2+0+2+0+2=6），rich 也按码点累加（同样 6），
-	// 但二者的宽度表对区域指示符（旗帜）取值不同，故不在语料里比较。
+	// 但二者的宽度表对区域指示符（旗帜）取值不同，故这里不做跨实现比较。
 	if got := DisplayWidth("👨\u200d👩\u200d👧"); got != 6 {
 		t.Fatalf("ZWJ 序列按码点累加应为 6, 得到 %d", got)
 	}

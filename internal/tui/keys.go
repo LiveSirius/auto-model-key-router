@@ -5,8 +5,7 @@ package tui
 // 设计要点：Python 直接读 msvcrt / stdin 这些全局，无法在别的平台上回归测试。
 // Go 侧把「原始输入」抽成两个小接口（RunReader 对应 msvcrt 的宽字符输入，
 // ByteReader 对应 POSIX 的 os.read+select），解析逻辑不变。
-// 于是 Windows 与 POSIX 两条解析分支都能用同一套脚本输入做对拍
-// （见 gen_tui_corpus.py（已随 Python 退役移除） 的 key 段与 testdata/tui_corpus.json）。
+// 于是 Windows 与 POSIX 两条解析分支都能用同一套脚本化输入测试。
 
 import (
 	"strings"
@@ -47,7 +46,7 @@ const (
 // RunReader 是宽字符输入源，对应 Python 的 msvcrt 模块用法（tui.py:312-330）。
 type RunReader interface {
 	// Getwch 读一个宽字符，阻塞；ok=false 表示输入流已结束（Python 会阻塞，
-	// 这里用于让脚本化对拍明确终止）。
+	// 这里用于让脚本化输入明确终止）。
 	Getwch() (rune, bool)
 	// Kbhit 报告是否还有待读字符（tui.py:325）。
 	Kbhit() bool
@@ -120,7 +119,7 @@ func ReadKeyFromRunReader(reader RunReader, clock RunClock) string {
 	return classifyWindowsKey(reader, clock, char)
 }
 
-// classifyWindowsKey 处理首字符之后的解析；单独拆出来是为了让对拍直接喂
+// classifyWindowsKey 处理首字符之后的解析；单独拆出来是为了让测试直接喂
 // 「首个字符 + 脚本化剩余输入」。
 func classifyWindowsKey(reader RunReader, clock RunClock, char rune) string {
 	switch char {
@@ -244,7 +243,7 @@ func ReadPosixCharsIfAvailable(reader ByteReader, count int) string {
 //
 // 关键：Python 是**逐字节**解码，多字节 UTF-8 的每个字节都独立解码失败被丢弃，
 // 因此 CJK 按键在 POSIX 分支下返回空串（tui.py:340）。Go 侧必须同样处理，
-// 否则行为对不上（语料里有该用例）。
+// 否则行为与参照实现不一致。
 func decodeSingleByte(value byte) string {
 	if value < 0x80 {
 		return string(rune(value))

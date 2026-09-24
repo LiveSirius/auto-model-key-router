@@ -99,7 +99,7 @@ func isIntLiteral(literal string) bool {
 // NativeEndpointStatePayload 对应 config_editor.py:138 的
 // _native_endpoint_state_payload。
 //
-// now 是 `time.time()`（epoch 秒，注入以便对拍）。返回 nil 表示「这个值不是一份
+// now 是 `time.time()`（epoch 秒，注入以便测试）。返回 nil 表示「这个值不是一份
 // 可用的状态」——对应 Python 的 None。
 func NativeEndpointStatePayload(value *canonical.Value, now float64) (*canonical.Value, error) {
 	if value.IsBool() {
@@ -205,7 +205,7 @@ func (p Prober) LoadNativeEndpointStatesFromFile(data *canonical.Value) (*canoni
 // 先读文件缓存，再用 `GET {管理地址}/health` 的 native_endpoint_states 覆盖。
 //
 // 参照实现用模块级 `httpx.get(...)`（无 Authorization），Go 侧走 Prober 的客户端接缝，
-// 因此可以对拍。失败（网络错误、非 2xx、响应不是 JSON 对象）时**原样返回文件状态**，
+// 因此可以脚本化测试。失败（网络错误、非 2xx、响应不是 JSON 对象）时**原样返回文件状态**，
 // 与参照实现把这几类异常折算成「只用文件缓存」一致。
 func (p Prober) FetchNativeEndpointStates(ctx context.Context, data *canonical.Value, timeout float64) (*canonical.Value, error) {
 	states, err := p.LoadNativeEndpointStatesFromFile(data)

@@ -8,7 +8,7 @@ package tui
 // Update 断言，而不需要真终端。
 //
 // 渲染复用 RenderOptionMenuState / RenderMultiSelectState，所以交互界面与
-// 「其他模块打印出来的窗体」用的是同一套版式（同一份对拍语料覆盖）。
+// 「其他模块打印出来的窗体」用的是同一套版式。
 
 import (
 	"strings"
@@ -356,7 +356,9 @@ type PromptState struct {
 // 与 Python 的差异（刻意）：编辑状态交给 bubbles/textinput，因此多了光标移动、
 // Home/End、Delete 等能力；Python 只有尾部追加、退格、Ctrl+U、Ctrl+W。
 // 显示规则仍然严格照抄 Python：可见值由 VisiblePromptValue 计算（含密码掩码与
-// "…" 截断），所以语料 prompt_visible 段锁定的显示结果完全一致。
+// "…" 截断），所以显示结果与参照实现一致，由
+// TestPromptModelVisibleValueTruncatesWithEllipsis 与 TestPromptModelPasswordMaskedInView
+// 断言。
 type PromptModel struct {
 	// Title 是窗体标题。
 	Title string

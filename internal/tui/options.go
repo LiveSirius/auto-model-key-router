@@ -34,7 +34,8 @@ func CopyResultPage(content any, copyText, copyLabel string) ResultPage {
 // VisiblePromptValue 复刻 prompt_text 输入框的可见值计算（tui.py:608-610）。
 //
 // 注意 Python 用 len() 与切片，都是**码点**而非显示宽度，Go 侧必须同样按
-// rune 处理，否则中文输入的长度截断会与参照不一致（语料 prompt_visible 段覆盖）。
+// rune 处理，否则中文输入的长度截断会与参照实现不一致。截断规则本身由
+// TestPromptModelVisibleValueTruncatesWithEllipsis 断言。
 func VisiblePromptValue(value string, password bool, maxVisible int) string {
 	if maxVisible < 8 {
 		maxVisible = 8

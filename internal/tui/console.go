@@ -15,7 +15,7 @@ import (
 // defaultTerminalWidth / defaultTerminalHeight 是探测不到终端尺寸时的兜底值。
 //
 // rich 在非终端环境同样退化成 80x25（rich/console.py 的 `_detect_size`），
-// 这里保持同值，让语料在任何环境下都能复现。
+// 这里保持同值，让渲染结果在任何环境下都可复现。
 const (
 	defaultTerminalWidth  = 80
 	defaultTerminalHeight = 25

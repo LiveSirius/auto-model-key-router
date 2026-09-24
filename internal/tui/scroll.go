@@ -1,7 +1,9 @@
 package tui
 
 // 本文件移植 tui.py:275-309 的滚轮/鼠标/滚动换算——都是**纯函数**，
-// 因此是语料覆盖的重点（见 testdata/tui_corpus.json 的 wheel / mouse 段）。
+// 因此可以在不碰真终端的前提下直接测试：滚轮去抖由
+// TestSelectModelWheelThrottledByInterval 覆盖，鼠标模式开关由
+// TestMouseWheelModeNoopWhenDisabled 覆盖。
 
 import (
 	"runtime"
@@ -50,7 +52,7 @@ func ParseSGRMouseSequence(sequence string) (string, bool) {
 // (是否处理, 新的 lastKey, 新的 lastAt)。
 //
 // 与 Python 的差异：`now` 由调用方给出——Python 内部直接调 time.monotonic()，
-// 注入时间才能让对拍与单测稳定。真实调用方用 ShouldHandleWheelNow。
+// 注入时间才能让单测稳定。真实调用方用 ShouldHandleWheelNow。
 func ShouldHandleWheel(key, lastKey string, lastAt, now float64) (bool, string, float64) {
 	if !isWheelKey(key) {
 		return true, lastKey, lastAt

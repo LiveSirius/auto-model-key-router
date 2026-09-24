@@ -51,7 +51,7 @@
 //	key_pressed                 → KeyPressed（返回 (按键名, 是否有输入)）
 //	read_key_responsive         → ReadKeyResponsive
 //	read_key                    → ReadKey
-//	read_posix_key              → ReadKeyFromByteReader（注入式，便于对拍）
+//	read_posix_key              → ReadKeyFromByteReader（注入式，便于测试）
 //	confirm_choice              → ConfirmChoice
 //	prompt_text                 → PromptText
 //	select_option               → SelectOption
@@ -83,14 +83,22 @@
 //  5. **异常 → 错误值**。KeyboardInterrupt 用 ErrCancelled 表达；
 //     run_submodule 的错误文案用 Go 类型名 + 错误文本代替「类名: 文本」。
 //  6. **输入框多光标移动**。编辑状态由 bubbles/textinput 维护（Python 只有尾部追加），
-//     但可见值的截断/掩码严格照抄 Python（VisiblePromptValue，语料锁定）。
+//     但可见值的截断/掩码严格照抄 Python（VisiblePromptValue，由
+//     TestPromptModelVisibleValueTruncatesWithEllipsis 断言）。
 //  7. **宽度表**。内置常用 East Asian Width 区段，不做 ZWJ 组合序列折叠；
-//     语料只覆盖 ASCII/CJK/单个 emoji。
+//     已知差异只在 emoji 组合序列，见 divergence_test.go 的
+//     TestDisplayWidthEmojiDivergence。
 //
-// # 对拍
+// # 测试方式
 //
-// gen_tui_corpus.py（已随 Python 退役移除） 用**真实 Python**（含真实 rich）产出
-// testdata/tui_corpus.json：把 tui.console 换成固定尺寸的受控 Console，把
-// msvcrt/os.read/select/time.monotonic 换成脚本化桩，因此版式、折行、按键解析
-// 这些纯逻辑都能确定性重放（corpus_test.go）。语料用 --check 校验是否过期。
+// 本包不依赖真终端：Console 的尺寸与输出可替换（SetSize / SetOutput），按键解析的
+// 输入源（RunReader / ByteReader）与时钟（RunClock）都是注入的接缝，因此版式、折行、
+// 按键解析这些纯逻辑都能确定性重放。
+//
+//   - tui_test.go 把按键消息直接喂给 Bubble Tea 模型的 Update，断言状态机与 View；
+//   - divergence_test.go 把本包**刻意与 rich 不同**的地方逐条具名钉住。
+//
+// 与真实 rich 的逐字节一致性不再有测试守着：迁移期用来做这件事的冻结语料、回放测试
+// 与生成脚本（testdata/tui_corpus.json、corpus_test.go、gen_tui_corpus.py）已随
+// Python 参照实现整体退役删除。
 package tui

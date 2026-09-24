@@ -41,7 +41,8 @@ type FrameOptions struct {
 //
 // 返回值里的 Offset/MaxOffset/ViewportHeight 由调用方保存，用于下一次滚动。
 // 高度不足 3 行时 rich 会退化成「直接输出正文、不套面板」（tui.py:155-158），
-// Go 侧同一分支处理，语料 frame 段的 height_1/height_2_degenerate 逐行锁定了它。
+// Go 侧同一分支处理，由 TestFrameDegenerateHeightHasNoPanel 的 height_1/height_2
+// 两个子用例钉住。
 func TerminalFrameState(renderables []Renderable, footer Renderable, options FrameOptions) FrameState {
 	width := maxInt(Console.Width(), MinRenderWidth)
 	height := maxInt(Console.Height(), 1)

@@ -1,11 +1,10 @@
 package configeditor
 
-// 面板内容的对拍与「接缝/刻意差异」的具名测试。
+// 面板内容的信息等价断言与「接缝/刻意差异」的具名测试。
 //
-// 版式（列宽、间距、边框、颜色）是本迁移明确不追求一致的部分，因此 panels 语料比较的
-// 是**信息**：Python 用固定宽度 Console 渲染后抽出的「有内容的词」，Go 侧同样渲染、
-// 同样归一化后必须全部出现。生成脚本里的 content_tokens 与这里的 renderTokens 必须
-// 保持同一套规则。
+// 版式（列宽、间距、边框、颜色）是本迁移明确不追求一致的部分，因此这里断言的是
+// **信息**：面板渲染后抽出的「有内容的词」里应出现（或不应出现）哪些词。
+// 抽词规则见 renderTokens。
 
 import (
 	"context"
@@ -23,14 +22,14 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/tui"
 )
 
-// boxGlyphs 与生成脚本的 BOX_GLYPHS 一致：这些字符是边框/分隔线，不是内容。
+// boxGlyphs 是渲染输出里的边框/分隔线字符：它们不是内容，抽词前先剔除。
 var boxGlyphs = []string{
 	"─", "━", "│", "┃", "╭", "╮", "╰", "╯", "├", "┤", "┬", "┴", "┼",
 	"┏", "┓", "┗", "┛", "┣", "┫", "┳", "┻", "╋", "╸", "╺", "╹", "╻",
 	"┄", "┅", "┆", "┇", "┈", "┉", "┊", "┋",
 }
 
-// renderTokens 把面板渲染成纯文本并抽出有内容的词（与 content_tokens 同规则）。
+// renderTokens 把面板渲染成纯文本并抽出有内容的词。
 func renderTokens(panel tui.Renderable) map[string]bool {
 	text := strings.Join(tui.Console.RenderLines(panel, 200), "\n")
 	for _, glyph := range boxGlyphs {

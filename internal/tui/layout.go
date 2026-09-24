@@ -47,7 +47,7 @@ var AppASCIIFlag = [4]string{
 
 // AppASCIIFlagStyles 对应 tui.py:41 的四种样式名。
 //
-// Go 侧不保留颜色，只保留此表以便未来需要时对齐样式顺序（语料不涉及）。
+// Go 侧不保留颜色，只保留此表以便未来需要时对齐样式顺序。
 var AppASCIIFlagStyles = [4]string{"bold bright_cyan", "bold cyan", "bold bright_blue", "bold bright_magenta"}
 
 // WheelKeys 是「滚轮事件」的按键名（tui.py:47）。
@@ -135,7 +135,8 @@ func MenuTable(options []Option, selected int) Renderable {
 // MenuTableStyled 与 MenuTable 相同，但允许调用方给**选中行**的单元格套样式。
 //
 // 交互模型用 lipgloss 高亮当前项（迁移方案允许样式自选，只要信息等价）；
-// style 为 nil 时与 rich 的纯文本版式一致，对拍语料走的就是这条路径。
+// style 为 nil 时与 rich 的纯文本版式一致，MenuTable（外部模块打印菜单走这条路）
+// 就是这么调的。
 func MenuTableStyled(options []Option, selected int, style func(string) string) Renderable {
 	rows := make([][]string, 0, len(options))
 	for index, option := range options {

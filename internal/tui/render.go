@@ -8,7 +8,7 @@ package tui
 //
 //  1. 其他待移植模块（service.py / main.py / config_editor.py / dashboard.py）
 //     调用 section_panel、page_title、menu_table 时拿到的东西可以直接打印；
-//  2. 对拍语料只比较**纯文本行**，不受颜色系统影响。
+//  2. 渲染只处理**纯文本行**，不受颜色系统影响。
 //
 // 刻意保留的差异（都在 divergence_test.go 里具名钉住）：
 //   - 面板边框固定用 ROUNDED（╭╮╰╯）。rich 在 safe_box 生效时会替换成 SQUARE

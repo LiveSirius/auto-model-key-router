@@ -13,15 +13,17 @@ import (
 
 // 本文件是探测相关的测试脚手架：脚本化 HTTP 传输与固定时钟。
 //
-// 它们原先住在对拍语料文件里；语料退役后，被测用例仍然需要这些桩。
+// 它们原先住在差分语料文件里；那批语料已随 Python 参照实现退役删除，但被测用例
+// 仍然需要这些桩。
 
 // corpusFixedEpoch 是桩时钟的 Unix 秒（固定值，避免用例受真实时间影响）。
 const corpusFixedEpoch = 1_800_000_000.0
 
-// scriptedClock 复刻生成脚本里的 ScriptedClock（每次单调调用递增 0.25 秒）。
+// scriptedClock 是确定性时钟：单调钟每次调用递增 0.25 秒（取值沿用迁移期生成脚本的
+// 桩，该脚本已随 Python 参照实现退役删除）。
 type scriptedClock struct{ value float64 }
 
-// scriptedClockStart / scriptedClockStep 与生成脚本里的桩一致。
+// scriptedClockStart / scriptedClockStep 是上面那套桩的起始值与步长。
 const (
 	scriptedClockStart = 1000.0
 	scriptedClockStep  = 0.25

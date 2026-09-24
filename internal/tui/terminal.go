@@ -85,7 +85,7 @@ func ReadKeyResponsive(onResize func()) string {
 //
 // Python 先写 ANSI 序列（`\033[2J\033[3J\033[H`）再调 console.clear()。Go 侧的
 // Console 没有需要清空的内部缓冲，所以只写一次序列——重复写两次是同一个效果，
-// 但会让「写到 stdout 的字节」与参照不一致（语料之外的具名测试
+// 但会让「写到 stdout 的字节」与参照实现不一致（具名测试
 // TestClearTerminalHistoryWritesSequence 钉住了这里只写一次）。
 func ClearTerminalHistory() {
 	Console.Write("\033[2J\033[3J\033[H")

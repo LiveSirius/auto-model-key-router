@@ -68,7 +68,7 @@ type Editor struct {
 	// RestartServiceAfterConfigChange 见 RestartServiceFunc。
 	RestartServiceAfterConfigChange RestartServiceFunc
 	// GenerateLocalAPIKey 对应 config.generate_local_api_key。nil 表示用 config 包的
-	// 实现；注入它是为了让「重新生成本地鉴权密钥」这条流程能确定性对拍（Python 侧
+	// 实现；注入它是为了让「重新生成本地鉴权密钥」这条流程能确定性测试（Python 侧
 	// 把它 monkeypatch 成固定值）。
 	GenerateLocalAPIKey func() (string, error)
 

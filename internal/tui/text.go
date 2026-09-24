@@ -7,7 +7,7 @@ package tui
 // tui.py 里所有居中、截断、折行都以此为准（tui.py:116、tui.py:608-610）。
 // Go 标准库没有 East Asian Width 表，而迁移约束不允许再引入第三方依赖，因此
 // 这里内置一张常用区段的宽字符表。已知差异：emoji 组合序列（ZWJ/旗帜）的宽度
-// 可能与 rich 不一致，见 divergence_test.go；语料刻意只用 ASCII 与 CJK。
+// 可能与 rich 不一致，见 divergence_test.go。
 
 import (
 	"strings"
@@ -162,7 +162,7 @@ func TruncateCells(s string, width int) string {
 //   - 超宽时裁到 width 个单元格；若最后一个宽字符落在边界上被丢掉，
 //     用空格补齐到恰好 width（实测：宽度 5 的「中文内容测试」得到「中文 」）。
 //
-// 折行与 no_wrap 渲染都要用它，否则语料里 trailing space / 中文截断两条会不一致。
+// 折行与 no_wrap 渲染都要用它，否则 trailing space 与中文截断两处会与参照实现不一致。
 func cropCells(s string, width int) string {
 	if width <= 0 {
 		return ""
@@ -176,8 +176,8 @@ func cropCells(s string, width int) string {
 
 // TruncateEllipsis 复刻 rich 的 `overflow="ellipsis"`：超宽时留一格放省略号。
 //
-// shortcut_text 用它（tui.py:108 的 `overflow="ellipsis"`），语料里有对应的
-// 长快捷键提示用例。rich 的实现在 rich/text.py 的 truncate：
+// shortcut_text 用它（tui.py:108 的 `overflow="ellipsis"`）。rich 的实现在
+// rich/text.py 的 truncate：
 // `set_cell_size(plain, max_width - 1) + "…"`，因此被丢掉的宽字符会用空格补齐。
 func TruncateEllipsis(s string, width int) string {
 	if DisplayWidth(s) <= width {
@@ -271,7 +271,7 @@ func StripMarkup(s string) string {
 // wrapLine 把单行文本按 width 个单元格贪心折行，等价于 rich 的
 // `Text.wrap` + `divide_line(fold=True)` 在纯文本上的结果。
 //
-// 规则（逐条与真实 rich 对拍过，见 testdata/tui_corpus.json 的 wrap 段）：
+// 规则（迁移期逐条与真实 rich 核对过，核对用的冻结语料已随 Python 参照实现退役删除）：
 //   - 优先在空白处断行，且**断行后去掉行尾空白**（rich 的 divide_line 用
 //     `word.rstrip()` 计长，切分点落在空白前）；
 //   - 单个词超过一行宽时按单元格硬切（fold=True）；

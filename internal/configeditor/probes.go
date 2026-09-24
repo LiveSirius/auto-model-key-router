@@ -64,8 +64,7 @@ type KeyProbeResult struct {
 // 端点能力缓存的过期换算。
 //
 // 参照实现直接用 datetime.now / time.monotonic / time.time；把三者做成接缝是为了让
-// 语料能同时锁定 checked_at、duration_ms 与 expires_in_seconds（generator 侧把
-// config_editor.datetime / monotonic / time 分别打桩成确定性值）。
+// 测试能同时控制 checked_at、duration_ms 与 expires_in_seconds。
 type Clock interface {
 	// Now 返回当前墙钟时间。
 	Now() time.Time
@@ -157,7 +156,7 @@ func ProbePayloadForMode(mode string, modelID string) *canonical.Value {
 //
 // 与参照实现的差异：httpx 的 response.text 会按 content-type 的 charset 解码并用
 // U+FFFD 替换非法字节，Go 侧不做 charset 嗅探，直接按 UTF-8 截断。探测响应的错误
-// 文本不是契约字段，且非法编码的上游响应不在语料覆盖范围内。
+// 文本不是契约字段，非法编码的上游响应也不值得专门处理。
 func ProbeErrorText(body []byte) string {
 	data, err := canonical.Parse(body)
 	if err != nil {
@@ -198,7 +197,7 @@ type httpResult struct {
 //   - Go 会自动补 User-Agent / Accept-Encoding，参照实现不会；
 //   - Go 的 `client.Do` 把传输层错误包成 *url.Error（`Get "https://…": …`），
 //     这里剥掉外层包装——httpx 的 RequestError 文本里没有 URL，不剥就无法与
-//     「脚本化错误消息」对拍，也会让日志里多一层噪音。
+//     测试里的「脚本化错误消息」逐字比较，也会让日志里多一层噪音。
 //
 // withAuth 为假时不发 Authorization 头：只有 `GET /health` 走这条路
 // （config_editor.py:122 用的是裸 httpx.get）。
@@ -469,7 +468,8 @@ func (p Prober) probeKeyAvailability(ctx context.Context, data *canonical.Value,
 // 配置字典（会用到 upstream_routes 与 models 里的遗留路由，见
 // UpstreamRoutesForBaseURL），返回带 mode/status_code 的完整结果。
 //
-// 对拍与交互界面用它；喂 internal/api 接缝的是 ProbeKeyAvailability。
+// 需要整份配置字典的调用方用这个导出入口；喂 internal/api 接缝的是
+// ProbeKeyAvailability。
 func (p Prober) ProbeKeyAvailabilityForData(ctx context.Context, data *canonical.Value, modelID string, key *canonical.Value, timeout float64, modes []string) ([]KeyProbeResult, error) {
 	return p.probeKeyAvailability(ctx, data, modelID, key, timeout, modes)
 }
