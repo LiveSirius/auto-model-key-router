@@ -12,7 +12,7 @@ import (
 //
 // 对齐 config.py:315。始终在私有副本上操作，调用方传入的 payload 不会被改写。
 //
-// 三条返回路径的差异是刻意的，语料逐条断言：
+// 三条返回路径的差异是刻意的，由本包用例逐条断言：
 //   - 版本已是 4：原样返回（连 config_version 的类型都保留，比如 "4"、4.0、true）；
 //   - 版本为 3：迁移并**强制**把 config_version 写成整数 4；
 //   - 其它版本：v1/v2 列表布局展平；models 不是列表则原样返回。
@@ -449,7 +449,7 @@ func v3PoolEnabledModels(provider *canonical.Value, poolName string) (map[string
 //
 // 关键的 Python 语义有两层：先做真值替换（None、空串、0、空容器都变成空列表），
 // 再按类型迭代（list 出元素、str 出字符、dict 出键，int/float 抛 TypeError）。
-// 池白名单写成字符串 "ab" 时会被展开成 'a'、'b'，这是语料实测的行为。
+// 池白名单写成字符串 "ab" 时会被展开成 'a'、'b'，这是参照实现的历史行为（刻意保留）。
 func iterateOrEmpty(value *canonical.Value) ([]string, error) {
 	if !truthyValue(value) {
 		return nil, nil

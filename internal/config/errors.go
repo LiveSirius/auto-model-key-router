@@ -10,7 +10,7 @@ import (
 // ConfigError 表示配置内容不合法。
 //
 // 对应 Python 侧抛出的 ValueError。错误文本会经 management API 原样回给用户，
-// 属于对外契约，故与 Python 的措辞保持一致（由 testdata 语料逐条断言）。
+// 属于对外契约，故与 Python 的措辞保持一致（由本包用例逐条断言）。
 type ConfigError struct {
 	Message string
 }

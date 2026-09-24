@@ -237,9 +237,9 @@ type RouterConfig struct {
 	//
 	// 重要：它**只**由 providers[].routes 汇总而来。配置文件顶层的
 	// upstream_routes 与 provider key 级的 upstream_routes 都会被忽略——
-	// 这是参照实现的实际行为（config.py:877 从空字典起步，而 KeyConfig 在
-	// config.py:963 构造时未传 upstream_routes）。迁移对拍语料已固化该行为；
-	// 详见 internal/config/doc.go 的说明。
+	// 这是参照实现的历史行为（config.py:877 从空字典起步，而 KeyConfig 在
+	// config.py:963 构造时未传 upstream_routes），刻意保留：改动它会让已有配置的
+	// 上游请求路径发生变化。详见 internal/config/doc.go 的说明。
 	UpstreamRoutes map[string]map[string]string
 	UnifiedModel   *UnifiedModelConfig
 	// Tasks 是**扁平**的全部任务，每项带自己的 Workspace（顶层 `tasks` 段的任务
@@ -774,7 +774,7 @@ func parseWorkspaceModels(raw *canonical.Value, workspace string, idsByName map[
 // parseTaskGroup 解析一段 `{任务名: {...}}`，workspace 是它归属的工作空间。
 //
 // prefix 只影响错误文本里的字段路径：默认工作空间保持 `tasks.<名字>.model` 这一
-// 既有措辞（语料逐字节锁定），命名工作空间用 `workspaces.<空间>.tasks.<名字>.model`。
+// 既有措辞（对外契约，不得改写），命名工作空间用 `workspaces.<空间>.tasks.<名字>.model`。
 func parseTaskGroup(
 	rawTasks *canonical.Value,
 	workspace, prefix string,
