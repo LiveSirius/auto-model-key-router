@@ -1272,9 +1272,13 @@ http://127.0.0.1:8000/ui/
 
 ### 鉴权
 
-`/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。页面会把 Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），并在未授权时提示输入。本地鉴权未启用时，管理接口对本机开放。
+`/ui/` 本身是静态资产，不需要鉴权；**它调用的管理接口都会照常校验本地鉴权 Key**。本地鉴权未启用时，管理接口对本机开放。
 
-三个页面各自的凭据面不同，不能互换：`index.html`（管理面）用本地鉴权 Key；`panel.html`（工作空间面板）用工作空间的面板 key，走 URL fragment；`guest.html`（访客看板）用访问密钥，存在**独立键名** `amkr.guestAccessKey` 下——与 `amkr.apiKey` 分开，否则访客的访问密钥会覆盖管理员已登录的本地鉴权 Key。
+管理面的登录是**独立一页** `/ui/login.html`：未授权时 `index.html` 不渲染任何内容，直接整页跳转到登录页（当前地址作为 `?next=` 带上，验通后回到原本要去的页面），因此不存在"带着无效 Key 进入主界面"的入口。Key 保存在浏览器 `localStorage`（键名 `amkr.apiKey`），**绝不会出现在 URL 里**。会话中途失效（如重置了本地鉴权 Key）会带 `?reason=expired` 跳回登录页并说明原因；服务连不上时则保留已填的 Key 并给出"重试连接"，因为那可能只是服务还没起来。
+
+四个页面各自的凭据面不同，不能互换：`index.html`（管理面）用本地鉴权 Key；`login.html` 是它的凭据入口；`panel.html`（工作空间面板）用工作空间的面板 key，走 URL fragment；`guest.html`（访客看板）用访问密钥，存在**独立键名** `amkr.guestAccessKey` 下——与 `amkr.apiKey` 分开，否则访客的访问密钥会覆盖管理员已登录的本地鉴权 Key。
+
+`login.html` 的 `?next=` 只接受**同源相对路径**（拒绝 `//host` 与 `/\host` 这类协议相对地址），否则就是一个开放重定向：用户在本站输入真实 Key 之后被送去站外。
 
 ### `GET /api/workspaces`、`POST /api/workspaces`、`PUT|DELETE /api/workspaces/{workspace}`、`POST /api/workspaces/{workspace}/inference-key`、`PUT /api/workspaces/{workspace}/models`、`POST /api/workspaces/export|import`
 
