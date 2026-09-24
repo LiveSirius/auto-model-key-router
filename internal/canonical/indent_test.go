@@ -48,9 +48,9 @@ func TestDumpsIndentZeroAndNegative(t *testing.T) {
 	}
 }
 
-// TestNewFloatFormatting 直接锁定浮点格式化规则，不依赖语料。
+// TestNewFloatFormatting 直接锁定浮点格式化规则。
 //
-// 语料覆盖很广但可读性差；这些是边界值，出错时能立刻看出是哪条规则错了。
+// 这些是边界值，出错时能立刻看出是哪条规则错了。
 //
 // 注意：期望值必须经 runtimeFloat 构造。Go 的**无类型常量**算术在编译期以任意
 // 精度求值，`0.1 + 0.2` 会得到精确的 0.3 并舍入为最接近 0.3 的 float64；

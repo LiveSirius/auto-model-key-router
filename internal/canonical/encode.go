@@ -219,7 +219,7 @@ func specialFloat(f float64) (string, bool) {
 //  3. decpt <= -4 或 decpt > 16 时用科学计数法，否则用定点表示；
 //  4. 定点表示始终带小数点（整数补 ".0"）；科学计数法的指数至少两位且有符号。
 //
-// 逐字节正确性由 testdata/corpus.jsonl 的浮点语料断言。
+// 逐字节正确性由本包的浮点用例断言。
 func formatFloat(f float64) string {
 	if f == 0 {
 		// 区分 0.0 与 -0.0：Python 的 repr(-0.0) 是 "-0.0"。

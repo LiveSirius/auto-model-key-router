@@ -225,8 +225,8 @@ func TestPyFloatMatchesPython(t *testing.T) {
 // TestParseIntTruncatesFloats 锁住 parseInt 对浮点字面量的截断行为。
 //
 // 这是本轮修复的回归点：旧实现让 parseInt 拒绝一切含小数点/指数的字面量，导致
-// 配置里 port 写成 8080.0 时 Go 报错而 Python 静默接受为 8080。对拍语料
-// port_as_float 正是捕获该差异的用例。
+// 配置里 port 写成 8080.0 时 Go 报错而 Python 静默接受为 8080（参照实现的历史
+// 行为），本用例锁住修复后不再复现该差异。
 func TestParseIntTruncatesFloats(t *testing.T) {
 	cases := []struct {
 		literal string

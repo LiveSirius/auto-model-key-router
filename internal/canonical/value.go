@@ -13,9 +13,8 @@
 //   - Encoder 默认把 < > & 与 U+2028/U+2029 转义成 \uXXXX，Python 不转义；
 //   - 不接受 NaN / Infinity / -Infinity 字面量，Python 接受。
 //
-// 因此这里自带解析器与序列化器。逐字节正确性由
-// gen_canonical_corpus.py（已随 Python 退役移除） 生成、testdata/corpus.jsonl 承载的语料断言，
-// 该语料以 Python 真实实现为参照，不依赖测试时存在 Python 解释器。
+// 因此这里自带解析器与序列化器。字节级正确性由本包与 internal/formatting 的用例
+// 逐条断言（浮点渲染、平局取偶、控制字符转义等边界都在其中）。
 package canonical
 
 import (
@@ -436,7 +435,7 @@ func (p *parser) parseString() (string, error) {
 //
 // Python 的 json 会把 \ud83d\ude00 解码成 U+1F600；孤立的代理项在 Python 里
 // 会得到一个无法编码为 UTF-8 的字符，Go 的 string 无法表示，这里退化为
-// U+FFFD（该情况不构成有效配置，语料也未覆盖）。
+// U+FFFD（该情况不构成有效配置）。
 func (p *parser) parseUnicodeEscape() (rune, error) {
 	p.pos++ // 'u'
 	code, err := p.readHex4()
