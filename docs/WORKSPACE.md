@@ -140,36 +140,36 @@ func hasWorkspaceCredential(entry *canonical.Value) bool {
 
 ## 6. 兼容性契约
 
-工作空间是 Go 侧新增的能力，参照实现没有对应实现，因此它**没有**可对拍的语料。它的
+工作空间是 Go 侧新增的能力，参照实现没有对应实现，因此它**没有**历史版本要沿用。它的
 兼容性契约是另一条：**不影响既有配置与既有调用方**。
 
 由此推出必须守住的性质：
 
 1. **`config_version` 仍是 4**，`workspaces` 是可选新增字段，顶层 `tasks` 就是
    `DefaultWorkspace`。
-2. **不带 `X-AMKR-Workspace` 头的请求行为逐字节不变。** 正因如此，被语料锁定的响应体
-   （`tasks/list` 锁定了 `{"tasks":[{name,model,fallback_model,params}],"config_revision"}`）
+2. **不带 `X-AMKR-Workspace` 头的请求行为逐字节不变。** 正因如此，`tasks/list` 这类既有
+   响应体（形状为 `{"tasks":[{name,model,fallback_model,params}],"config_revision"}`）
    **没有、也不允许**新增 `workspace` 字段——当前空间由请求头决定，不体现在响应里。
-3. **新增的 `/api` 路由与冻结清单分开维护。** 管理面 47 条与运维面 7 条路由的响应被
-   逐字节语料锁定（`routePatterns()` / `opsRoutePatterns()`），那些语料是本项目**已
-   发布接口**的回归凭证。工作空间自身的操作（`GET|POST /api/workspaces`、
+3. **新增的 `/api` 路由与已发布清单分开维护。** 管理面 47 条与运维面 7 条路由
+   （`routePatterns()` / `opsRoutePatterns()`）是**已发布接口**的清单，它们的响应形状已经
+   对外承诺。工作空间自身的操作（`GET|POST /api/workspaces`、
    `PUT|DELETE /api/workspaces/{workspace}`、`POST /api/workspaces/export|import`）
    是管理面的正式资源，因此注册在 `/api` 之下，但列在**另一份**清单
-   （`workspacePatterns()`）里：它们没有历史版本可对照，塞进那 47 条会让「这 47 条
-   逐字节等于已发布行为」这句话失去意义。两批都注册在同一棵 mux 上，因此错方法的
+   （`workspacePatterns()`）里：它们没有历史版本可对照，塞进那 47 条会让「这 47 条就是
+   已发布行为」这句话失去意义。两批都注册在同一棵 mux 上，因此错方法的
    `405` / `Allow` 判定必须同时看两份清单（`internal/api/server.go` 的 `patterns`）。
 
    反过来说，**其余新增能力**（价格目录 `/ui/pricing.json`、自更新入口、工作空间用量
-   `/ui/workspace-usage.json`）仍然挂 `/ui/`：那些是本项目自有的读数，与被锁定的
-   `/api` 面在语义上不连续，挂 `/ui/` 既落在冻结清单之外，也让「不开 WebUI 就没有
-   这些读数」这件事顺理成章。判断标准是**它是不是管理面的正式资源**，而不是「能不
-   能挂到 /ui 躲开语料」。
+   `/ui/workspace-usage.json`、访问密钥用量 `/ui/access-key-usage.json`）仍然挂 `/ui/`：
+   那些是本项目自有的读数，与 `/api` 面在语义上不连续，挂 `/ui/` 既落在那份已发布清单
+   之外，也让「不开 WebUI 就没有这些读数」这件事顺理成章。判断标准是**它是不是管理面的
+   正式资源**，而不是「能不能挂到 /ui 躲开清单」。
 4. **访问密钥不能使用任务**，带上该头也一样（它不绑定工作空间，该头只用来选任务所在的
    空间，而访问密钥一律进不了任务路由）。
 5. **错误文本**：工作空间引入的新错误（`workspaces 必须是对象`、`工作空间名不能为空`、
    `工作空间名重复: %s`、`工作空间 %s 必须是对象`、`workspaces.<空间>.tasks...`）没有
-   Python 先例，是自由措辞；但既有的 `任务…` / `tasks.<名字>…` 文本被语料逐字节锁定，
-   不得改写。
+   Python 先例，是自由措辞；但既有的 `任务…` / `tasks.<名字>…` 文本是**对外契约**，
+   既有调用方依赖它，不得改写。
 6. **`Validate` 的错误顺序也是契约**。新增检查请追加在末尾或紧邻同类检查，不要插到
    既有检查之前——那会改变既有非法配置报出的第一条错误。
 
@@ -266,16 +266,13 @@ CREATE TABLE IF NOT EXISTS request_workspace (
 
 1. `request_id` 是 `INTEGER PRIMARY KEY`，即 rowid 别名。一对一约束与 JOIN 索引
    同时到手，且**不会**在 `sqlite_master` 里多出一条索引条目。
-2. `request_metrics` 的建表原文、列序与索引定义原先由 `internal/metrics/testdata/schema.jsonl`
-   **逐字节锁定**（`TestSchemaMatchesPython`），那是整条兼容链的根。而
+2. 旁挂表让 `request_metrics` 自身的建表原文、列序与索引定义保持逐字节不变，而
    `ALTER TABLE ... ADD COLUMN` **会重写 `sqlite_master.sql`**（实测：即便在全新库
-   上也会把新列以追加形式写进原文），加列必然打破那份语料。旁挂表让
-   `request_metrics` 自身逐字节不变，差异面从「表定义被改写」缩小到「多了一张表」。
+   上也会把新列以追加形式写进原文），加列因此会让表定义本身发生变化。差异面从
+   「表定义被改写」缩小到「多了一张表」。
 
-   注意：那份语料连同对拍测试已随「冻结语料退役」一并删除，因此这条理由现在只剩
-   **历史依据**——旁挂表的设计不再由它守护。`request_metrics` 的列序与索引定义仍是
-   兼容性契约（旧二进制要能继续读写同一个库），改动前请回到本节与 `internal/metrics`
-   的 schema 说明确认影响面。
+   `request_metrics` 的列序与索引定义仍是**兼容性契约**（旧二进制要能继续读写同一个
+   库），改动前请回到本节与 `internal/metrics` 的 schema 说明确认影响面。
 
 > 旧二进制打开新库时只是看不到这张表，仍能正常读写指标。加列则会遇到它不认识的列序
 > （`SELECT *` 与 `table_info` 的输出都会变）。
@@ -314,8 +311,7 @@ scale），不能让每层各自缩放到满高。后者会让同一节点的入
 - **归属从本版本才开始记录**：升级前的历史行永远是 `unattributed`，不会追溯回填
   （回填需要当时的工作空间名，而它没有被记下来）。
 - 该读数挂在 `/ui/workspace-usage.json`：它是本项目自有的响应形状，没有可比对的
-  oracle，因此不混进被逐字节语料锁定的 `/metrics` 系列（理由与 `/ui/` 的选择一致，
-  见第 6 节）。
+  oracle，因此不混进 `/metrics` 系列（理由与 `/ui/` 的选择一致，见第 6 节）。
 
 ## 9. 面板 key 与可嵌入面板
 
@@ -339,9 +335,9 @@ scale），不能让每层各自缩放到满高。后者会让同一节点的入
 | | 配置导出/导入、工作空间整包迁移（要完整权限） |
 
 面板 key **不是**第三档权限，而是「被钉死在某个空间上的任务面权限」。实现上它刻意不
-进 `internal/auth`：那个包是被逐字节语料锁定的纯函数，加一条分支会把它作为兼容性凭证
-的价值弄糊。解析发生在调用点——`internal/api/server.go` 的 `authorizedTaskConfig` 先
-照常调 `auth.Authenticate`，**失败之后**才拿请求头里的 key 去查
+进 `internal/auth`：那个包是不依赖 `config` 的纯函数，加一条分支会把它作为通用鉴权
+判定的价值弄糊。解析发生在调用点——`internal/api/server.go` 的 `authorizedTaskConfig`
+先照常调 `auth.Authenticate`，**失败之后**才拿请求头里的 key 去查
 `config.WorkspaceForAPIKey`。因此面板 key 永远走不到 `IsFull()` 那条路。
 
 ### 钉死：请求头被忽略
@@ -529,12 +525,12 @@ fragment 更宽的攻击面。如果 `X-AMKR-Workspace` 能换空间，一把泄
 
 ## 12. 改动时的检查清单
 
-- [ ] 新代码是否让「不带 `X-AMKR-Workspace` 头」的行为发生了变化？语料会立刻发现。
-- [ ] 是否给被语料锁定的响应体新增了字段？（`tasks/list` 等）
+- [ ] 新代码是否让「不带 `X-AMKR-Workspace` 头」的行为发生了变化？既有调用方依赖它。
+- [ ] 是否给 `tasks/list` 这类既有响应体新增了字段？（那等于改动已对外承诺的形状）
 - [ ] 新增的 `/api` 路由是否放在了 `workspacePatterns()` 这类**独立清单**里，并同步
       了 `internal/api/server.go` 的 `patterns`（错方法的 405 判定）？
 - [ ] 挂 `/ui/` 的新能力是否真的是「非管理面读数」？管理面的正式资源不该借 `/ui/`
-      躲开语料冻结。
+      从那份已发布路由清单里溜出去。
 - [ ] 冲突检查是否被意外地收窄到空间内？模型名冲突必须保持**全局**。
 - [ ] 空分组的两处口径是否仍然一致？（`configops.writeWorkspaceTasks` 的
       `hasWorkspaceCredential` 与 `config.parseTasks`；带 `api_key`、`inference_key`
