@@ -353,17 +353,16 @@ function draw() {
   render(host, children);
 }
 
-export async function renderAccessKeys(context) {
+// render 必须是**同步**的：app.js 直接把它返回的节点 mount 进 #content，写成 async
+// 就是返回一个 Promise，会被当成子节点渲染成整页的 "[object Promise]"。取数在后台
+// 完成后自行重绘，与其它页面同一约定。
+export function renderAccessKeys(context) {
   host = h("div.stack");
   state.loading = true;
   state.error = null;
   draw();
-  try {
-    await load();
-  } catch (error) {
-    state.error = errorText(error);
-  }
-  state.loading = false;
-  draw();
+  load()
+    .catch((error) => { state.error = errorText(error); })
+    .finally(() => { state.loading = false; draw(); });
   return host;
 }
