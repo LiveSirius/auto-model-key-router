@@ -12,6 +12,7 @@ package selfupdate
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -129,10 +130,23 @@ func (e *httpStatusError) retryable() bool {
 		e.Code >= 500
 }
 
+// permanentError 标记「重试也不会变好」的本地失败（磁盘写不进、目录不可写）。
+//
+// 存在的理由：消费响应体时两类错误混在一起——**读到一半断流**（网络抖动，必须重试）
+// 与**写不进本地文件**（磁盘满，重试无用）。不区分的话，前者（下载 15MB 时连接被重置）
+// 会被当成后者直接放弃，而那正是最该重试的情形。
+type permanentError struct{ err error }
+
+func (e *permanentError) Error() string { return e.err.Error() }
+func (e *permanentError) Unwrap() error { return e.err }
+
 // fetchWithRetry 带重试地取回 url，把响应体交给 consume 消费。
 //
-// 重试的边界划得很清楚：**连接层失败与可重试的状态码**才重试；consume 的错误
-// （磁盘写不进去、校验和文件里没有这个产物）一律立即返回——那些重试也不会变好。
+// 重试规则：
+//   - 连接层失败（TLS 握手超时、连接重置、DNS）→ 重试。
+//   - 5xx / 429 / 408 → 重试；其余状态码立刻返回。
+//   - consume 返回 permanentError（本地写失败）→ 立刻返回。
+//   - consume 返回其它错误（读到一半断流）→ 重试。
 func fetchWithRetry(client *http.Client, url string, consume func(io.Reader) error) error {
 	if client == nil {
 		client = http.DefaultClient
@@ -151,6 +165,11 @@ func fetchWithRetry(client *http.Client, url string, consume func(io.Reader) err
 			continue
 		}
 		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			// 先排空再关闭，让这条 keep-alive 连接能被下一次尝试复用。不读就走的话
+			// Go 会直接丢弃连接，于是每次重试都要重做一次 TLS 握手——而我们要处理的
+			// 失败恰恰经常就是 TLS 握手超时，那等于把最贵的部分重做一遍。
+			// 只读前 4KB：错误响应体没有价值，但要足够让连接回到池子里。
+			_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4<<10))
 			_ = response.Body.Close()
 			status := &httpStatusError{Code: response.StatusCode, URL: url}
 			if !status.retryable() {
@@ -162,7 +181,13 @@ func fetchWithRetry(client *http.Client, url string, consume func(io.Reader) err
 		err = consume(response.Body)
 		closeErr := response.Body.Close()
 		if err != nil {
-			return err
+			var permanent *permanentError
+			if errors.As(err, &permanent) {
+				return permanent.err
+			}
+			// 其余当作读到一半断流：值得再试。
+			lastErr = err
+			continue
 		}
 		if closeErr != nil {
 			return closeErr
@@ -180,16 +205,19 @@ func Download(client *http.Client, url, path string) error {
 	return fetchWithRetry(client, url, func(body io.Reader) error {
 		file, err := os.Create(path)
 		if err != nil {
-			return err
+			// 本地写不进去（磁盘满、目录不可写）：重试无用，直接上报。
+			return &permanentError{err: err}
 		}
 		if _, err := io.Copy(file, body); err != nil {
 			_ = file.Close()
 			_ = os.Remove(path)
+			// 刻意**不**标记为永久失败：十几兆的产物下到一半被断流是最典型的瞬时
+			// 故障，正是重试要救的情形。（真·磁盘写满时多试几次只是浪费几秒。）
 			return err
 		}
 		if err := file.Close(); err != nil {
 			_ = os.Remove(path)
-			return err
+			return &permanentError{err: err}
 		}
 		return nil
 	})

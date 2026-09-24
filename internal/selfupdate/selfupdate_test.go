@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -457,24 +458,103 @@ func TestFetchChecksumsRetriesAndKeepsDeterministicFailure(t *testing.T) {
 	})
 }
 
-// TestFetchWithRetryReturnsConsumeErrorImmediately 锁定：consume 的错误（磁盘写不进去）
-// 不重试——它不是网络问题，重试也不会变好。
-func TestFetchWithRetryReturnsConsumeErrorImmediately(t *testing.T) {
+// TestFetchWithRetrySplitsConsumeErrorsByRetryability 锁定消费阶段的错误分界：
+//
+//   - 本地写失败（permanentError，磁盘满）→ 立刻返回，重试无意义。
+//   - 其余错误（读到一半被断流）→ **必须重试**。十几兆的产物下一半断流是最典型的
+//     瞬时故障，早期实现把它当成"本地错误"直接放弃，这是真实存在的失败模式。
+func TestFetchWithRetrySplitsConsumeErrorsByRetryability(t *testing.T) {
 	defer noRetrySleep()
 
+	t.Run("本地写失败不重试", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			atomic.AddInt32(&attempts, 1)
+			_, _ = w.Write([]byte("body"))
+		}))
+		defer server.Close()
+
+		sentinel := errors.New("磁盘满了")
+		err := fetchWithRetry(server.Client(), server.URL, func(io.Reader) error {
+			return &permanentError{err: sentinel}
+		})
+		if !errors.Is(err, sentinel) {
+			t.Errorf("应返回原始错误，实际 %v", err)
+		}
+		if n := atomic.LoadInt32(&attempts); n != 1 {
+			t.Errorf("本地写失败不该重试，实际请求了 %d 次", n)
+		}
+	})
+
+	t.Run("中途断流要重试", func(t *testing.T) {
+		var attempts int32
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if atomic.AddInt32(&attempts, 1) == 1 {
+				_, _ = w.Write([]byte("半截"))
+				return
+			}
+			_, _ = w.Write([]byte("完整内容"))
+		}))
+		defer server.Close()
+
+		// 第一次消费时报一个非 permanent 的错误，模拟读到一半断流。
+		var payload []byte
+		var first bool
+		err := fetchWithRetry(server.Client(), server.URL, func(reader io.Reader) error {
+			text, readErr := io.ReadAll(reader)
+			if readErr != nil {
+				return readErr
+			}
+			if !first {
+				first = true
+				return errors.New("unexpected EOF")
+			}
+			payload = text
+			return nil
+		})
+		if err != nil {
+			t.Fatalf("中途断流应当重试并成功，实际 %v", err)
+		}
+		if string(payload) != "完整内容" {
+			t.Errorf("内容 = %q", payload)
+		}
+		if n := atomic.LoadInt32(&attempts); n != 2 {
+			t.Errorf("尝试次数 = %d，期望 2", n)
+		}
+	})
+}
+
+// TestDownloadRetriesMidStreamTruncation 走真实的 io.Copy 路径验证上面那条判断：
+// 服务端声明了长度却只写一半就关闭 → 客户端 io.Copy 报错 → 必须重试并最终装好。
+func TestDownloadRetriesMidStreamTruncation(t *testing.T) {
+	defer noRetrySleep()
+
+	payload := []byte("这是一个完整的产物内容，第二次才发全")
 	var attempts int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
-		_, _ = w.Write([]byte("body"))
+		attempt := atomic.AddInt32(&attempts, 1)
+		// 声明完整长度，第一次却只写一半就返回（客户端会看到 unexpected EOF）。
+		w.Header().Set("Content-Length", strconv.Itoa(len(payload)))
+		if attempt == 1 {
+			_, _ = w.Write(payload[:len(payload)/2])
+			return
+		}
+		_, _ = w.Write(payload)
 	}))
 	defer server.Close()
 
-	sentinel := errors.New("磁盘满了")
-	err := fetchWithRetry(server.Client(), server.URL, func(io.Reader) error { return sentinel })
-	if !errors.Is(err, sentinel) {
-		t.Errorf("错误应为 consume 的原错误，实际 %v", err)
+	path := filepath.Join(t.TempDir(), "payload")
+	if err := Download(server.Client(), server.URL, path); err != nil {
+		t.Fatalf("中途断流应当重试并成功，实际 %v", err)
 	}
-	if n := atomic.LoadInt32(&attempts); n != 1 {
-		t.Errorf("consume 失败不该重试，实际请求了 %d 次", n)
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Errorf("内容 = %q，期望 %q", got, payload)
+	}
+	if n := atomic.LoadInt32(&attempts); n != 2 {
+		t.Errorf("尝试次数 = %d，期望 2", n)
 	}
 }
