@@ -49,12 +49,14 @@ jobs:
         run: go vet ./...
 
       - name: Go 测试（go test）
-        # 回放仓库里**冻结的差分语料**（internal/*/testdata、cmd/amkr/testdata），
-        # 它们是兼容性的唯一凭证，不做任何网络访问。
+        # 行为用例：配置解析与校验、canonical 序列化、key 选择、代理改写、指标读写等，
+        # 不做任何网络访问。
         run: go test ./...
 
       - name: WebUI 资产检查（node）
         # 前端资产经 //go:embed 编进二进制，源码正确性仍单独验一遍。
+        # 与 ci.yml 同一套检查；探针清单必须与 webui/probes/ 保持一致，漏掉一个等于
+        # 发布门禁比 CI 松——那种缺口只会在发布后才被发现。
         run: |
           node scripts/webui_module_check.mjs
           node webui/probes/webui_chart_probe.mjs
@@ -65,6 +67,8 @@ jobs:
           node webui/probes/webui_providers_probe.mjs
           node webui/probes/webui_routing_probe.mjs
           node webui/probes/webui_panel_probe.mjs
+          node webui/probes/webui_layout_probe.mjs
+          node webui/probes/webui_guest_probe.mjs
 
   # ---- 容器镜像 ----
   #
