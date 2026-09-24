@@ -54,9 +54,9 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/updatecheck"
 )
 
-// version 与 pyproject.toml 的 project.version 保持一致；发布时可用
-// `-ldflags "-X main.version=..."` 覆盖。
-var version = "5.2.1"
+// version 是本仓库版本号的唯一来源；发布时可用
+// `-ldflags "-X main.version=..."` 覆盖（release 工作流就是这么注入 tag 的）。
+var version = "6.0.0"
 
 // shutdownTimeout 是优雅关停的上限。
 //
