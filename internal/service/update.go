@@ -71,19 +71,21 @@ func (e *Env) ServiceInstanceRunning(configPath string, cfg *config.RouterConfig
 //
 // 判据：
 //   - 注册信息可读（systemd user unit / 可见的计划任务）→ 能停能起。
-//   - 有 PID 文件（后台服务形态）→ 能停能起。**但进程还活着时必须核对可终止性**：
-//     PID 文件只记载"曾以后台形态启动过"，它可能早已被 SYSTEM 计划任务接管（本机实测
-//     的 3756 就是如此——PID 文件里写着它，但它属于会话 0，taskkill 一律被拒）。
-//     那种情况下"有 PID 文件"并不能兑现自动重启的承诺。
+//   - 有 PID 文件且**那个进程在跑、我们也杀得掉**（后台服务形态）→ 能停能起。
+//     两个条件缺一不可：PID 文件只记载"曾以后台形态启动过"，它可能指向一个已被 SYSTEM
+//     计划任务接管的会话 0 进程（本机实测的 3756 就是这样，taskkill 一律被拒），也可能
+//     只是一份残留（进程早已退出）。这两种情况都兑现不了自动重启的承诺。
 //   - 服务根本没在跑 → 无需重启，算「能」（助手只会清理旧文件）。
-//   - 服务在跑但上面两条都不成立 → 只可能是查不到的 SYSTEM 任务，**不能**自动重启。
+//   - 还有实例在服务但上面几条都不成立 → 只可能是查不到的 SYSTEM 任务，**不能**自动重启。
+//
+// 最后一条用 /health 兜底（与 ServiceInstanceRunning 同一个探针）：残留 PID 文件 +
+// SYSTEM 任务正在服务时，前面两条都以为"没人在跑"，只有探针能发现真相。
 func (e *Env) CanRestartService(configPath string, cfg *config.RouterConfig) bool {
 	if e.IsSystemServiceRegistered(configPath) {
 		return true
 	}
-	if pid, registered := e.BackgroundServiceRegistered(cfg); registered {
-		// 登记过就是后台形态——除非那个进程还在、而我们杀不掉它。
-		return !e.IsProcessRunning(pid) || e.CanTerminateProcess(pid)
+	if pid, registered := e.BackgroundServiceRegistered(cfg); registered && e.IsProcessRunning(pid) {
+		return e.CanTerminateProcess(pid)
 	}
 	return !e.IsServiceHealthy(cfg.Host, cfg.Port, false)
 }

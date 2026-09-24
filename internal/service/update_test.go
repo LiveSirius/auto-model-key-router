@@ -214,6 +214,22 @@ func TestCanRestartService(t *testing.T) {
 		t.Error("PID 文件残留但进程已退出时，应当报告可以自动重启")
 	}
 
+	// 残留 PID 文件 + 真的有实例在服务（SYSTEM 任务）：前面两条都以为"没人在跑"，
+	// 只有 /health 能发现真相 → 必须报**不能**。
+	//
+	// 这是最容易漏的一种：PID 文件是"曾经以后台形态启动过"的化石，与"现在谁在服务"
+	// 无关。少了这一条，助手会去停一个早已不存在的进程、以为停完了，然后把新版本
+	// 拉起来——而端口还被那个查不到的 SYSTEM 任务占着，启动必然失败。
+	stale := newUpdateTestEnv(t)
+	stale.pidLive = false
+	stale.healthy = true
+	if !stale.env.IsServiceHealthy(cfg.Host, cfg.Port, false) {
+		t.Fatal("夹具前提不成立：/health 应当报告健康")
+	}
+	if stale.env.CanRestartService(configPath, cfg) {
+		t.Error("PID 文件残留但仍有实例在服务时，必须报告不能自动重启")
+	}
+
 	if err := os.Remove(PidFilePath(cfg)); err != nil {
 		t.Fatal(err)
 	}
