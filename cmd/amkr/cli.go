@@ -25,7 +25,7 @@ package main
 //	--restart-service-after-update  update.py:613 的自更新收尾；Go 版改由
 //	                            --update-helper 助手进程自动重启，不再需要这个开关
 //
-// 这两条都由 TestDroppedFlagsAreNotDefined 具名锁定。
+// 这两条现在没有任何测试守着——它们随回放语料一并删除了。
 //
 // 注意 `--update` 曾经也是被砍的一员（产品决策 8「取消自更新」）。该决策已被**推翻**：
 // 现在恢复 `--update`，并补上 WebUI/API 入口。恢复的理由与实现见 docs/CLI.md 的
@@ -37,7 +37,7 @@ package main
 //     （`str(DEFAULT_CONFIG_PATH)`），于是 `RouterConfig.load` 里的 AMKR_CONFIG 分支
 //     永远走不到；Go 侧默认留空再交给 config.ResolveConfigPath，因此是
 //     「显式路径 > $AMKR_CONFIG > 默认路径」（与任务要求的 CLI > 环境变量 > 配置文件
-//     一致）。见 TestConfigPathPrecedenceDivergesFromPython。
+//     一致）。该优先级由 internal/config 的 TestResolveConfigPathPrecedence 断言。
 //  2. **默认（无参数）动作**。参照实现进入 dashboard.py 的 run_terminal_ui；该模块已
 //     随 Python 版退役，Go 侧的默认动作由 defaultCommand 一个常量决定——见那里的说明
 //     （这是一个**待产品确认**的开放决策）。
