@@ -38,8 +38,8 @@ import (
 // TestClient 发一个带升级头的普通 HTTP 请求」在 Python 侧落进 HTTP 路由（实测
 // `GET /v1/does-not-exist` -> 401），而 Go 会真的升级（101）。在**真实** uvicorn 上
 // 两者一致——实测同一个请求返回 `HTTP/1.1 101 Switching Protocols`，因为 uvicorn 已经
-// 把它当成 websocket scope 了。因此这不是行为差异，而是测试载体的差异；对拍语料
-// 因此**不收录**「带升级头的普通 HTTP 请求」这类用例（它锁不到真实协议行为）。
+// 把它当成 websocket scope 了。因此这不是行为差异，而是测试载体的差异：用
+// TestClient 写不出能覆盖真实协议行为的用例（它锁不到 101 这条路径）。
 func isWebSocketUpgrade(request *http.Request) bool {
 	if request == nil {
 		return false
@@ -69,8 +69,8 @@ func isWebSocketUpgrade(request *http.Request) bool {
 // 顺序上容易看漏的一点：客户端看到的**第一帧不是 connected**。`authenticate` 在返回
 // 之前会 await `on_client_count_change`（app.py:135），而那个回调会立刻广播
 // client_count 与 metrics_snapshot（app.py:129-132）；connected 是握手完成之后才补发
-// 的。eventbus 的 e2e.jsonl 与本次新增的语料 ws_auth_valid 都钉住了
-// `client_count, metrics_snapshot, connected` 这个顺序。
+// 的。internal/eventbus 的用例与 internal/server 的 TestWSEventsHandshakeSequence
+// 都钉住了 `client_count, metrics_snapshot, connected` 这个顺序。
 func (a *App) handleWSEvents(w http.ResponseWriter, request *http.Request) {
 	if !isWebSocketUpgrade(request) {
 		writeNotFound(w)
@@ -181,9 +181,7 @@ func (a *App) handleWSProxy(w http.ResponseWriter, request *http.Request) {
 //
 // dirty 信号的语义与 Python 的 asyncio.Event 一致：**电平而不是队列**。容量 1 的非阻塞
 // 发送正好表达这一点——sleep(1.0) 期间到达的写入只要还有一个信号没过期，下一轮
-// wait() 就会立刻返回（对应 eventbus 语料里的
-// dirty_inside_sleep_is_remembered）。多余信号被丢弃是安全的：dirty 只表示「有写入」，
-// 不承载数量。
+// wait() 就会立刻返回。多余信号被丢弃是安全的：dirty 只表示「有写入」，不承载数量。
 func (a *App) startMetricsBroadcast() {
 	if a.eventBus == nil || a.broadcaster == nil {
 		return

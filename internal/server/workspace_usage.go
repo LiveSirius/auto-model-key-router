@@ -10,12 +10,12 @@ import (
 // workspaceUsagePath 是工作空间用量读数在 WebUI 挂载下的文件名。
 //
 // **为什么挂在 /ui/ 而不是新开 /api/metrics/workspaces**：与 workspaces.go、
-// pricing.go、update.go 同一条理由——管理面的 47+7 条路由被逐字节语料锁定，而工作
-// 空间是 Go 侧新增能力，Python 侧没有对应实现，手写一条 /api 语料等于伪造兼容性
-// 证据。挂在 /ui/ 之下则落在所有冻结清单之外。
+// pricing.go、update.go 同一条理由——管理面的 47 条与运维面的 7 条都是有对外承诺的
+// 已发布接口，而工作空间是 Go 侧新增能力，Python 侧没有对应实现，新写的 `/api` 用例
+// 给不出任何兼容性证据。挂在 /ui/ 之下则落在所有已发布清单之外。
 //
-// 与 /metrics 系列的关系：/metrics 是**逐字节对照参照实现**的读数，不能加字段；
-// 这份读数是本项目自己的形状，因此单独一条路由，两边互不牵制。
+// 与 /metrics 系列的关系：/metrics 是**对照参照实现**的读数，形状已经发布，不能加
+// 字段；这份读数是本项目自己的形状，因此单独一条路由，两边互不牵制。
 const workspaceUsagePath = "/workspace-usage.json"
 
 // handleWorkspaceUsage 返回按工作空间拆分的用量统计与流向连边。

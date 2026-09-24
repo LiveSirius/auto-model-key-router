@@ -181,8 +181,8 @@ func normalizeUpstreamRoutesOrdered(raw *canonical.Value) (*canonical.Value, err
 //
 // **不对称点**：这里替换 keys 时**不**弹出每个 KeyCreate 自带的 config_revision，
 // 而 POST /api/models/{id}/keys 会把它弹掉。也就是说在 ModelCreate 的 keys 里写
-// config_revision 会被原样交给 config 层（可能落进配置）。这条差异已由语料与
-// TestModelCreateKeepsKeyRevisionQuirk 锁定。
+// config_revision 会被原样交给 config 层（可能落进配置）。这是参照实现的历史行为，
+// 刻意保留。
 func modelCreateData(payload *canonical.Value) (*canonical.Value, error) {
 	data := payload.Clone()
 	if err := normalizeModelUpdates(data); err != nil {

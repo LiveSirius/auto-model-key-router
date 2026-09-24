@@ -63,12 +63,12 @@ func (a *App) buildHandler() http.Handler {
 		// 它比 "/ui/" 更精确，因此 ServeMux 优先选中它，不会落到静态文件处理器上
 		// 去找一个磁盘上并不存在的 pricing.json。
 		mux.HandleFunc(path+pricingPath, a.handlePricing)
-		// 自更新入口（理由见 update.go）：同样挂在 /ui/ 之下，避开被逐字节语料锁定的
-		// 47+7 条 /api 路由。
+		// 自更新入口（理由见 update.go）：同样挂在 /ui/ 之下，避开那 47+7 条
+		// 已发布 /api 路由。
 		mux.HandleFunc(path+updateStatusPath, a.handleUpdateStatus)
 		mux.HandleFunc(path+updateApplyPath, a.handleUpdateApply)
 		// 工作空间用量读数（理由见 workspace_usage.go）：这是本项目自己的响应形状，
-		// 不能混进被逐字节语料锁定的 /metrics 系列，因此同样挂在 /ui/ 之下。
+		// 不能混进 /metrics 系列，因此同样挂在 /ui/ 之下。
 		mux.HandleFunc(path+workspaceUsagePath, a.handleWorkspaceUsage)
 		// 嵌入方面板的读数（理由见 workspace_panel.go）：与上一条形状相同，但只认
 		// 面板 key，且只回 key 所属那**一个**空间的用量。
@@ -86,7 +86,7 @@ func (a *App) buildHandler() http.Handler {
 	// ["GET","POST","PUT","PATCH","DELETE"]（app.py:371-373），因此其余四个方法会走到
 	// proxy 并得到 proxy 的错误（实测：POST /v1/models -> 404「模型  未配置」）。
 	// 若这里简单写成「非 GET 一律 405」，POST /v1/models 就会从 404 变成 405——
-	// 语料里的 proxy_catchall_post_models 正是钉住这一点的。
+	// 这是对外可观测的行为变化，不能改。
 	mux.HandleFunc("/v1/models", a.handleModelsRoute)
 	a.getRoute(mux, "/metrics", a.handleMetrics)
 	a.getRoute(mux, "/metrics/requests", a.handleMetricsRequests)
@@ -103,7 +103,7 @@ func (a *App) buildHandler() http.Handler {
 	// if 里，实测：webui 与 ops 全关时 /ws/events 的升级仍然被接受）。因此这里也不
 	// 引入 Options 上的新开关。普通 HTTP 请求不匹配 websocket 路由（Starlette 的
 	// WebSocketRoute 只在 scope["type"]=="websocket" 时匹配），落到兜底 404——由
-	// handleWSEvents 自己给出，与语料的 ws_events_http_* 逐字节对齐。
+	// handleWSEvents 自己给出，与参照实现的 ws_events_http_* 行为一致。
 	mux.HandleFunc("/ws/events", a.handleWSEvents)
 
 	mux.HandleFunc("/", a.handleRoot)
@@ -124,11 +124,11 @@ var proxyMethods = map[string]bool{
 // **已知分歧（有实测证据）**：参照实现的 Allow 由 Starlette 用一个集合拼出来，顺序随
 // PYTHONHASHSEED 变化——同一个 HEAD /v1/chat/completions 连续三次运行分别是
 // "PATCH, DELETE, GET, PUT, POST"、"PUT, PATCH, GET, POST, DELETE"、
-// "PUT, POST, GET, DELETE, PATCH"。那串字节因此不是稳定契约，不能进语料（会让
-// --check 随机失败）。这里固定成一个有序列表。
+// "PUT, POST, GET, DELETE, PATCH"。那串字节因此不是稳定契约，不该被别人当作契约依赖。
+// 这里固定成一个有序列表。
 //
 // 多方法 405 只出现在通配路由上；/v1/models、/health、/metrics* 与 "/" 的 Allow
-// 都是单元素（Python 侧同样稳定），它们已被语料逐字节锁定。
+// 都是单元素（Python 侧同样稳定），它们是对外契约。
 const proxyMethodList = "GET, POST, PUT, PATCH, DELETE"
 
 // handleProxyRoute 处理 /v1/{path}：WebSocket 升级交给 wsproxy，其余只有参照实现

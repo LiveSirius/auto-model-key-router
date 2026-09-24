@@ -30,8 +30,8 @@ import (
 //     文案，绝不静默成功（见各 handler 的说明与 handlers_ops_test.go 的具名用例）。
 //  2. **文件系统错误的文本**。ops_api.py:153 把 `str(exc)` 塞进 error 字段；CPython
 //     的 errno 文案（"[Errno 13] Permission denied: ..."）无法在 Go 里逐字复刻，因此
-//     Server.LogTail 接缝让对拍用例注入同一段文本，真实运行时的文案是 Go 的
-//     `*os.PathError` 文本。状态码、字段形状与「不 500」的契约已逐字节锁定。
+//     Server.LogTail 接缝让测试注入同一段文本，真实运行时的文案是 Go 的
+//     `*os.PathError` 文本。状态码、字段形状与「不 500」的契约不变。
 //  3. **rich 渲染的纯文本**。参照用 Console(record=True) 把 Panel/Group 渲染成纯文本
 //     （ops_api.py:73-90）；迁移方案已把「富文本降级为等价纯文本」定为不透明字符串，
 //     由 RunServiceAction 接缝的实现方决定。
@@ -78,8 +78,8 @@ var OpsServiceTargets = map[string]OpsServiceTarget{
 // opsSupportedAgents 对应 agent_config.py:27 的 SUPPORTED_AGENTS。
 //
 // 它必须与 internal/agentconfig 手工同步：agent_config.py 才是新 Agent 的唯一来源，
-// 而这里要在没有装配 agentconfig 的情况下也能给出参照实现的 404/422（语料里三个合法
-// Agent 的非法 mode 用例与一个非法 Agent 的用例会同时钉住正反两面）。
+// 而这里要在没有装配 agentconfig 的情况下也能给出参照实现的 404/422——合法 Agent
+// 配非法 mode 是 422、非法 Agent 是 404，两面都得对。
 // OpsIntegrations.SupportedAgents 非空时以接缝为准，见 opsAgentSupportedAt。
 var opsSupportedAgents = []string{"claude-code", "codex", "pi-agent"}
 
@@ -194,7 +194,7 @@ func (s *Server) RegisterOps(mux *http.ServeMux) {
 
 // handleOpsLogs 对应 ops_api.py:144 的 read_logs。
 //
-// 三条容易写错的语义（都已由语料逐字节锁定）：
+// 三条容易写错的语义（都刻意与参照实现保持一致）：
 //
 //  1. 日志文件不存在、或路径不是普通文件时返回 **200**，text 为空、error 为 null
 //     （ops_api.py:148-149）；
@@ -670,8 +670,10 @@ func pathExists(path string) bool {
 //
 // 与 internal/proxysupport 里的同名函数逐字相同：那边是私有实现，而本次迁移约定
 // 「只新增 internal/api」，不值得为了一个 50 行 helper 去导出别人的内部件（那还会让
-// api 依赖 proxysupport）。两处都由穷举语料对拍，不会各自漂移：本包的
-// TestOpsDecodeUTF8ReplacingMatchesCorpus 直接读 proxysupport 的语料。
+// api 依赖 proxysupport）。两处各自被本包的用例守着：这里的边界取值由
+// TestOpsLogsTailRule 覆盖，proxysupport 那份由 TestDecodeUTF8ReplacingIsValidUTF8
+// 与 TestDecodeUTF8ReplacingCountsMaximalSubparts 覆盖，因此改动任何一份都会在
+// 对应的包里失败。
 //
 // 为什么不能图省事：
 //   - strings.ToValidUTF8 会把**连续**非法字节折叠成一个 U+FFFD；

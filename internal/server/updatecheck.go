@@ -12,7 +12,7 @@ func defaultCheckUpdate(version string) func(timeout float64) api.UpdateCheckRes
 	return newUpdateCheck(version, updatecheck.HTTPFetcher(nil))
 }
 
-// newUpdateCheck 构造版本检查接缝。fetch 做成参数，测试与语料回放因此不必联网。
+// newUpdateCheck 构造版本检查接缝。fetch 做成参数，测试因此不必联网。
 //
 // **这里修掉了一处已知缺陷。** api 的 handleCheckUpdate 直接信任调用方给的
 // UpdateAvailable 字段（internal/api/handlers_meta.go 里那段

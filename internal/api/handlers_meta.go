@@ -111,8 +111,8 @@ func clearableString(obj *canonical.Value, key string) *string {
 // findConfigModel 按**精确 id** 查找模型。
 //
 // 刻意匹配别名：参照实现的 _find_model 只比 model.id，因此 GET /api/models/alias-a
-// 是 404 而不是命中别名（语料已固化）。它旁边那个会匹配别名的 find_config_model 在
-// management_api.py 里根本没有被任何路由调用。
+// 是 404 而不是命中别名（这是参照实现的历史行为，刻意保留）。它旁边那个会匹配别名的
+// find_config_model 在 management_api.py 里根本没有被任何路由调用。
 func findConfigModel(cfg *config.RouterConfig, modelID string) (*config.ModelConfig, error) {
 	for i := range cfg.Models {
 		if cfg.Models[i].ID == modelID {
@@ -146,7 +146,7 @@ func findConfigTask(cfg *config.RouterConfig, workspace, taskName string) (*conf
 //
 // 与代理面共用 X-AMKR-Workspace 这一个头：调用方与管理面用同一个概念选空间，
 // 不必记两套机制。缺省即默认工作空间，因此既有的管理调用（都不带这个头）语义
-// 一字未变，全部 22 条任务语料原样通过。
+// 一字未变——这是对外契约。
 //
 // 刻意复用 config.NormalizeWorkspace：空白与命名规则必须与运行时一致，否则
 // 「在 A 里建、去 A 里读」会因多一个空格而落空。
@@ -207,7 +207,7 @@ func (s *Server) handleUpdateUnifiedModel(w http.ResponseWriter, r *http.Request
 		}
 
 		// 分支二：切换目标。缺 model 时抛 ManagementAPIError——它在 _update_config
-		// 之外，因此对外是 500 而不是 422（语料 PUT /api/unified-model {} 已固化）。
+		// 之外，因此对外是 500 而不是 422（这是参照实现的历史行为，刻意保留）。
 		if !nonNull(payload, "model") {
 			return nil, &managementAPIError{status: 422, message: "必须提供 model 或 default"}
 		}
@@ -287,8 +287,8 @@ func (s *Server) handleListTasks(w http.ResponseWriter, r *http.Request) {
 			return nil, err
 		}
 		tasks := canonical.NewArray()
-		// 只列本空间的任务。响应体**没有 workspace 字段**：那条 tasks/list 语料逐字节
-		// 锁定了 {tasks:[{name,model,fallback_model,params}], config_revision}，加字段
+		// 只列本空间的任务。响应体**没有 workspace 字段**：既有调用方依赖
+		// {tasks:[{name,model,fallback_model,params}], config_revision} 这个形状，加字段
 		// 就会改掉已发布的接口。display_name 是唯一的例外，且只在任务真的取了名时才
 		// 出现（见 taskResponse），因此对没取名的既有任务仍然逐字节不变。
 		for _, task := range cfg.Tasks {

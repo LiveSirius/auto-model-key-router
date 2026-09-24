@@ -445,7 +445,7 @@ func TestOpsServiceTargetsMatchReference(t *testing.T) {
 
 // TestOpsLogsTailRule 直接锁定截断与宽容解码的边界规则。
 //
-// 语料已经通过 HTTP 覆盖了这些取值，这里把规则写成独立用例是为了失败时能一眼看懂
+// 规则本身由 HTTP 层已经覆盖，这里把取值写成独立用例是为了失败时能一眼看懂
 // 「是 > 而不是 >=」「最大子部分只产一个 U+FFFD」。
 func TestOpsLogsTailRule(t *testing.T) {
 	dir := t.TempDir()

@@ -209,7 +209,7 @@ func TestUpdateApplyRequestsShutdownOnlyWhenRestartPending(t *testing.T) {
 }
 
 // TestUpdateRoutesAreMountedUnderUIPrefix 锁定两条路由都挂在 /ui/ 下，
-// 且不占用被语料锁定的 /api 前缀（理由见 update.go）。
+// 且不占用已发布的 /api 前缀（理由见 update.go）。
 func TestUpdateRoutesAreMountedUnderUIPrefix(t *testing.T) {
 	app := newSelfUpdateApp(t, func(string) (selfupdate.Result, error) {
 		return selfupdate.Result{}, nil

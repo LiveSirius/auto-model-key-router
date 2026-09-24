@@ -21,17 +21,17 @@
 //
 // # 与参照实现的有意分歧
 //
-// 除下面这些点，本包的行为与 app.py 逐字节对齐（已由 testdata/server_corpus.json
-// 的差分语料锁定；WebSocket 的两个路由另有 ws_cases / ws_proxy_cases 两块语料，
-// 用 TestClient.websocket_connect 驱动）：
+// 除下面这些点，本包的行为与 app.py 对齐（当年由 testdata/server_corpus.json 的
+// 差分语料逐字节核对过，该语料已随 Python 参照实现退役删除；现在的保护是下面「方法」
+// 一节列出的那些本包用例，它们只覆盖被逐条写出来的地方）：
 //
 //   - **WebSocket 已接线，但升级判定读的是请求头**。参照实现由 ASGI 协议层分流
 //     （`scope["type"]`），而 Go 的 net/http 没有这一层，因此 websocket.go 的
 //     isWebSocketUpgrade 复刻 uvicorn 的 `_get_upgrade`：`upgrade: websocket` 且
-//     `connection` 含 `upgrade`。真实 uvicorn 上两者一致（实测带这两个头的
-//     `GET /v1/does-not-exist` 返回 101）；**TestClient 只能发 HTTP scope**，所以
-//     「用 TestClient 发带升级头的普通 HTTP 请求」会落进 Python 的 HTTP 路由，语料
-//     因此不收录这类用例（详见 websocket.go 的说明）。
+//     `connection` 含 `upgrade`。真实 uvicorn 上两者一致（当年实测带这两个头的
+//     `GET /v1/does-not-exist` 返回 101）；而 Starlette 的 TestClient 只能发 HTTP
+//     scope，「用 TestClient 发带升级头的普通 HTTP 请求」会落进 Python 的 HTTP 路由，
+//     因此这条差异锁不到真实协议行为（详见 websocket.go 的说明）。
 //   - **异常冒泡的落点不同**。首帧是合法 JSON 但不是对象时，参照实现抛
 //     AttributeError 冒到 ASGI 服务器（连接的异常关闭）；Go 侧在
 //     `eventbus.Authenticate` 返回 ErrUnsupportedAuthFrame 后直接关闭底层连接。
@@ -49,13 +49,21 @@
 //
 // # 方法
 //
-// 本包的测试分三层：
+// 本包的测试是纯 Go 的：全部用 httptest 装配真实的 App，不再有回放外部语料的层。
 //
-//   - corpus_test.go：回放 gen_server_corpus.py（已随 Python 退役移除） 用**真实 Python 应用**
-//     产出的语料，逐字节比对状态码 / 响应体 / content-type / content-length；
-//   - websocket_corpus_test.go：回放同一份语料里的 ws_cases / ws_proxy_cases
-//     （帧文本、关闭码、上游请求），用真实 TCP 上的 coder/websocket 客户端；
-//   - *_test.go：对无法在 HTTP 层对拍的接缝做单元测试（指标字段映射、版本检查的
-//     update_available 推导、热重载、WebUI 挂载、路由不互相遮蔽、节流广播的接线）；
-//   - handlers_test.go：纯 Go 的边界补充（例如未覆盖的查询参数组合）。
+//   - routes_test.go：从装配后的 Handler 出发逐条实例化管理/运维/app 面路由，证明
+//     三块 URL 空间互不遮蔽（外层 mux 的 "/" 兜底一旦写宽就会静默吞掉它们）；
+//   - websocket_test.go：两个 WebSocket 路由的装配——握手帧序、4001/4003 关闭码、
+//     dirty 驱动的 metrics_snapshot、config_change，以及 /v1/{path} 升级到 wsproxy
+//     并真的打到上游，全部用真实 socket（ResponseRecorder 不支持 Hijack）；
+//   - handlers_test.go：app 面读数的语义（/v1/models 的收窄、/health 的取数来自
+//     装配层、401 的两套错误信封）；
+//   - ops_test.go / accesslog_test.go：运维面的可达性与访问日志接进 /api/logs 的闭环；
+//   - reload_test.go：热重载的四条可观测语义（换代、换库、改坏配置保留旧一代、mtime）；
+//   - metricsadapter_test.go / updatecheck_test.go / pricing_test.go /
+//     workspace_usage_test.go / workspace_panel_test.go / accesskey_usage_test.go /
+//     update_test.go：各条接缝与新增读数的形状、鉴权与 Allow 头。
+//
+// 纯决策（节流状态机、成帧、字段映射）分别由 internal/eventbus、internal/wsproxy、
+// internal/metrics 自己的用例覆盖，本包只验证「接缝接对了」。
 package server

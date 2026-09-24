@@ -23,8 +23,8 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/metrics"
 )
 
-// 本文件覆盖两个 WebSocket 路由的**装配**（HTTP 层与纯决策分别由 routes_test.go、
-// internal/eventbus、internal/wsproxy 的语料负责）：
+// 本文件覆盖两个 WebSocket 路由的**装配**（HTTP 层由 routes_test.go 覆盖，纯决策由
+// internal/eventbus 与 internal/wsproxy 自己的用例覆盖）：
 //
 //	1. /ws/events 的握手帧序、4001/4003、dirty 驱动的 metrics_snapshot、config_change；
 //	2. /v1/{path} 升级到 internal/wsproxy 并真的打到上游。
@@ -79,7 +79,7 @@ func writeWebSocketFrame(t *testing.T, conn *websocket.Conn, text string) {
 	}
 }
 
-// frameEventType 取出帧里的 "type" 字段（对拍语料只比较类型与少数帧文本）。
+// frameEventType 取出帧里的 "type" 字段（这里只比较类型与少数帧文本，不做整帧比对）。
 func frameEventType(t *testing.T, frame string) string {
 	t.Helper()
 	value, err := canonical.ParseString(frame)
@@ -270,7 +270,7 @@ func TestWSEventsSnapshotAfterMetricsWrite(t *testing.T) {
 
 // TestNoMetricsSnapshotWithoutClients 断言「没有订阅者时不构建快照」在装配后依然成立。
 //
-// 为什么需要它：internal/eventbus 的 throttle 语料已经用虚拟时钟锁定了**纯决策**
+// 为什么需要它：internal/eventbus 的用例已经用虚拟时钟钉住了**纯决策**
 // （Loop.Advance 在 clientCount == 0 时不把时刻放进 fired），但那不能防止装配层接错
 // ——例如把快照构建直接挂在 dirty 信号上。那时线上没有 WebUI 订阅者，服务每秒白跑一次
 // SQLite 聚合查询。
@@ -635,7 +635,7 @@ func TestWebSocketProxyRoundTrip(t *testing.T) {
 // TestWebSocketProxyAuthFailureCloseCode 断言鉴权失败的关闭码是 1008 而不是 1000。
 //
 // 这是状态码 -> 关闭码映射在装配路径上的落点：wsproxy 拿到的 401 来自真实的
-// internal/proxy（而不是语料里的假 ProxyHandler）。
+// internal/proxy（而不是测试替身假 ProxyHandler）。
 func TestWebSocketProxyAuthFailureCloseCode(t *testing.T) {
 	capture := &upstreamCapture{contentType: "application/json"}
 	upstream := httptest.NewServer(http.HandlerFunc(capture.handler))

@@ -13,8 +13,7 @@ import (
 
 // 本文件覆盖 _reload_config_if_changed（app.py:443-475）的四条可观测语义。
 //
-// 语料里已有一条用例（models_after_external_config_edit）从字节层钉住「外部改配置后
-// 清单立刻变空」；这里补的是无法用响应字节表达的接线：
+// 这里补的是无法用一次响应字节表达的接线：
 //
 //	1. 重载真的**换了一代资源**（RuntimeManager 的当前代指针变了）；
 //	2. metrics_db_path 不变时**复用同一个指标库**（否则每次热重载都会丢连接池与句柄）；

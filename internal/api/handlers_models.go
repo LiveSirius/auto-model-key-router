@@ -286,7 +286,8 @@ func (s *Server) handleGetModelKeyStats(w http.ResponseWriter, r *http.Request) 
 		if _, err := findConfigKey(model, keyName); err != nil {
 			return nil, err
 		}
-		// hours 解析失败被静默忽略（值为 None），而不是 422——语料含 hours=abc。
+		// hours 解析失败被静默忽略（值为 None），而不是 422——这是参照实现的历史
+		// 行为（`hours=abc` 时如此），刻意保留。
 		var hours *float64
 		if raw := r.URL.Query().Get("hours"); raw != "" {
 			if parsed, parseErr := canonical.ToFloat(canonical.NewString(raw)); parseErr == nil {

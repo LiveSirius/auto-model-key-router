@@ -13,7 +13,8 @@ import (
 // v3 视图）」以及探测相关的路由。
 //
 // 这一族的 DELETE 请求体是**必填**的（`payload: RevisionPayload`），与
-// models/tasks/unified-model 的可选请求体形成不对称——语料对两者都做了断言。
+// models/tasks/unified-model 的可选请求体形成不对称——这是参照实现的历史行为，
+// 刻意保留，改动会改变既有调用方看到的 422 边界。
 
 // —— GET /api/providers ——
 
@@ -224,7 +225,8 @@ func (s *Server) handleCreateProviderKey(w http.ResponseWriter, r *http.Request)
 			return nil, err
 		}
 		// 用**原始** name 去查（`["keys"][payload.name]`）：config 层会 strip 名字，
-		// 因此带空白的名字在这里查不到，Python 抛 KeyError -> 500。语料锁定了这点。
+		// 因此带空白的名字在这里查不到，Python 抛 KeyError -> 500。这是参照实现的
+		// 历史行为，刻意保留。
 		provider, err := rawRequireProvider(data, providerID)
 		if err != nil {
 			return nil, err

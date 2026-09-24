@@ -34,8 +34,8 @@ type probeRecord struct {
 
 // probeIDHex 生成 32 位小写十六进制 id，等价于 `uuid.uuid4().hex`。
 //
-// 真实服务用密码学随机；语料回放时通过 Server.ProbeID 注入固定值，因为 Python 侧
-// 的 uuid4 在生成语料时也被 monkeypatch 成同一个常量。
+// 真实服务用密码学随机。需要可预期的 id 时走 Server.uuidHex()——它优先用注入的
+// UUIDHex，只有没注入时才落到这里。
 func probeIDHex() string {
 	buffer := make([]byte, 16)
 	if _, err := rand.Read(buffer); err != nil {
@@ -48,7 +48,7 @@ func probeIDHex() string {
 // startProbe 对应 management_api.py:652 的 start_probe。
 //
 // 注意 `names = key_names or list(available)` 的「or」语义：显式传空数组时探测该
-// 供应商的**全部** Key，而不是一个都不探测。这是参照实现的原样行为，语料已固化。
+// 供应商的**全部** Key，而不是一个都不探测。这是参照实现的历史行为，刻意保留。
 func (s *Server) startProbe(r *http.Request, providerID string, keyNames []string, timeout float64) (*canonical.Value, error) {
 	if _, err := s.authorizedConfig(r); err != nil {
 		return nil, err

@@ -93,7 +93,7 @@ func (f fieldSpec) ltV(bound *canonical.Value) fieldSpec { f.lt = bound; return 
 
 // 各字段约束用的字面量。数字字面量的类型（int 还是 float）会原样进入 ctx：
 // `port: int = Field(ge=1)` 给 `{"ge":1}`，而 `timeout_seconds: float =
-// Field(gt=0)` 给 `{"gt":0.0}`——两者在语料里都出现过，不能统一。
+// Field(gt=0)` 给 `{"gt":0.0}`——两者都是参照实现里真实出现过的形状，不能统一。
 var (
 	intGe1     = canonical.NewInt("1")
 	intLe65535 = canonical.NewInt("65535")
@@ -111,7 +111,7 @@ var specRevisionPayload = newModelSpec("RevisionPayload",
 //
 // 它继承 APIModel，所以**也有 config_revision**。这条继承带来两个不对称：
 // POST /api/models/{id}/keys 会把它弹掉，而 POST /api/models 的 keys 数组不会
-// （见 modelCreateData 的说明）——两者都已由语料锁定。
+// （见 modelCreateData 的说明）——两者都是参照实现的历史行为，刻意保留。
 var specKeyCreate = newModelSpec("KeyCreate",
 	nul("config_revision", kindStr).minLenOf(1),
 	req("name", kindStr).minLenOf(1),
@@ -135,7 +135,7 @@ var specKeyUpdate = newModelSpec("KeyUpdate",
 //
 // 注意它继承 APIModel，因此**也接受 config_revision**。这不是笔误：参照实现真的
 // 允许在 params 里写 config_revision，随后由 config.normalize_task_params 以
-// 422「params 不支持的参数」拒绝（configops 语料已固化）。Go 侧必须同样先接受、
+// 422「params 不支持的参数」拒绝。Go 侧必须同样先接受、
 // 再由 config 层拒绝，否则会提前变成 extra_forbidden，错误文本就不一样了。
 var specTaskParams = newModelSpec("TaskParams",
 	nul("config_revision", kindStr).minLenOf(1),
@@ -475,7 +475,7 @@ func requestBody(r *http.Request) ([]byte, error) {
 // 已知分歧：请求体不是合法 JSON 时，Pydantic 的 `json_invalid` 错误里带的是
 // CPython json 模块的错误文本与偏移（例如「Expecting property name enclosed in
 // double quotes」），Go 侧无法逐字复刻，这里给同类错误形状但文本取 encoding/json
-// 的说明。这类请求体不在语料覆盖范围内。
+// 的说明。这条分歧尚未被覆盖，修改时注意没有既有用例会替你发现。
 func decodePayload(r *http.Request, spec *modelSpec, optional bool) (*canonical.Value, bool, error) {
 	raw, err := requestBody(r)
 	if err != nil {
@@ -880,7 +880,7 @@ func typContextKey(typ string) string {
 
 // numText 把约束字面量渲染成错误消息里的形式。
 //
-// Pydantic 的消息用「短」写法：ctx 里是 0.0、消息里是 0（语料 case
+// Pydantic 的消息用「短」写法：ctx 里是 0.0、消息里是 0（参照实现里
 // timeout_seconds=0 的 msg 是 "Input should be greater than 0"，而 ctx 是
 // {"gt":0.0}）。因此整数值的浮点要去掉小数点。
 func numText(value *canonical.Value) string {
@@ -894,7 +894,7 @@ func numText(value *canonical.Value) string {
 // pyBool 复刻 Pydantic 的 lax bool 解析。
 //
 // 接受 bool、0/1 整数、以及 "true/false/yes/no/on/off/1/0/t/f/y/n"（大小写不敏感，
-// 首尾空白容忍）。整数 2 会报 bool_parsing——语料已固化。
+// 首尾空白容忍）。整数 2 会报 bool_parsing——这是参照实现的历史行为，刻意保留。
 func pyBool(value *canonical.Value) (bool, bool) {
 	switch value.Kind {
 	case canonical.KindBool:

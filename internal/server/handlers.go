@@ -153,7 +153,8 @@ func scopedModelNames(cfg *config.RouterConfig, workspace string) []string {
 // handleMetrics 对应 app.py:212-233 的 GET /metrics。
 //
 // 参数校验必须排在鉴权**之前**：FastAPI 在调用路由函数前完成参数解析，所以
-// `GET /metrics?hours=0`（不带凭据）是 422 而不是 401。语料里两种顺序都有用例。
+// `GET /metrics?hours=0`（不带凭据）是 422 而不是 401。装配层必须保持这个顺序
+// （同样的要求在 workspace_usage.go 那几条新增读数上也有对应用例）。
 func (a *App) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	result, errs := validateQuery(r.URL.Query(), metricsSnapshotParams)
 	if len(errs) > 0 {
@@ -325,7 +326,7 @@ func metricsStoreOf(resources *runtime.RuntimeResources) *metrics.Store {
 // —— 响应写出 ——
 //
 // 这里三个 helper 与 internal/api 的同名函数逐字同形，但那边没有导出。刻意重复而
-// 不是把 api 的内部实现改成导出的：api 已经通过语料锁定，改动它的编写面属于无谓
+// 不是把 api 的内部实现改成导出的：api 的对外形状已经发布，改动它的编写面属于无谓
 // 风险；这三个函数一共 20 行。
 
 // writeJSON 写出 canonical 序列化的 JSON 响应。

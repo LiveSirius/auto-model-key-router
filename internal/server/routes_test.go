@@ -121,7 +121,7 @@ func TestManagementRoutesNotShadowed(t *testing.T) {
 
 // TestWorkspaceRoutesNotShadowed 逐条实例化 Go 侧新增的工作空间路由。
 //
-// 它们不写 /api 语料（没有 Python 先例），但同样注册在管理 API 的那棵 mux 上，
+// 它们没有 Python 先例，但同样注册在管理 API 的那棵 mux 上，
 // 因此同样有被 app 面兜底吞掉的风险——这条测试把「可达」钉住。
 func TestWorkspaceRoutesNotShadowed(t *testing.T) {
 	app := newTestApp(t, t.TempDir(), nil)
@@ -209,7 +209,7 @@ func TestCatchAllOnlyMatchesV1(t *testing.T) {
 				recorder.Body.String())
 		}
 	}
-	// 反向：/v1/models 的 GET 走 app 面（同一条路径的其它方法走 proxy，见语料）。
+	// 反向：/v1/models 的 GET 走 app 面（同一条路径的其它方法走 proxy）。
 	models := serve(app, http.MethodGet, "/v1/models", fullAuthorization)
 	if !strings.Contains(models.Body.String(), `"object":"list"`) {
 		t.Errorf("GET /v1/models 未走 app 面: %s", models.Body.String())
@@ -225,8 +225,8 @@ func TestCatchAllOnlyMatchesV1(t *testing.T) {
 // 了两个更精确的测试：
 //
 //   - TestWSEventsHTTPRequestIs404：普通 HTTP 请求仍然 404，但那**不是**因为路由缺席，
-//     而是因为 Starlette 的 WebSocketRoute 不匹配 http scope（语料的
-//     ws_events_http_get 逐字节钉住了这一点）；
+//     而是因为 Starlette 的 WebSocketRoute 不匹配 http scope（参照实现的
+//     ws_events_http_get 返回的正是 404）；
 //   - TestWebSocketUpgradeAccepted：真的握手必须被接受（101），这才是「路由已注册」的
 //     判据——404 本身区分不了「没注册」与「注册了但只认 websocket」。
 func TestStaticAbsentWhenDisabled(t *testing.T) {
@@ -246,8 +246,8 @@ func TestStaticAbsentWhenDisabled(t *testing.T) {
 //
 // 与参照实现一致：`@app.websocket("/ws/events")` 只匹配 websocket scope，所以
 // TestClient 的 GET /ws/events 落到 Starlette 兜底 → 404 `{"detail":"Not Found"}`
-// （实测；语料 ws_events_http_get / ws_events_http_post / ws_events_http_head 逐字节
-// 锁定状态码、content-type 与 content-length）。
+// （实测；迁移期对 ws_events_http_get / ws_events_http_post / ws_events_http_head
+// 逐字节核对过状态码、content-type 与 content-length）。
 //
 // 注意这条断言**证不了**路由是否注册：405 与 404 的形状在这里都可能被兜底伪装。
 // 「路由已注册」由 TestWebSocketUpgradeAccepted 用真实握手证明。

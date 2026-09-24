@@ -15,9 +15,9 @@ import (
 
 // 本文件固化管理 API 的工作空间语义。
 //
-// 工作空间是 Go 侧新增的能力（参照实现没有），因此没有对拍语料。既有的 22 条
-// /api/tasks* 语料（都不带 X-AMKR-Workspace 头）继续锁定「默认工作空间」的
-// 兼容性——这里只补语料无法表达的部分。
+// 工作空间是 Go 侧新增的能力（参照实现没有），因此没有历史版本可对照。既有的
+// /api/tasks* 接口（调用方都不带 X-AMKR-Workspace 头）继续承诺「默认工作空间」的
+// 兼容性——这里只补这些既有调用方看不到的部分。
 
 // workspaceFixture 是一份两空间配置，teamA 与默认空间各有一个同名任务 shared。
 const workspaceFixture = `{
@@ -98,7 +98,7 @@ func taskNames(t *testing.T, body string) []string {
 func TestListTasksIsWorkspaceScoped(t *testing.T) {
 	server, _ := workspaceServer(t)
 
-	// 不带请求头 -> 默认空间。响应体形状必须与语料锁定的一致（没有 workspace 字段）。
+	// 不带请求头 -> 默认空间。响应体形状必须与既有接口一致（没有 workspace 字段）。
 	recorder := callTasks(t, server, http.MethodGet, "/api/tasks", "", "")
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("默认空间状态码 = %d（body=%s）", recorder.Code, recorder.Body.String())
@@ -111,7 +111,7 @@ func TestListTasksIsWorkspaceScoped(t *testing.T) {
 		t.Errorf("默认空间的列表不应包含 teamA 的任务: %s", recorder.Body.String())
 	}
 	if strings.Contains(recorder.Body.String(), "workspace") {
-		t.Errorf("响应体不应新增 workspace 字段（语料逐字节锁定）: %s", recorder.Body.String())
+		t.Errorf("响应体不应新增 workspace 字段（既有调用方依赖该形状）: %s", recorder.Body.String())
 	}
 
 	// 带 teamA 头 -> 只看到 teamA 的任务。
@@ -239,8 +239,8 @@ func TestUnknownWorkspaceHeaderIsEmptyScope(t *testing.T) {
 // TestCreateTaskWithoutModelIsAllowed 固化：创建接口不传 model 也能成功。
 //
 // 这是**有意的契约放宽**（Go 侧新增，见 docs/API.md 与 CHANGELOG）：参照实现的
-// CreateTask 把 model 列为必填，因此那条 tasks/create-missing-* 语料仍锁着「缺 name
-// 报 missing」，而 model 已经不在必填之列。
+// CreateTask 把 model 列为必填，而现在 model 已经不在必填之列——缺 name 仍然报
+// missing，缺 model 则放行。
 func TestCreateTaskWithoutModelIsAllowed(t *testing.T) {
 	server, path := workspaceServer(t)
 	revision := currentRevision(t, path)
@@ -309,7 +309,7 @@ func TestUpdateTaskDisplayNameCountsAsUpdate(t *testing.T) {
 // TestTaskResponseOmitsDisplayNameWhenUnset 固化兼容性：没取名的任务响应逐字节不变。
 //
 // display_name 只在设了名字时才出现，因此已发布接口对既有调用方零影响——这也正是
-// 那条 tasks/get 语料（任务没有显示名）在改动后仍然原封不动的原因。
+// 没取名的任务响应在改动后仍然原封不动的原因。
 func TestTaskResponseOmitsDisplayNameWhenUnset(t *testing.T) {
 	server, _ := workspaceServer(t)
 
@@ -320,7 +320,7 @@ func TestTaskResponseOmitsDisplayNameWhenUnset(t *testing.T) {
 	if strings.Contains(recorder.Body.String(), "display_name") {
 		t.Errorf("未取名的任务不应出现 display_name 字段: %s", recorder.Body.String())
 	}
-	// 字段顺序也必须保持原样：这条响应由语料逐字节锁定。
+	// 字段顺序也必须保持原样：既有调用方依赖这个形状。
 	want := `{"name":"shared","model":"model-a","fallback_model":null,"params":{},`
 	if !strings.HasPrefix(recorder.Body.String(), want) {
 		t.Errorf("响应前缀应为 %s，实际 %s", want, recorder.Body.String())

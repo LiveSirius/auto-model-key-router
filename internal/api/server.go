@@ -71,7 +71,7 @@ type Server struct {
 	//
 	// 实现方必须复刻 app.py:443 的 mtime 门：**文件不存在（mtime 为 0）时直接返回**。
 	// 不能图省事在这里无条件调 config.Load——它在文件缺失时会创建一份空配置并返回
-	// 成功，会让后续鉴权拿着空 local_api_key 失败（运维面语料已锁定该行为）。
+	// 成功，会让后续鉴权拿着空 local_api_key 失败（这是参照实现的历史行为，刻意保留）。
 	Reload func()
 	// CurrentConfig 返回「当前生效」的配置，对应
 	// `lease.resources.config`。为 nil 时回落到从 ConfigPath 现场加载。
@@ -99,11 +99,11 @@ type Server struct {
 	// 不依赖它，只留这个接缝。
 	KeyStats func(modelID, keyName string, hours *float64) (*canonical.Value, error)
 	// UUIDHex 生成 32 位十六进制，对应 `uuid.uuid4().hex`（探测 id 与导入备份
-	// 文件名后缀都用它）。nil 表示用密码学随机数；语料回放时注入固定值，因为参照
-	// 实现生成语料时把 uuid4 也 patch 成了常量。
+	// 文件名后缀都用它）。nil 表示用密码学随机数；注入固定值是为了让测试能对 id
+	// 做断言。
 	UUIDHex func() string
 	// GenerateLocalAPIKey 对应 config.generate_local_api_key。nil 表示用
-	// config 包的实现；语料回放时注入固定值。
+	// config 包的实现；注入固定值是为了让测试能对生成的 key 做断言。
 	GenerateLocalAPIKey func() (string, error)
 
 	// —— 运维面（ops_api.py）需要的开关与接缝，全部只在 OpsEnabled 为真时生效 ——
@@ -126,7 +126,8 @@ type Server struct {
 	// LogTail 读取日志尾部，对应 ops_api.py:93 的 _tail。nil 表示用内置实现。
 	//
 	// 留接缝是为了确定性地覆盖「读取失败仍返回 200 + error 文本」这条分支：真实文件
-	// 系统上「is_file() 为真、随后 stat/open 失败」只能靠竞态或权限构造，无法进语料。
+	// 系统上「is_file() 为真、随后 stat/open 失败」只能靠竞态或权限构造，测试里复现
+	// 不稳定。
 	LogTail func(path string, limit int) (string, bool, error)
 	// WebUIStatus 返回 webui_status(app) 的输入，对应 webui.py:48。nil 表示
 	// 「未挂载、不可用、未启用」的零值。复用 health.WebUI 以与 /health 同一套语义。
@@ -176,8 +177,9 @@ type UpdateCheckResult struct {
 // Handler 返回注册了全部管理路由的 http.Handler；OpsEnabled 为真时额外注册 7 条
 // 运维路由（ops_api.py 的 register_ops_api），因此 URL 空间与 Python 完全一致。
 //
-// 管理路由分两批（见 router.go）：参照实现的 47 条（响应字节被语料锁定）与 Go 侧
-// 新增的工作空间 3 条。两批都算「已知路径」，否则错方法会从 405 退化成 404。
+// 管理路由分两批（见 router.go）：参照实现留下的 47 条（已发布接口，响应字节不能再
+// 变）与 Go 侧新增的工作空间/访问密钥那批。两批都算「已知路径」，否则错方法会从 405
+// 退化成 404。
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	s.register(mux)
@@ -206,7 +208,7 @@ func (s *Server) Handler() http.Handler {
 	// 所以这里自己判定：路径能匹配已注册模式 -> 405 + Allow，否则 404。
 	//
 	// 遗留分歧：ServeMux 会清理/重定向路径，参照实现不会。两类都不在 47 条路由的
-	// 契约内，语料不覆盖，见 doc.go 的说明。
+	// 契约内，见 doc.go 的说明。
 	//
 	//   - 带尾斜杠：参照实现由 Starlette 的 redirect_slashes 先 307 到无尾斜杠的路径
 	//     （实测 `/api/logs/`：GET 跟随重定向后 200、PUT 405 + Allow: GET），而

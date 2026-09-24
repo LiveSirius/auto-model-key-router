@@ -70,7 +70,7 @@ type Options struct {
 	// CheckUpdate 覆盖版本检查，对应 update.check_latest_version。
 	//
 	// nil 表示用 internal/updatecheck 的真实实现（会发网络请求）。注入它主要是为了
-	// 测试与语料回放不联网。**UpdateAvailable 由适配器按 latest/current 推导**，
+	// 让测试不联网。**UpdateAvailable 由适配器按 latest/current 推导**，
 	// 见 updatecheck.go。
 	CheckUpdate func(timeout float64) api.UpdateCheckResult
 	// PricingFetch 覆盖 models.dev 价格目录的取回。

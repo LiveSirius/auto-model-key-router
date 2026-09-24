@@ -17,8 +17,8 @@ import (
 
 // TestModelsExcludesUnconfiguredModelAndAppendsUnified 断言 /v1/models 的语义。
 //
-// 与语料的逐字节比对互补：语料锁定的是**整体字节**（键序、owned_by 等），这里把
-// 「哪些模型该出现」显式写出来，读者不必去读语料 JSON：
+// 与「整体字节」层面的断言互补（键序、owned_by 等由 handlers.go 的编码路径决定），
+// 这里把「哪些模型该出现」显式写出来，读者不必去读别处的 JSON：
 //
 //   - model-b 没有任何 key（未配置）⇒ 它自己与它的别名都不出现；
 //   - unified-model 是**末尾追加**的（key_pool.available_model_ids 的 append 语义）。
@@ -233,7 +233,7 @@ func TestUnauthorizedBodiesMatchReference(t *testing.T) {
 
 // TestHealthReportsAssembledInputs 断言 /health 的取数来自装配层。
 //
-// 响应体的字段顺序与语义由 internal/health 的语料锁定；这里只钉住「装配层喂进去的
+// 响应体的字段顺序与语义由 internal/health 自己的用例锁定；这里只钉住「装配层喂进去的
 // 是哪些值」——尤其是 local_api_key 的指纹（它证明真的把运行时配置里的 key 传下去了）
 // 与 config_path（绝对路径），这两项一旦漏传会静默变成空串。
 func TestHealthReportsAssembledInputs(t *testing.T) {

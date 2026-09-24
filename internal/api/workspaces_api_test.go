@@ -11,7 +11,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// 本文件固化 /api/workspaces* 的语义（Go 侧新增能力，无对拍语料）。
+// 本文件固化 /api/workspaces* 的语义（Go 侧新增能力，参照实现没有对应接口）。
 //
 // 与 workspace_test.go 的分工：那边管 /api/tasks* 的**空间隔离**（用请求头选空间），
 // 这里管**空间自身**的增删改查（空间名是路径参数）。

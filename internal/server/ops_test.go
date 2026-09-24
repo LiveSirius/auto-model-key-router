@@ -16,7 +16,7 @@ import (
 	"github.com/Sparrived/auto-model-key-router/internal/config"
 )
 
-// fixtureTemplate 是 Go 侧测试用的最小 v4 配置：与语料夹具同形（含一个没有任何 key
+// fixtureTemplate 是 Go 侧测试用的最小 v4 配置：取自迁移期的夹具形状（含一个没有任何 key
 // 的模型、一个隐藏别名、unified_model），但路径由调用方填。
 //
 // 三个 %s 依次是 endpoint_capabilities_path、metrics_db_path、log_file_path（都指向

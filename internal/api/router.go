@@ -12,8 +12,8 @@ import "net/http"
 // 便于逐条对照 management_api.py。
 //
 // 路由分两批：**参照实现那批**（routePatterns）与 **Go 侧新增能力**
-// （workspacePatterns）。两批注册在同一棵 mux 上，但只有前者的响应字节被对拍语料
-// 锁定，因此清单也分开维护。
+// （workspacePatterns）。两批注册在同一棵 mux 上，但前者是已发布的对外接口、形状
+// 不能再变，后者是本项目新增的能力，因此清单也分开维护。
 func (s *Server) register(mux *http.ServeMux) {
 	// —— unified-model ——
 	mux.HandleFunc("GET /api/unified-model", s.handleGetUnifiedModel)
@@ -108,19 +108,20 @@ func (s *Server) register(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/models/{model_id}/keys/{key_name}", s.handleDeleteModelKey)
 }
 
-// routePatterns 列出参照实现那 47 条「方法 + 模式」，供测试断言它们齐全。
+// routePatterns 列出参照实现那 47 条「方法 + 模式」，是这批已发布接口的显式清单。
 //
 // 单独维护一份而不是从 mux 反射取出：ServeMux 不暴露已注册模式，而「47 条都注册
-// 了」是验收条件之一，需要一条明确的、可断言的清单。
+// 了」需要一个明确的、可断言的清单（internal/server 的 routes_test.go 复制了这份
+// 清单、断言数量是 47 并逐条实例化，因此改动这里会在那边失败）。
 //
 // **顺序是行为的一部分**：Handler 的兜底 405 用它算 Allow，而参照实现只报「第一个
 // 路径匹配的路由」的方法（见 allowedMethod）。因此同一路径的多个模式必须按注册顺序
 // 排列（`GET /api/models` 在 `POST /api/models` 之前，与 management_api.py 的装饰器
 // 顺序一致，也决定了 `PUT /api/models` 的 Allow 是 "GET"）。
 //
-// **这份清单是冻结的**：每条都被 management_api_corpus.json 逐字节覆盖，加一条就会
-// 让 TestCorpusCoversEveryRoute 失败（新增能力没有可比对的 oracle，手写语料等于伪造
-// 兼容性证据）。Go 侧新增的路由因此另立 workspacePatterns。
+// **不要往这里加新的 /api 路由**：这 47 条是参照实现留下的已发布接口，响应形状已经
+// 对外承诺，既有调用方依赖它们；加一条会让「这 47 条就是既有对外行为」这句话失去
+// 意义。Go 侧新增的路由因此另立 workspacePatterns。
 func routePatterns() []string {
 	return []string{
 		"GET /api/unified-model", "PUT /api/unified-model", "DELETE /api/unified-model",
@@ -158,14 +159,14 @@ func routePatterns() []string {
 // 名字保留 workspacePatterns 是因为工作空间是这批里最大的一块，且测试与文档都按这个
 // 名字引用它；它描述的是「参照实现没有的 /api 能力」，不只是工作空间。
 //
-// 与 routePatterns 分开的**唯一理由是语料**：那 47 条由已退役的参照实现产出，是
-// 本项目兼容性的凭证；工作空间与访问密钥在 Python 侧没有对应实现，因此没有可比对的
-// oracle，给它补一条 /api 语料等于伪造兼容性证据。分开之后 47 条那份仍然逐字节受锁，
-// 新增能力则由各自的测试自己钉形状。
+// 与 routePatterns 分开的**唯一理由是「已发布」与「新增」之别**：那 47 条由参照实现
+// 产出，是既有调用方依赖的对外契约；工作空间与访问密钥在 Python 侧没有对应实现，
+// 没有历史版本可对照，塞进那 47 条会让「这 47 条就是既有对外行为」这句话失去意义。
+// 分开之后 47 条那份由装配层的逐条用例守着，新增能力则由各自的测试自己钉形状。
 //
 // 仍然注册在同一棵 mux 上（而不是像 /ui/pricing.json 那样挂到别处）：这些已经是
 // 管理面的正式资源，与 /api/tasks 同级；挂在 /ui/ 下会让「管理面必须开 WebUI 才能
-// 用」——那是当初为了绕开语料冻结而付的代价，现在没有理由继续付。
+// 用」——那是当初为了绕开已发布清单而付的代价，现在没有理由继续付。
 //
 // 有 POST：应用侧需要「先建空间拿 key、之后才填任务」，因此工作空间有了自己的显式
 // 创建入口（空分组本不进配置，见 configops.writeWorkspaceTasks）。POST 建出的空间

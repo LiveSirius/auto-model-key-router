@@ -20,7 +20,7 @@ import (
 // 覆盖范围刻意收窄：只做三条 /metrics* 路由用到的形态（float / int / bool / str /
 // Literal，以及 gt/ge/le/min_length/max_length）。参照实现里没有别的查询参数。
 //
-// 三条容易写错的语义（都由 gen_server_corpus.py（已随 Python 退役移除） 用真实 Python 应用钉住）：
+// 三条容易写错的语义（都是参照实现当年用真实 Python 应用钉住的行为，刻意保留）：
 //
 //  1. **重复参数取最后一个**。Starlette 的 QueryParams.__getitem__ 取列表末位
 //     （`?hours=1&hours=2` 得到 2.0），而 Go 的 url.Values.Get 取第一位——必须显式取
@@ -32,7 +32,7 @@ import (
 //     `/metrics/series?all_history=true` 既不是 422 也不是 200 带 all_history，
 //     而是完全忽略它（series 根本没有这个参数）。
 //
-// 已知的**有意收紧**（无法在 Go 侧逐字复刻、也不在语料覆盖范围内）：
+// 已知的**有意收紧**（无法在 Go 侧逐字复刻，因此刻意不追求与参照实现逐字一致）：
 //
 //   - 只认 ASCII 空白与 ASCII 数字。Python 的 float() 还接受 Unicode 数字
 //     （float("١٢") == 12.0）与非 ASCII 空白，这里统一按解析失败处理。
@@ -148,8 +148,9 @@ var requestHistoryParams = []qParam{
 // 让「用量统计」页能画到年与全量。放宽是安全的，因为点数上限（MaxSeriesPoints）
 // 与它无关——`seriesPointLimitExceeded` 仍然独立把关，长窗口只能配粗桶
 // （1 年 = 366 个日桶，仍在 500 以内；想拿 1 年配 15 秒桶照样是 422）。
-// 这条边界不在差分语料里（语料只钉了 `hours=0`、`bucket_seconds` 越界与点数超限），
-// 因此放宽不会与参照实现的对拍结论冲突；`/metrics/requests` 仍保持 720。
+// 这条边界是有意偏离参照实现的，放宽不会破坏既有一年以内窗口的行为
+// （`hours=0`、`bucket_seconds` 越界与点数超限的拒绝都原样保留）；
+// `/metrics/requests` 仍保持 720。
 var metricsSeriesParams = []qParam{
 	{name: "hours", kind: qFloat, def: qFloatOne, gt: qFloat0, le: qFloat8760},
 	{name: "bucket_seconds", kind: qInt, def: qInt60, ge: qInt15, le: qInt86400},
@@ -445,7 +446,7 @@ func compareNumbers(left, right float64) int {
 
 // parseFloatQuery 复刻 Pydantic 的 str -> float 宽松解析。
 //
-// 与 Python 的 float() 的差别只有两处，且都不在语料覆盖范围内（见文件顶部说明）：
+// 与 Python 的 float() 的差别只有两处，都是刻意不追平的分歧（见文件顶部说明）：
 //   - 十六进制浮点被显式拒绝（Go 接受 "0x1p-2"，Python 不接受）；
 //   - Unicode 数字与空白不支持（Go 只认 ASCII）。
 //
@@ -475,7 +476,7 @@ func isHexFloat(text string) bool {
 
 // parseIntQuery 复刻 Pydantic 的 str -> int 宽松解析。
 //
-// 参照实现的实测行为（语料已固化）：
+// 参照实现的历史行为（刻意保留）：
 //
 //	"50.0" -> 50    （字符串先当浮点解析，再要求是整数）
 //	"1.5"  -> int_parsing（有小数部分就拒绝，注意**不是** int_from_float：
@@ -484,7 +485,7 @@ func isHexFloat(text string) bool {
 //
 // 超出 int64 的整数（`before_id=999999999999999999999`）会被钳到边界：Python 的
 // int 无上限，随后把它交给 SQLite 会抛 OverflowError 变成 500——那是参照实现的
-// 缺陷（未移植，也未写进语料）。钳位在语义上等价：唯一没有上界的 int 参数是
+// 缺陷（未移植）。钳位在语义上等价：唯一没有上界的 int 参数是
 // before_id，而它只参与 `id < ?` 比较，"比任何 id 都大" 与真实值结果相同。
 func parseIntQuery(text string) (int64, bool) {
 	trimmed := strings.TrimSpace(text)
