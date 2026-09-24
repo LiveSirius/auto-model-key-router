@@ -70,4 +70,18 @@ if (failures.length) {
   console.error(`\n${failures.length} 个模块加载失败`);
   process.exit(1);
 }
+
+// 页面 render 契约：app.js 把 page.render(ctx) 的返回值直接 mount 进 #content，
+// 所以它必须**同步**返回节点。async 函数返回 Promise，会被 dom.js 的 append 当成
+// 子节点渲染成整页的 "[object Promise]"——「访问密钥」页正是这么坏掉的，而它语法、
+// 导入全都正确，上面那条加载检查抓不到。
+const { PAGES } = await import(pathToFileURL(path.join(WEBUI, "app.js")).href);
+const asyncPages = PAGES.flatMap((group) => group.items)
+  .filter((item) => item.render.constructor.name === "AsyncFunction")
+  .map((item) => item.id);
+if (asyncPages.length) {
+  console.error(`以下页面的 render 是 async 函数（会渲染成 [object Promise]）：${asyncPages.join(", ")}`);
+  process.exit(1);
+}
+
 console.log(`\n全部 ${walk(WEBUI).length} 个模块加载正常`);
