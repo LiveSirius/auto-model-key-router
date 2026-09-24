@@ -10,8 +10,8 @@ import (
 
 // 本文件固化「参照实现的怪异行为」与「刻意不移植的部分」，每条都有名字。
 //
-// 对拍语料已经覆盖了绝大多数路径，这里只写三类断言：
-//   - 语料不容易表达的结构性事实（键顺序、指针身份、内部 helper 的语义差异）；
+// 这里只写三类断言：
+//   - 不容易用别的方式表达的结构性事实（键顺序、指针身份、内部 helper 的语义差异）；
 //   - 参照实现里看起来像 bug 但必须保留的行为（防止后人「顺手修好」）；
 //   - Go 侧有意的偏离（必须显式记录，否则就是静默漂移）。
 
@@ -270,8 +270,8 @@ func TestUpdateModelDistinguishesAbsentFromEmptyAliases(t *testing.T) {
 //
 // config_operations.py:412 的 desired 是 Python set，一次新增多个模型时写入
 // models 的顺序由字符串哈希决定（进程间随机）。Go 侧按调用方给出的顺序去重后
-// 依次创建——更稳定，但顺序可能与某一次 Python 运行不同。对拍语料因此只覆盖
-// 「新增 0 或 1 个模型」，这条测试负责把偏离钉住并说清原因。
+// 依次创建——更稳定，但顺序可能与某一次 Python 运行不同。这条测试负责把偏离
+// 钉住并说清原因。
 func TestSetKeyServiceModelsCreatesModelsInCallerOrder(t *testing.T) {
 	data := mustParse(t, `{"config_version":4,"providers":{"p":{"base_url":"https://a.example",`+
 		`"keys":{"k":{"api_key":"1"}}}},"models":{}}`)

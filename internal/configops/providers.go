@@ -14,7 +14,8 @@ import (
 //
 // 对齐 config_operations.py:89。顺序值得注意：先校验 ID、再 setdefault
 // providers、再查重、最后才校验 base_url。因此 base_url 非法时，data 里已经
-// 多了一个空的 providers 对象——这是参照实现的可观察行为，语料锁住。
+// 多了一个空的 providers 对象——这是参照实现的可观察行为，刻意保留
+// （由 TestCreateProviderFailureStillCreatesProvidersKey 钉住）。
 func CreateProvider(data *canonical.Value, providerID, baseURL string) (*canonical.Value, error) {
 	id, err := nonEmptyString(providerID, "供应商 ID")
 	if err != nil {

@@ -15,7 +15,7 @@ import (
 //	var opErr *configops.ConfigOperationError
 //	if errors.As(err, &opErr) { w.WriteHeader(opErr.StatusCode) }
 //
-// 错误文本（Message）是对外契约，与 Python 逐字一致，由 testdata 语料断言。
+// 错误文本（Message）是对外契约，与 Python 逐字一致，由本包用例逐条断言。
 type ConfigOperationError struct {
 	Message    string
 	StatusCode int
@@ -39,10 +39,11 @@ func opErrf(statusCode int, format string, args ...any) *ConfigOperationError {
 // 过高、normalize_upstream_base_url 的空 URL、`for x in None`、`int("abc")` 等
 // 都会作为裸 ValueError / TypeError / AttributeError 冒到调用方。这些分支对外
 // 表现为 500 而不是 400，属于可观察行为，所以 Go 侧不能一律折叠成
-// ConfigOperationError——对拍语料会断言「是不是 ConfigOperationError」。
+// ConfigOperationError——由 TestUnbalancedBracketIsNotConfigOperationError 这类用例
+// 断言「是不是 ConfigOperationError」。
 //
 // TypeName 用 Python 的类名（ValueError / TypeError / AttributeError），便于
-// 语料比对时把 Go 错误分类映射回 Python 异常类型。
+// 调用方按异常类型分类处理（api 与 configeditor 都依赖这个区分）。
 type PyError struct {
 	TypeName string
 	Message  string

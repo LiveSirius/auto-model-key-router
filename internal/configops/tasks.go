@@ -249,7 +249,7 @@ func CreateTaskIn(
 //
 // nil 表示「不动这个字段」；非 nil 表示「要更新」。要清空某个字符串字段时传指向
 // 空串的指针，而不是 nil——nil 已经被「不改」占用了。这与既有 Model 的语义一致
-// （fallback_model 用了独立的 UpdateFallback 开关，那是语料锁定的历史写法）。
+// （fallback_model 用了独立的 UpdateFallback 开关，那是参照实现的历史写法）。
 type UpdateTaskOptions struct {
 	Model          *string
 	DisplayName    *string
@@ -718,7 +718,7 @@ func RepairTasks(data *canonical.Value) ([]string, error) {
 // repairTaskGroup 修复一个工作空间内的任务，把被删掉的任务名记进 removed。
 //
 // 命名空间里的任务用 `空间/任务名` 记录：两个空间可能有同名任务，不限定就无法区分。
-// 默认空间保持原名——那批名字由对拍语料锁定。
+// 默认空间保持原名——那批名字已经是对外可见的任务标识，改名会破坏既有调用方。
 func repairTaskGroup(
 	data *canonical.Value,
 	workspace string,

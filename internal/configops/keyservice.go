@@ -74,7 +74,7 @@ func (r KeyServiceModelsResult) Value() *canonical.Value {
 //
 // 与 Python 的唯一差别：desired 在 Python 里是 set，**一次新增多个模型**时写入
 // models 的顺序取决于字符串哈希（进程间随机）；Go 侧按调用方给出的顺序去重后
-// 依次创建。对拍语料因此只覆盖「新增 0 个或 1 个模型」的情形。
+// 依次创建，由 TestSetKeyServiceModelsCreatesModelsInCallerOrder 钉住。
 func SetKeyServiceModels(data *canonical.Value, providerID, keyName string, modelIDs []string) (KeyServiceModelsResult, error) {
 	provider, err := RequireProvider(data, providerID)
 	if err != nil {

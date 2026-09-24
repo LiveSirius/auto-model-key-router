@@ -10,10 +10,9 @@ import (
 
 // 本文件固化工作空间隔离在 configops 层的语义。
 //
-// 对拍语料（config_operations_corpus.json）由已退役的 Python 脚本生成，里面没有
-// 任何工作空间用例——工作空间是 Go 侧的新增能力，因此这里手写断言。既有 API
-// （CreateTask/UpdateTask/DeleteTask/RepairTasks）的行为必须与语料保持不变，那由
-// 语料本身继续守着。
+// 工作空间是 Go 侧的新增能力，参照实现里没有对应行为，因此这里手写断言。既有 API
+// （CreateTask/UpdateTask/DeleteTask/RepairTasks）的行为必须保持不变，那由本包既有
+// 用例（含 quirks_test.go）守着。
 
 // workspaceData 是一份带默认空间与命名空间的最小配置。
 func workspaceData(t *testing.T) *canonical.Value {
@@ -353,7 +352,7 @@ func TestDeleteWorkspaceKeepsSibling(t *testing.T) {
 
 // TestDefaultWorkspaceAliasesLegacyAPI 固化：既有 API 一律作用于默认空间。
 //
-// 这是兼容性的核心——语料锁定的那批调用路径（不带工作空间）必须一字不变。
+// 这是兼容性的核心——既有调用路径（不带工作空间）的行为必须一字不变。
 func TestDefaultWorkspaceAliasesLegacyAPI(t *testing.T) {
 	data := workspaceData(t)
 	if _, err := CreateTask(data, "legacy", CreateTaskOptions{Model: "model-b"}); err != nil {

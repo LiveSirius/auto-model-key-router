@@ -2,7 +2,7 @@
 // 任务 / unified_model，以及随之而来的引用修复。
 //
 // 移植 auto_model_key_router/config_operations.py（1282 行）。这一层不碰 I/O、
-// 网络与数据库，输入输出都是 internal/canonical 的 JSON 值，因此可以逐条对拍。
+// 网络与数据库，输入输出都是 internal/canonical 的 JSON 值，因此可以逐条测试。
 //
 // # 数据模型
 //
@@ -23,7 +23,7 @@
 //   - 真值判断一律走 canonical 的 Truthy / StringValue，不要用 != "" 或 != 0：
 //     Python 的 `or` 把 0、空串、空列表、false、空对象都当假。
 //
-// # 刻意保留的参照实现行为（看起来像 bug，但语料锁住）
+// # 刻意保留的参照实现行为（看起来像 bug，但刻意保留）
 //
 //   - Providers/Models/ProviderKeys/ModelTargets 会 setdefault：读一次就把
 //     空容器写进 data（config_operations.py:26）。连 fallback_model_id 这种
@@ -33,9 +33,8 @@
 //   - update_provider 在 data 里搬 upstream_routes 时只搬旧的顶层键，且
 //     provider["base_url"] 为空时会抛裸 ValueError（不是 ConfigOperationError）。
 //   - set_key_service_models 的 desired 是 Python set，因此**一次新增多个模型**
-//     时写入 models 的顺序取决于 Python 的字符串哈希（进程间随机）。对拍语料
-//     刻意只覆盖「一次新增 0 或 1 个模型」，其余情况 Go 侧按调用方给出的顺序
-//     依次创建；详见该函数与 TestSetKeyServiceModelsOrderNoteIsDocumented。
+//     时写入 models 的顺序取决于 Python 的字符串哈希（进程间随机）。Go 侧按调用方
+//     给出的顺序依次创建；详见该函数与 TestSetKeyServiceModelsCreatesModelsInCallerOrder。
 //
 // # 已知未复刻的边界
 //
@@ -46,5 +45,5 @@
 //   - str.strip() 与 strings.TrimSpace 对 U+001C..U+001F 这四个分隔符的处理不同
 //     （Python 视为空白，Go 不视为空白）。这类输入不是合法配置。
 //   - Go 侧参数按 Python 类型注解映射（见上），把 base_url 传成数字这类契约外
-//     调用不在对拍语料覆盖范围内；反之，**data 内部的任意 JSON 值**都完整覆盖。
+//     调用不在用例覆盖范围内；反之，**data 内部的任意 JSON 值**都完整覆盖。
 package configops
